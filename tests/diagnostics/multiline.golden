@@ -1,4 +1,4 @@
-multiline.cur:2:11: error: test error
+multiline.curlee:2:11: error: test error
   |
   |   let x = 1 +
   |           ^

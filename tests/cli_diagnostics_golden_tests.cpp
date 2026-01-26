@@ -72,7 +72,7 @@ static bool run_check_not_implemented_case(const fs::path& golden_path)
     auto* old_cout = std::cout.rdbuf(captured_out.rdbuf());
     auto* old_cerr = std::cerr.rdbuf(captured_err.rdbuf());
 
-    const std::string rel_path = "tests/fixtures/hello.cur";
+    const std::string rel_path = "tests/fixtures/hello.curlee";
 
     std::vector<std::string> argv_storage = {"curlee", "check", rel_path};
     std::vector<char*> argv;
@@ -115,7 +115,7 @@ static bool run_check_unknown_name_case(const fs::path& golden_path)
     auto* old_cout = std::cout.rdbuf(captured_out.rdbuf());
     auto* old_cerr = std::cerr.rdbuf(captured_err.rdbuf());
 
-    const std::string rel_path = "tests/fixtures/check_unknown_name.cur";
+    const std::string rel_path = "tests/fixtures/check_unknown_name.curlee";
 
     std::vector<std::string> argv_storage = {"curlee", "check", rel_path};
     std::vector<char*> argv;

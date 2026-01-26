@@ -43,7 +43,7 @@ set_tests_properties(curlee_no_args PROPERTIES WILL_FAIL TRUE)
 add_test(NAME curlee_missing_file COMMAND curlee lex ${CMAKE_SOURCE_DIR}/tests/fixtures/does_not_exist.cur)
 set_tests_properties(curlee_missing_file PROPERTIES WILL_FAIL TRUE)
 
-add_test(NAME curlee_lex_reads_file COMMAND curlee lex ${CMAKE_SOURCE_DIR}/tests/fixtures/hello.cur)
+add_test(NAME curlee_lex_reads_file COMMAND curlee lex ${CMAKE_SOURCE_DIR}/tests/fixtures/hello.curlee)
 
 add_executable(curlee_line_map_tests
   tests/line_map_tests.cpp

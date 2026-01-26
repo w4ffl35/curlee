@@ -1,4 +1,4 @@
-tests/fixtures/check_unknown_name.cur:2:3: error: unknown name 'foo'
+tests/fixtures/check_unknown_name.curlee:2:3: error: unknown name 'foo'
   |
   |   foo(1);
   |   ^^^

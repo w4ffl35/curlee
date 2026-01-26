@@ -111,7 +111,7 @@ int main(int argc, char** argv)
         }
 
         const auto path = entry.path();
-        if (path.extension() != ".cur")
+        if (path.extension() != ".curlee")
         {
             continue;
         }

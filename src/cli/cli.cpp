@@ -25,10 +25,10 @@ void print_usage(std::ostream& out)
     out << "curlee: verification-first language (early scaffold)\n\n";
     out << "usage:\n";
     out << "  curlee --help\n";
-    out << "  curlee lex <file.cur>\n";
-    out << "  curlee parse <file.cur>\n";
-    out << "  curlee check <file.cur>\n";
-    out << "  curlee run <file.cur>\n";
+    out << "  curlee lex <file.curlee>\n";
+    out << "  curlee parse <file.curlee>\n";
+    out << "  curlee check <file.curlee>\n";
+    out << "  curlee run <file.curlee>\n";
 }
 
 bool is_help_flag(std::string_view arg)
@@ -167,7 +167,7 @@ int run(int argc, char** argv)
 
     if (argc != 3)
     {
-        std::cerr << "error: expected <command> <file.cur>\n\n";
+        std::cerr << "error: expected <command> <file.curlee>\n\n";
         print_usage(std::cerr);
         return kExitUsage;
     }
