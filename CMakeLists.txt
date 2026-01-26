@@ -29,6 +29,7 @@ add_executable(curlee
   src/resolver/resolver.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
+  src/types/type_check.cpp
 )
 
 target_include_directories(curlee PRIVATE include)
@@ -74,6 +75,7 @@ add_executable(curlee_cli_diagnostics_golden_tests
   src/resolver/resolver.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
+  src/types/type_check.cpp
 )
 target_include_directories(curlee_cli_diagnostics_golden_tests PRIVATE include)
 

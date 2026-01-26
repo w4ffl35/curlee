@@ -1,0 +1,4 @@
+tests/fixtures/check_type_error.curlee:2:3: error: return type mismatch: expected Unit, got Int
+  |
+  |   return 0;
+  |   ^^^^^^^^^
