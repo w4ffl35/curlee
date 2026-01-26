@@ -105,19 +105,15 @@ The step-by-step execution checklist lives in [TODO.md](TODO.md).
 
 ## Docs
 
-- [docs/AI_NATIVE_VISION.md](docs/AI_NATIVE_VISION.md) — the “why” and long-term direction
-- [docs/VERIFICATION_SCOPE.md](docs/VERIFICATION_SCOPE.md) — what Curlee proves in the MVP
-- [docs/SYNTAX_PRINCIPLES.md](docs/SYNTAX_PRINCIPLES.md) — constraints on syntax (LLM-friendly, unambiguous)
-- [docs/STDLIB.md](docs/STDLIB.md) — builtins vs stdlib, capability-bearing APIs
-- [docs/BUNDLES.md](docs/BUNDLES.md) — proof-carrying bundle format and manifest schema
-- [docs/ONTOLOGY.md](docs/ONTOLOGY.md) — future shared type ontology notes
-- [docs/PYTHON_INTEROP.md](docs/PYTHON_INTEROP.md) — design for explicit unsafe Python interop
-- [docs/LSP.md](docs/LSP.md) — minimal language server (diagnostics/hover/definition)
-- [docs/LSP_UX.md](docs/LSP_UX.md) — planned LSP UX for contracts and models
-- [docs/QUALITY.md](docs/QUALITY.md) — datasets, end-to-end tests, and versioning
-- [docs/TENSOR_IR.md](docs/TENSOR_IR.md) — future tensor-first IR milestone
-- [docs/LINEAR_TYPES.md](docs/LINEAR_TYPES.md) — future linear/ownership types
-- [docs/GEMINI_COVERAGE_CHECKLIST.md](docs/GEMINI_COVERAGE_CHECKLIST.md) — mapping from the original Gemini planning conversation
+User-facing documentation lives in the local `wiki/` folder (a clone of the GitHub wiki).
+
+- [wiki/](wiki/)
+
+Note: `wiki/` is intentionally gitignored in the main repo so it stays available to local tooling/agents without being committed here.
+
+Project work tracking lives in:
+
+- [TODO.md](TODO.md)
 
 ---
 

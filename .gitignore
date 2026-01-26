@@ -1,11 +1,12 @@
 build/
 
+# Local clone of the GitHub wiki (kept in-workspace for agents, not tracked).
+wiki/
+
 # Private docs/workflow notes: keep locally, not in git.
 *.md
 !/README.md
-!/docs/ONTOLOGY.md
-!/docs/PYTHON_INTEROP.md
-!/docs/LSP.md
-!/docs/LSP_UX.md
-!/docs/QUALITY.md
-!/docs/TENSOR_IR.md
+!/docs/README.md
+
+# Local prompt / training artifacts.
+training_data.txt
