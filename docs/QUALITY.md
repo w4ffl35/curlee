@@ -20,6 +20,17 @@ This document defines the quality harness, dataset versioning, and stable/unstab
 - The output is deterministic for the same seed and count.
 - Regenerating with different parameters must update `training_data.txt` and the dataset.
 
+## Benchmark harness (optional)
+
+- Run `scripts/benchmark.py` after building the CLI.
+- Example:
+  ```bash
+  cmake --preset linux-debug
+  cmake --build --preset linux-debug
+  ./scripts/benchmark.py --dirs tests/run
+  ```
+- The harness reports average time across runs.
+
 ## Versioning policy
 
 - Dataset versions increment when:
