@@ -120,10 +120,17 @@ struct ExprStmt
     Expr expr;
 };
 
+struct Block;
+
+struct BlockStmt
+{
+    std::unique_ptr<Block> block;
+};
+
 struct Stmt
 {
     curlee::source::Span span;
-    std::variant<LetStmt, ReturnStmt, ExprStmt> node;
+    std::variant<LetStmt, ReturnStmt, ExprStmt, BlockStmt> node;
 };
 
 struct Block

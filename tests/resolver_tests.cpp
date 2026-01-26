@@ -95,6 +95,34 @@ fn main() -> Unit {
         }
     }
 
+    {
+        const std::string src = R"(fn main() -> Unit {
+  let x: Int = 1;
+  { let x: Int = 2; x; }
+  x;
+  return 0;
+})";
+
+        const auto program = parse_ok(src);
+        const auto res = resolver::resolve(program);
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success on block shadowing");
+        }
+
+        const auto& r = std::get<resolver::Resolution>(res);
+        if (r.uses.size() != 2)
+        {
+            fail("expected exactly two name uses in block shadowing test");
+        }
+
+        // Symbol 0 is the function. Then `let x = 1` (outer) then `let x = 2` (inner).
+        if (r.uses[0].target.value == r.uses[1].target.value)
+        {
+            fail("expected inner and outer x to resolve to different symbols");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

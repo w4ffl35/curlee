@@ -15,6 +15,7 @@ using curlee::parser::BinaryExpr;
 using curlee::parser::CallExpr;
 using curlee::parser::Expr;
 using curlee::parser::ExprStmt;
+using curlee::parser::BlockStmt;
 using curlee::parser::Function;
 using curlee::parser::GroupExpr;
 using curlee::parser::LetStmt;
@@ -157,6 +158,16 @@ class Resolver
 
     void resolve_stmt_node(const ReturnStmt& s, Span) { resolve_expr(s.value); }
     void resolve_stmt_node(const ExprStmt& s, Span) { resolve_expr(s.expr); }
+
+    void resolve_stmt_node(const BlockStmt& s, Span)
+    {
+        push_scope();
+        for (const auto& stmt : s.block->stmts)
+        {
+            resolve_stmt(stmt);
+        }
+        pop_scope();
+    }
 
     void resolve_expr(const Expr& e)
     {

@@ -602,6 +602,20 @@ class Parser
     {
         const std::size_t start_pos = pos_;
 
+        if (check(TokenKind::LBrace))
+        {
+            auto block_res = parse_block();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(block_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(block_res));
+            }
+            auto block = std::get<Block>(std::move(block_res));
+            Stmt stmt;
+            stmt.span = block.span;
+            stmt.node = BlockStmt{.block = std::make_unique<Block>(std::move(block))};
+            return stmt;
+        }
+
         if (match(TokenKind::KwLet))
         {
             const Token kw = previous();
@@ -1143,6 +1157,11 @@ class Dumper
     {
         dump_expr(s.expr);
         out_ << ";";
+    }
+
+    void dump_stmt_node(const BlockStmt& s)
+    {
+        dump_block(*s.block);
     }
 
     void dump_expr(const Expr& e)
