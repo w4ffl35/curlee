@@ -210,6 +210,14 @@ target_include_directories(curlee_bundle_tests PRIVATE include)
 
 add_test(NAME curlee_bundle_tests COMMAND curlee_bundle_tests)
 
+add_executable(curlee_interop_tests
+  tests/interop_tests.cpp
+  src/interop/python_ffi.cpp
+)
+target_include_directories(curlee_interop_tests PRIVATE include)
+
+add_test(NAME curlee_interop_tests COMMAND curlee_interop_tests)
+
 add_executable(curlee_compiler_tests
   tests/compiler_tests.cpp
   src/compiler/emitter.cpp

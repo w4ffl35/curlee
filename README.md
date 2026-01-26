@@ -111,6 +111,7 @@ The step-by-step execution checklist lives in [TODO.md](TODO.md).
 - [docs/STDLIB.md](docs/STDLIB.md) — builtins vs stdlib, capability-bearing APIs
 - [docs/BUNDLES.md](docs/BUNDLES.md) — proof-carrying bundle format and manifest schema
 - [docs/ONTOLOGY.md](docs/ONTOLOGY.md) — future shared type ontology notes
+- [docs/PYTHON_INTEROP.md](docs/PYTHON_INTEROP.md) — design for explicit unsafe Python interop
 - [docs/LINEAR_TYPES.md](docs/LINEAR_TYPES.md) — future linear/ownership types
 - [docs/GEMINI_COVERAGE_CHECKLIST.md](docs/GEMINI_COVERAGE_CHECKLIST.md) — mapping from the original Gemini planning conversation
 

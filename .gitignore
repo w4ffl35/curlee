@@ -3,4 +3,5 @@ build/
 # Private docs/workflow notes: keep locally, not in git.
 *.md
 !/README.md
-!/docs/*.md
+!/docs/ONTOLOGY.md
+!/docs/PYTHON_INTEROP.md
