@@ -17,10 +17,12 @@ using curlee::parser::Expr;
 using curlee::parser::ExprStmt;
 using curlee::parser::Function;
 using curlee::parser::GroupExpr;
+using curlee::parser::IfStmt;
 using curlee::parser::LetStmt;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
 using curlee::parser::Stmt;
+using curlee::parser::WhileStmt;
 using curlee::source::Span;
 
 struct Def
@@ -178,6 +180,40 @@ class Resolver
     {
         push_scope();
         for (const auto& stmt : s.block->stmts)
+        {
+            resolve_stmt(stmt);
+        }
+        pop_scope();
+    }
+
+    void resolve_stmt_node(const IfStmt& s, Span)
+    {
+        resolve_expr(s.cond);
+
+        push_scope();
+        for (const auto& stmt : s.then_block->stmts)
+        {
+            resolve_stmt(stmt);
+        }
+        pop_scope();
+
+        if (s.else_block != nullptr)
+        {
+            push_scope();
+            for (const auto& stmt : s.else_block->stmts)
+            {
+                resolve_stmt(stmt);
+            }
+            pop_scope();
+        }
+    }
+
+    void resolve_stmt_node(const WhileStmt& s, Span)
+    {
+        resolve_expr(s.cond);
+
+        push_scope();
+        for (const auto& stmt : s.body->stmts)
         {
             resolve_stmt(stmt);
         }

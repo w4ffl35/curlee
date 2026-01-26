@@ -265,6 +265,10 @@ class Lexer
         {
             return TokenKind::KwIf;
         }
+        if (lexeme == "else")
+        {
+            return TokenKind::KwElse;
+        }
         if (lexeme == "while")
         {
             return TokenKind::KwWhile;

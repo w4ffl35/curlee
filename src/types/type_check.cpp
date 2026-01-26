@@ -20,10 +20,12 @@ using curlee::parser::Expr;
 using curlee::parser::ExprStmt;
 using curlee::parser::Function;
 using curlee::parser::GroupExpr;
+using curlee::parser::IfStmt;
 using curlee::parser::LetStmt;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
 using curlee::parser::Stmt;
+using curlee::parser::WhileStmt;
 using curlee::source::Span;
 
 struct Scope
@@ -224,6 +226,50 @@ class Checker
     {
         push_scope();
         for (const auto& stmt : s.block->stmts)
+        {
+            check_stmt(stmt, expected_return);
+        }
+        pop_scope();
+    }
+
+    void check_stmt_node(const IfStmt& s, Span, Type expected_return)
+    {
+        const auto cond_t = check_expr(s.cond);
+        if (cond_t.has_value() && cond_t->kind != TypeKind::Bool)
+        {
+            error_at(s.cond.span, "if condition type mismatch: expected Bool, got " +
+                                      std::string(to_string(*cond_t)));
+        }
+
+        push_scope();
+        for (const auto& stmt : s.then_block->stmts)
+        {
+            check_stmt(stmt, expected_return);
+        }
+        pop_scope();
+
+        if (s.else_block != nullptr)
+        {
+            push_scope();
+            for (const auto& stmt : s.else_block->stmts)
+            {
+                check_stmt(stmt, expected_return);
+            }
+            pop_scope();
+        }
+    }
+
+    void check_stmt_node(const WhileStmt& s, Span, Type expected_return)
+    {
+        const auto cond_t = check_expr(s.cond);
+        if (cond_t.has_value() && cond_t->kind != TypeKind::Bool)
+        {
+            error_at(s.cond.span, "while condition type mismatch: expected Bool, got " +
+                                      std::string(to_string(*cond_t)));
+        }
+
+        push_scope();
+        for (const auto& stmt : s.body->stmts)
         {
             check_stmt(stmt, expected_return);
         }

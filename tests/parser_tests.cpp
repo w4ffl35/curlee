@@ -182,6 +182,58 @@ int main()
     }
 
     {
+        const std::string src = R"(fn main() -> Unit {
+  if (1 < 2) { return; } else { return; }
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on if/else program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on if/else program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("if (") == std::string::npos || dumped.find(" else ") == std::string::npos)
+        {
+            fail("dump missing if/else statement");
+        }
+    }
+
+    {
+        const std::string src = R"(fn main() -> Unit {
+  while (1 < 2) { return; }
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on while program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on while program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("while (") == std::string::npos)
+        {
+            fail("dump missing while statement");
+        }
+    }
+
+    {
         const std::string src = R"(import foo.bar;
 
 fn main() -> Unit {

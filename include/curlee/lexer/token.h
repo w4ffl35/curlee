@@ -18,6 +18,7 @@ enum class TokenKind
     KwFn,
     KwLet,
     KwIf,
+    KwElse,
     KwWhile,
     KwReturn,
 
@@ -88,6 +89,8 @@ struct Token
         return "kw_let";
     case TokenKind::KwIf:
         return "kw_if";
+    case TokenKind::KwElse:
+        return "kw_else";
     case TokenKind::KwWhile:
         return "kw_while";
     case TokenKind::KwReturn:

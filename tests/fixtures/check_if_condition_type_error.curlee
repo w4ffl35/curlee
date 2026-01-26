@@ -1,0 +1,7 @@
+fn main() -> Unit {
+  if (1) {
+    return;
+  }
+
+  return;
+}

@@ -1,0 +1,4 @@
+tests/fixtures/check_if_condition_type_error.curlee:2:7: error: if condition type mismatch: expected Bool, got Int
+  |
+  |   if (1) {
+  |       ^

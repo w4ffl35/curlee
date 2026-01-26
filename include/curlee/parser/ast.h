@@ -122,6 +122,19 @@ struct ExprStmt
 
 struct Block;
 
+struct IfStmt
+{
+    Expr cond;
+    std::unique_ptr<Block> then_block;
+    std::unique_ptr<Block> else_block;
+};
+
+struct WhileStmt
+{
+    Expr cond;
+    std::unique_ptr<Block> body;
+};
+
 struct BlockStmt
 {
     std::unique_ptr<Block> block;
@@ -130,7 +143,7 @@ struct BlockStmt
 struct Stmt
 {
     curlee::source::Span span;
-    std::variant<LetStmt, ReturnStmt, ExprStmt, BlockStmt> node;
+    std::variant<LetStmt, ReturnStmt, ExprStmt, BlockStmt, IfStmt, WhileStmt> node;
 };
 
 struct Block

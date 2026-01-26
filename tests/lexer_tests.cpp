@@ -56,6 +56,25 @@ int main()
     }
 
     {
+        const std::string src = "if x { } else { }";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for if/else");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::KwIf, "if");
+        expect_token(toks, 1, TokenKind::Identifier, "x");
+        expect_token(toks, 2, TokenKind::LBrace, "{");
+        expect_token(toks, 3, TokenKind::RBrace, "}");
+        expect_token(toks, 4, TokenKind::KwElse, "else");
+        expect_token(toks, 5, TokenKind::LBrace, "{");
+        expect_token(toks, 6, TokenKind::RBrace, "}");
+        expect_token(toks, 7, TokenKind::Eof, "");
+    }
+
+    {
         const std::string src = "requires x > 0; // comment\nensures x >= 1;";
         const auto res = lex(src);
         if (!std::holds_alternative<std::vector<Token>>(res))
@@ -124,8 +143,8 @@ int main()
         const auto& toks = std::get<std::vector<Token>>(res);
         expect_token(toks, 0, TokenKind::KwLet, "let");
         expect_token(toks, 1, TokenKind::Identifier, "s");
-            expect_token(toks, 2, TokenKind::Equal, "=");
-            expect_token(toks, 3, TokenKind::StringLiteral, "\"hi\\n\\\"there\"");
+        expect_token(toks, 2, TokenKind::Equal, "=");
+        expect_token(toks, 3, TokenKind::StringLiteral, "\"hi\\n\\\"there\"");
         expect_token(toks, 4, TokenKind::Semicolon, ";");
         expect_token(toks, 5, TokenKind::Eof, "");
     }

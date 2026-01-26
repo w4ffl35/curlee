@@ -729,6 +729,95 @@ class Parser
             return stmt;
         }
 
+        if (match(TokenKind::KwIf))
+        {
+            const Token kw = previous();
+
+            if (auto err = consume(TokenKind::LParen, "expected '(' after 'if'"); err.has_value())
+            {
+                return *err;
+            }
+
+            auto cond_res = parse_expr();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(cond_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(cond_res));
+            }
+            Expr cond = std::get<Expr>(std::move(cond_res));
+
+            if (auto err = consume(TokenKind::RParen, "expected ')' after if condition");
+                err.has_value())
+            {
+                return *err;
+            }
+
+            auto then_res = parse_block();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(then_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(then_res));
+            }
+            auto then_block = std::make_unique<Block>(std::get<Block>(std::move(then_res)));
+
+            std::unique_ptr<Block> else_block;
+            if (match(TokenKind::KwElse))
+            {
+                auto else_res = parse_block();
+                if (std::holds_alternative<curlee::diag::Diagnostic>(else_res))
+                {
+                    return std::get<curlee::diag::Diagnostic>(std::move(else_res));
+                }
+                else_block = std::make_unique<Block>(std::get<Block>(std::move(else_res)));
+            }
+
+            const curlee::source::Span span = else_block != nullptr
+                                                  ? span_cover(kw.span, else_block->span)
+                                                  : span_cover(kw.span, then_block->span);
+            Stmt stmt{
+                .span = span,
+                .node = IfStmt{.cond = std::move(cond),
+                               .then_block = std::move(then_block),
+                               .else_block = std::move(else_block)},
+            };
+            return stmt;
+        }
+
+        if (match(TokenKind::KwWhile))
+        {
+            const Token kw = previous();
+
+            if (auto err = consume(TokenKind::LParen, "expected '(' after 'while'");
+                err.has_value())
+            {
+                return *err;
+            }
+
+            auto cond_res = parse_expr();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(cond_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(cond_res));
+            }
+            Expr cond = std::get<Expr>(std::move(cond_res));
+
+            if (auto err = consume(TokenKind::RParen, "expected ')' after while condition");
+                err.has_value())
+            {
+                return *err;
+            }
+
+            auto body_res = parse_block();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(body_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(body_res));
+            }
+            auto body = std::make_unique<Block>(std::get<Block>(std::move(body_res)));
+
+            Stmt stmt{
+                .span = span_cover(kw.span, body->span),
+                .node = WhileStmt{.cond = std::move(cond), .body = std::move(body)},
+            };
+            return stmt;
+        }
+
         if (match(TokenKind::KwReturn))
         {
             const Token kw = previous();
@@ -1239,6 +1328,27 @@ class Dumper
     }
 
     void dump_stmt_node(const BlockStmt& s) { dump_block(*s.block); }
+
+    void dump_stmt_node(const IfStmt& s)
+    {
+        out_ << "if (";
+        dump_expr(s.cond);
+        out_ << ") ";
+        dump_block(*s.then_block);
+        if (s.else_block != nullptr)
+        {
+            out_ << " else ";
+            dump_block(*s.else_block);
+        }
+    }
+
+    void dump_stmt_node(const WhileStmt& s)
+    {
+        out_ << "while (";
+        dump_expr(s.cond);
+        out_ << ") ";
+        dump_block(*s.body);
+    }
 
     void dump_expr(const Expr& e)
     {

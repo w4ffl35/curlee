@@ -124,6 +124,22 @@ fn main() -> Unit {
     }
 
     {
+        const std::string src = R"(fn main() -> Unit {
+  let x: Int = 1;
+  if (x == 1) { let x: Int = 2; x; } else { x; }
+  while (x == 1) { x; }
+  return 0;
+})";
+
+        const auto program = parse_ok(src);
+        const auto res = resolver::resolve(program);
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for if/while scoping");
+        }
+    }
+
+    {
         const std::string src = R"(import foo.bar;
 
 fn main() -> Unit {
