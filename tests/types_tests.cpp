@@ -59,6 +59,21 @@ int main()
         }
     }
 
+    {
+        const CapabilityType a{.name = "std.fs"};
+        const CapabilityType b{.name = "std.fs"};
+        const CapabilityType c{.name = "std.net"};
+
+        if (!(a == b))
+        {
+            fail("expected capability types with the same name to compare equal");
+        }
+        if (a == c)
+        {
+            fail("expected capability types with different names to compare unequal");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

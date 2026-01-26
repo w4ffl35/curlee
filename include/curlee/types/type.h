@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -31,6 +32,17 @@ struct FunctionType
 [[nodiscard]] inline bool operator==(const FunctionType& a, const FunctionType& b)
 {
     return a.params == b.params && a.result == b.result;
+}
+
+struct CapabilityType
+{
+    // Opaque capability-bearing values: equality is name-based.
+    std::string name;
+};
+
+[[nodiscard]] inline bool operator==(const CapabilityType& a, const CapabilityType& b)
+{
+    return a.name == b.name;
 }
 
 [[nodiscard]] constexpr std::string_view to_string(TypeKind kind)
