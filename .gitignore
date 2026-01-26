@@ -5,3 +5,4 @@ build/
 !/README.md
 !/docs/ONTOLOGY.md
 !/docs/PYTHON_INTEROP.md
+!/docs/LSP.md

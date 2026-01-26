@@ -78,6 +78,17 @@ add_executable(curlee
 target_include_directories(curlee PRIVATE include)
 target_link_libraries(curlee PRIVATE Z3::Z3)
 
+add_executable(curlee_lsp
+  src/lsp/lsp.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+  src/resolver/resolver.cpp
+  src/source/line_map.cpp
+  src/source/source_file.cpp
+  src/types/type_check.cpp
+)
+target_include_directories(curlee_lsp PRIVATE include)
+
 enable_testing()
 
 add_test(NAME curlee_help COMMAND curlee --help)
