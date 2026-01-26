@@ -96,6 +96,21 @@ The MVP logic fragment is intentionally small and decidable.
 
 This repository is early-stage.
 
+### MVP scope (current)
+
+Curlee currently supports two useful workflows:
+
+- **MVP-check**: `curlee check <file.curlee>` runs lex → parse → resolve → type-check → verify (Z3). If a proof obligation can’t be discharged (or is out of scope), Curlee fails with a diagnostic.
+- **MVP-run**: `curlee run <file.curlee>` runs `check` first, then executes a small verified subset on the deterministic VM (fuel-bounded).
+
+The runnable subset is intentionally small:
+
+- Expressions: `Int` / `Bool` literals, names, `+`, grouping.
+- Statements: `let`, `return`, `if/else`, `while`.
+- Calls: simple **no-arg** calls to a named function.
+
+Out of scope (for now): strings, general unary/binary ops, function parameters, modules/import execution.
+
 ---
 
 ## Docs
@@ -136,7 +151,9 @@ cmake --build --preset linux-debug
 ### Run
 
 ```bash
-./build/linux-debug/curlee
+./build/linux-debug/curlee --help
+./build/linux-debug/curlee check examples/mvp_run_int.curlee
+./build/linux-debug/curlee run examples/mvp_run_control_flow.curlee
 ```
 
 ---

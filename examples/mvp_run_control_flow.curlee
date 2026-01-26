@@ -1,0 +1,13 @@
+fn foo() -> Int {
+  return 7;
+}
+
+fn main() -> Int {
+  if (true) {
+    return foo() + 1;
+  } else {
+    while (true) {
+      return 0;
+    }
+  }
+}
