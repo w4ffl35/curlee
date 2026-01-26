@@ -1,0 +1,11 @@
+// Example: ownership transfer (not executable yet)
+
+fn take_once(token: Token) -> Token {
+  // token is linear: we must return it or consume it
+  return token;
+}
+
+fn main(tok: Token) -> Token {
+  let tok = take_once(tok);
+  return tok;
+}

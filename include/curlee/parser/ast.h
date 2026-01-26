@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <curlee/lexer/token.h>
 #include <curlee/source/span.h>
 #include <memory>
@@ -98,6 +99,7 @@ struct GroupExpr
 
 struct Expr
 {
+    std::size_t id = 0;
     curlee::source::Span span;
     std::variant<IntExpr, StringExpr, NameExpr, UnaryExpr, BinaryExpr, CallExpr, GroupExpr> node;
 };

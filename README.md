@@ -108,11 +108,27 @@ The step-by-step execution checklist lives in [TODO.md](TODO.md).
 - [docs/AI_NATIVE_VISION.md](docs/AI_NATIVE_VISION.md) — the “why” and long-term direction
 - [docs/VERIFICATION_SCOPE.md](docs/VERIFICATION_SCOPE.md) — what Curlee proves in the MVP
 - [docs/SYNTAX_PRINCIPLES.md](docs/SYNTAX_PRINCIPLES.md) — constraints on syntax (LLM-friendly, unambiguous)
+- [docs/STDLIB.md](docs/STDLIB.md) — builtins vs stdlib, capability-bearing APIs
+- [docs/BUNDLES.md](docs/BUNDLES.md) — proof-carrying bundle format and manifest schema
+- [docs/LINEAR_TYPES.md](docs/LINEAR_TYPES.md) — future linear/ownership types
 - [docs/GEMINI_COVERAGE_CHECKLIST.md](docs/GEMINI_COVERAGE_CHECKLIST.md) — mapping from the original Gemini planning conversation
 
 ---
 
 ## Build & run (Linux)
+
+### Dependencies (Ubuntu/Debian)
+
+```bash
+sudo apt-get update
+sudo apt-get install -y cmake ninja-build g++ libz3-dev pkg-config
+```
+
+By default, Curlee uses the system Z3 if available. To force the vendored build:
+
+```bash
+cmake --preset linux-debug -DCURLEE_USE_SYSTEM_Z3=OFF
+```
 
 ### Configure
 

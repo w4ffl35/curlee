@@ -11,6 +11,43 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+
+option(CURLEE_USE_SYSTEM_Z3 "Use system-installed Z3 if available; otherwise fetch" ON)
+
+if(CURLEE_USE_SYSTEM_Z3)
+  find_package(Z3 QUIET)
+endif()
+
+if(NOT Z3_FOUND)
+  include(FetchContent)
+  set(Z3_BUILD_LIBZ3_SHARED OFF CACHE BOOL "" FORCE)
+  set(Z3_BUILD_EXECUTABLE OFF CACHE BOOL "" FORCE)
+  set(Z3_BUILD_TEST_EXECUTABLES OFF CACHE BOOL "" FORCE)
+  set(Z3_BUILD_PYTHON_BINDINGS OFF CACHE BOOL "" FORCE)
+  set(Z3_BUILD_DOTNET_BINDINGS OFF CACHE BOOL "" FORCE)
+  set(Z3_BUILD_JAVA_BINDINGS OFF CACHE BOOL "" FORCE)
+  set(Z3_BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(
+    z3
+    GIT_REPOSITORY https://github.com/Z3Prover/z3.git
+    GIT_TAG z3-4.12.5
+  )
+  FetchContent_MakeAvailable(z3)
+
+  if(TARGET libz3)
+    add_library(Z3::Z3 ALIAS libz3)
+  elseif(TARGET z3)
+    add_library(Z3::Z3 ALIAS z3)
+  else()
+    message(FATAL_ERROR "Z3 target not found after FetchContent")
+  endif()
+endif()
+
+if(NOT TARGET Z3::Z3)
+  message(FATAL_ERROR "Z3 not found: install libz3-dev or set CURLEE_USE_SYSTEM_Z3=OFF to fetch")
+endif()
+
 # Keep warnings sensible by default. You can tighten these later.
 if(MSVC)
   add_compile_options(/W4)
@@ -23,6 +60,8 @@ endif()
 add_executable(curlee
   src/main.cpp
   src/cli/cli.cpp
+  src/bundle/bundle.cpp
+  src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
   src/parser/parser.cpp
@@ -30,9 +69,14 @@ add_executable(curlee
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
+  src/verification/checker.cpp
+  src/verification/predicate_lowering.cpp
+  src/verification/solver.cpp
+  src/vm/vm.cpp
 )
 
 target_include_directories(curlee PRIVATE include)
+target_link_libraries(curlee PRIVATE Z3::Z3)
 
 enable_testing()
 
@@ -69,6 +113,7 @@ add_test(
 add_executable(curlee_cli_diagnostics_golden_tests
   tests/cli_diagnostics_golden_tests.cpp
   src/cli/cli.cpp
+  src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
   src/parser/parser.cpp
@@ -76,8 +121,13 @@ add_executable(curlee_cli_diagnostics_golden_tests
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
+  src/verification/checker.cpp
+  src/verification/predicate_lowering.cpp
+  src/verification/solver.cpp
+  src/vm/vm.cpp
 )
 target_include_directories(curlee_cli_diagnostics_golden_tests PRIVATE include)
+target_link_libraries(curlee_cli_diagnostics_golden_tests PRIVATE Z3::Z3)
 
 add_test(
   NAME curlee_cli_diagnostics_golden_tests
@@ -107,6 +157,7 @@ add_executable(curlee_resolver_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/source/source_file.cpp
 )
 target_include_directories(curlee_resolver_tests PRIVATE include)
 
@@ -114,7 +165,80 @@ add_test(NAME curlee_resolver_tests COMMAND curlee_resolver_tests)
 
 add_executable(curlee_types_tests
   tests/types_tests.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+  src/types/type_check.cpp
 )
 target_include_directories(curlee_types_tests PRIVATE include)
 
 add_test(NAME curlee_types_tests COMMAND curlee_types_tests)
+
+add_executable(curlee_cli_fmt_tests
+  tests/cli_fmt_tests.cpp
+  src/cli/cli.cpp
+  src/compiler/emitter.cpp
+  src/diag/render.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+  src/resolver/resolver.cpp
+  src/source/line_map.cpp
+  src/source/source_file.cpp
+  src/types/type_check.cpp
+  src/verification/checker.cpp
+  src/verification/predicate_lowering.cpp
+  src/verification/solver.cpp
+  src/vm/vm.cpp
+)
+target_include_directories(curlee_cli_fmt_tests PRIVATE include)
+target_link_libraries(curlee_cli_fmt_tests PRIVATE Z3::Z3)
+
+add_test(NAME curlee_cli_fmt_tests COMMAND curlee_cli_fmt_tests)
+
+add_executable(curlee_vm_tests
+  tests/vm_tests.cpp
+  src/vm/vm.cpp
+)
+target_include_directories(curlee_vm_tests PRIVATE include)
+
+add_test(NAME curlee_vm_tests COMMAND curlee_vm_tests)
+
+add_executable(curlee_bundle_tests
+  tests/bundle_tests.cpp
+  src/bundle/bundle.cpp
+)
+target_include_directories(curlee_bundle_tests PRIVATE include)
+
+add_test(NAME curlee_bundle_tests COMMAND curlee_bundle_tests)
+
+add_executable(curlee_compiler_tests
+  tests/compiler_tests.cpp
+  src/compiler/emitter.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+  src/vm/vm.cpp
+)
+target_include_directories(curlee_compiler_tests PRIVATE include)
+
+add_test(NAME curlee_compiler_tests COMMAND curlee_compiler_tests)
+
+add_executable(curlee_verification_tests
+  tests/verification_solver_tests.cpp
+  src/verification/solver.cpp
+)
+target_include_directories(curlee_verification_tests PRIVATE include)
+target_link_libraries(curlee_verification_tests PRIVATE Z3::Z3)
+
+add_test(NAME curlee_verification_tests COMMAND curlee_verification_tests)
+
+add_executable(curlee_verification_predicate_lowering_tests
+  tests/verification_predicate_lowering_tests.cpp
+  src/verification/predicate_lowering.cpp
+  src/verification/solver.cpp
+)
+target_include_directories(curlee_verification_predicate_lowering_tests PRIVATE include)
+target_link_libraries(curlee_verification_predicate_lowering_tests PRIVATE Z3::Z3)
+
+add_test(
+  NAME curlee_verification_predicate_lowering_tests
+  COMMAND curlee_verification_predicate_lowering_tests
+)

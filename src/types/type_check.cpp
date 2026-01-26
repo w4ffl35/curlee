@@ -282,7 +282,7 @@ class Checker
             std::visit([&](const auto& node) { return check_expr_node(node, e.span); }, e.node);
         if (t.has_value())
         {
-            info_.expr_types.emplace(&e, *t);
+            info_.expr_types.emplace(e.id, *t);
         }
         return t;
     }

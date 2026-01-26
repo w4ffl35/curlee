@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <curlee/diag/diagnostic.h>
 #include <curlee/types/type.h>
 #include <unordered_map>
@@ -17,7 +18,7 @@ namespace curlee::types
 
 struct TypeInfo
 {
-    std::unordered_map<const curlee::parser::Expr*, Type> expr_types;
+    std::unordered_map<std::size_t, Type> expr_types;
 };
 
 using TypeCheckResult = std::variant<TypeInfo, std::vector<curlee::diag::Diagnostic>>;

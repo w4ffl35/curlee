@@ -1,0 +1,8 @@
+tests/fixtures/check_requires_divide.curlee:2:12: error: requires clause not satisfied
+  |
+  |   requires denominator != 0;
+  |            ^^^^^^^^^^^^^^^^
+note: goal: (denominator != 0)
+note: model:
+divide::denominator = 0
+note: hint: add or strengthen preconditions/refinements to satisfy this contract

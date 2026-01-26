@@ -1,0 +1,9 @@
+fn divide(numerator: Int, denominator: Int) -> Int [
+  requires denominator != 0;
+] {
+  return numerator / denominator;
+}
+
+fn main() -> Int {
+  return divide(10, 0);
+}

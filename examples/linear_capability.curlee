@@ -1,0 +1,12 @@
+// Example: linear capability flow (not executable yet)
+
+import std.fs;
+
+fn copy_file(src: String, dst: String, fs: cap std.fs) -> cap std.fs {
+  // open consumes capability, returns refreshed capability
+  let (in_file, fs) = std.fs.open_read(src, fs);
+  let (out_file, fs) = std.fs.open_write(dst, fs);
+
+  // files are linear: must be consumed exactly once
+  std.fs.copy(in_file, out_file, fs)
+}

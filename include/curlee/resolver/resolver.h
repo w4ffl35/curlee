@@ -3,7 +3,7 @@
 #include <curlee/diag/diagnostic.h>
 #include <curlee/parser/ast.h>
 #include <curlee/resolver/symbol.h>
-
+#include <curlee/source/source_file.h>
 #include <string_view>
 #include <variant>
 #include <vector>
@@ -33,5 +33,7 @@ struct Resolution
 using ResolveResult = std::variant<Resolution, std::vector<curlee::diag::Diagnostic>>;
 
 [[nodiscard]] ResolveResult resolve(const curlee::parser::Program& program);
+[[nodiscard]] ResolveResult resolve(const curlee::parser::Program& program,
+                                    const curlee::source::SourceFile& source);
 
 } // namespace curlee::resolver

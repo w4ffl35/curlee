@@ -1,4 +1,7 @@
 #include <curlee/resolver/resolver.h>
+#include <curlee/source/source_file.h>
+#include <filesystem>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -39,16 +42,14 @@ struct Scope
 class Resolver
 {
   public:
+    explicit Resolver(std::optional<std::filesystem::path> base_path)
+        : base_path_(std::move(base_path))
+    {
+    }
+
     [[nodiscard]] ResolveResult run(const curlee::parser::Program& program)
     {
-        for (const auto& imp : program.imports)
-        {
-            Diagnostic d;
-            d.severity = Severity::Error;
-            d.message = "imports are not implemented yet";
-            d.span = imp.span;
-            diagnostics_.push_back(std::move(d));
-        }
+        resolve_imports(program);
 
         // First pass: declare top-level functions.
         push_scope();
@@ -74,6 +75,49 @@ class Resolver
     std::vector<Scope> scopes_;
     Resolution resolution_;
     std::vector<Diagnostic> diagnostics_;
+    std::optional<std::filesystem::path> base_path_;
+
+    void resolve_imports(const curlee::parser::Program& program)
+    {
+        for (const auto& imp : program.imports)
+        {
+            if (!base_path_.has_value())
+            {
+                Diagnostic d;
+                d.severity = Severity::Error;
+                d.message = "imports require a source file path";
+                d.span = imp.span;
+                diagnostics_.push_back(std::move(d));
+                continue;
+            }
+
+            std::filesystem::path module_path = *base_path_;
+            std::string import_name;
+            for (std::size_t i = 0; i < imp.path.size(); ++i)
+            {
+                module_path /= std::string(imp.path[i]);
+                import_name += std::string(imp.path[i]);
+                if (i + 1 < imp.path.size())
+                {
+                    import_name += ".";
+                }
+            }
+            module_path += ".curlee";
+
+            const auto loaded = source::load_source_file(module_path.string());
+            if (std::holds_alternative<source::LoadError>(loaded))
+            {
+                Diagnostic d;
+                d.severity = Severity::Error;
+                d.message = "import not found: '" + import_name + "'";
+                d.span = imp.span;
+                d.notes.push_back(Related{.message = "expected module at " + module_path.string(),
+                                          .span = std::nullopt});
+                diagnostics_.push_back(std::move(d));
+                continue;
+            }
+        }
+    }
 
     void push_scope() { scopes_.push_back(Scope{}); }
     void pop_scope() { scopes_.pop_back(); }
@@ -273,7 +317,20 @@ class Resolver
 
 ResolveResult resolve(const curlee::parser::Program& program)
 {
-    return Resolver().run(program);
+    return Resolver(std::nullopt).run(program);
+}
+
+ResolveResult resolve(const curlee::parser::Program& program,
+                      const curlee::source::SourceFile& source)
+{
+    std::filesystem::path base;
+    if (!source.path.empty())
+    {
+        base = std::filesystem::path(source.path).parent_path();
+    }
+    const auto base_opt =
+        source.path.empty() ? std::nullopt : std::optional<std::filesystem::path>(base);
+    return Resolver(base_opt).run(program);
 }
 
 } // namespace curlee::resolver

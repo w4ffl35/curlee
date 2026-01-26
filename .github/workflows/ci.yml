@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++
+          sudo apt-get install -y cmake ninja-build g++ libz3-dev pkg-config clang-format
 
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}

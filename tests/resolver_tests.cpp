@@ -2,6 +2,9 @@
 #include <curlee/lexer/lexer.h>
 #include <curlee/parser/parser.h>
 #include <curlee/resolver/resolver.h>
+#include <curlee/source/source_file.h>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <variant>
@@ -32,6 +35,24 @@ static curlee::parser::Program parse_ok(const std::string& src)
     return std::get<parser::Program>(std::move(parsed));
 }
 
+static curlee::resolver::ResolveResult resolve_with_source(const std::string& src,
+                                                           const std::string& path)
+{
+    const auto program = parse_ok(src);
+    const curlee::source::SourceFile file{.path = path, .contents = src};
+    return curlee::resolver::resolve(program, file);
+}
+
+static void write_file(const std::filesystem::path& path, const std::string& contents)
+{
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out)
+    {
+        fail("failed to write file: " + path.string());
+    }
+    out << contents;
+}
+
 int main()
 {
     using namespace curlee;
@@ -46,8 +67,7 @@ fn main() -> Unit {
   return 0;
 })";
 
-        const auto program = parse_ok(src);
-        const auto res = resolver::resolve(program);
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_ok.curlee");
         if (!std::holds_alternative<resolver::Resolution>(res))
         {
             fail("expected resolver success on happy path");
@@ -60,8 +80,7 @@ fn main() -> Unit {
   return 0;
 })";
 
-        const auto program = parse_ok(src);
-        const auto res = resolver::resolve(program);
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_unknown.curlee");
         if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
         {
             fail("expected resolver error on unknown name");
@@ -81,8 +100,7 @@ fn main() -> Unit {
   return x;
 })";
 
-        const auto program = parse_ok(src);
-        const auto res = resolver::resolve(program);
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_dup.curlee");
         if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
         {
             fail("expected resolver error on duplicate definition");
@@ -103,8 +121,7 @@ fn main() -> Unit {
   return 0;
 })";
 
-        const auto program = parse_ok(src);
-        const auto res = resolver::resolve(program);
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_shadow.curlee");
         if (!std::holds_alternative<resolver::Resolution>(res))
         {
             fail("expected resolver success on block shadowing");
@@ -131,8 +148,7 @@ fn main() -> Unit {
   return 0;
 })";
 
-        const auto program = parse_ok(src);
-        const auto res = resolver::resolve(program);
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_if_while.curlee");
         if (!std::holds_alternative<resolver::Resolution>(res))
         {
             fail("expected resolver success for if/while scoping");
@@ -146,18 +162,39 @@ fn main() -> Unit {
   return 0;
 })";
 
-        const auto program = parse_ok(src);
-        const auto res = resolver::resolve(program);
+        namespace fs = std::filesystem;
+        const fs::path base = fs::temp_directory_path() / "curlee_resolver_tests";
+        const fs::path module_dir = base / "foo";
+        fs::create_directories(module_dir);
+        const fs::path module_path = module_dir / "bar.curlee";
+        write_file(module_path, "fn helper() -> Unit { return 0; }");
+
+        const fs::path main_path = base / "main.curlee";
+        const auto res = resolve_with_source(src, main_path.string());
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success when import exists");
+        }
+    }
+
+    {
+        const std::string src = R"(import missing.mod;
+
+fn main() -> Unit {
+  return 0;
+})";
+
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_missing_import.curlee");
         if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
         {
-            fail("expected resolver error when imports are present");
+            fail("expected resolver error when import is missing");
         }
 
         const auto& ds = std::get<std::vector<diag::Diagnostic>>(res);
         bool found = false;
         for (const auto& d : ds)
         {
-            if (d.message.find("imports are not implemented") != std::string::npos)
+            if (d.message.find("import not found") != std::string::npos)
             {
                 found = true;
                 break;
@@ -165,7 +202,7 @@ fn main() -> Unit {
         }
         if (!found)
         {
-            fail("expected import-not-implemented diagnostic");
+            fail("expected import-not-found diagnostic");
         }
     }
 

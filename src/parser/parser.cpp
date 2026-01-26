@@ -20,6 +20,102 @@ static curlee::source::Span span_cover(const curlee::source::Span& a, const curl
     return curlee::source::Span{.start = a.start, .end = b.end};
 }
 
+void assign_expr_ids(curlee::parser::Expr& expr, std::size_t& next_id);
+
+void assign_expr_ids_block(curlee::parser::Block& block, std::size_t& next_id);
+
+void assign_expr_ids_stmt(curlee::parser::Stmt& stmt, std::size_t& next_id)
+{
+    std::visit(
+        [&](auto& node)
+        {
+            using Node = std::decay_t<decltype(node)>;
+            if constexpr (std::is_same_v<Node, curlee::parser::LetStmt>)
+            {
+                assign_expr_ids(node.value, next_id);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::ReturnStmt>)
+            {
+                if (node.value.has_value())
+                {
+                    assign_expr_ids(*node.value, next_id);
+                }
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::ExprStmt>)
+            {
+                assign_expr_ids(node.expr, next_id);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::BlockStmt>)
+            {
+                assign_expr_ids_block(*node.block, next_id);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::IfStmt>)
+            {
+                assign_expr_ids(node.cond, next_id);
+                assign_expr_ids_block(*node.then_block, next_id);
+                if (node.else_block != nullptr)
+                {
+                    assign_expr_ids_block(*node.else_block, next_id);
+                }
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::WhileStmt>)
+            {
+                assign_expr_ids(node.cond, next_id);
+                assign_expr_ids_block(*node.body, next_id);
+            }
+        },
+        stmt.node);
+}
+
+void assign_expr_ids_block(curlee::parser::Block& block, std::size_t& next_id)
+{
+    for (auto& stmt : block.stmts)
+    {
+        assign_expr_ids_stmt(stmt, next_id);
+    }
+}
+
+void assign_expr_ids(curlee::parser::Expr& expr, std::size_t& next_id)
+{
+    expr.id = next_id++;
+    std::visit(
+        [&](auto& node)
+        {
+            using Node = std::decay_t<decltype(node)>;
+            if constexpr (std::is_same_v<Node, curlee::parser::UnaryExpr>)
+            {
+                assign_expr_ids(*node.rhs, next_id);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::BinaryExpr>)
+            {
+                assign_expr_ids(*node.lhs, next_id);
+                assign_expr_ids(*node.rhs, next_id);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::CallExpr>)
+            {
+                assign_expr_ids(*node.callee, next_id);
+                for (auto& arg : node.args)
+                {
+                    assign_expr_ids(arg, next_id);
+                }
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::GroupExpr>)
+            {
+                assign_expr_ids(*node.inner, next_id);
+            }
+        },
+        expr.node);
+}
+
+void assign_expr_ids(curlee::parser::Program& program)
+{
+    std::size_t next_id = 1;
+    for (auto& function : program.functions)
+    {
+        assign_expr_ids_block(function.body, next_id);
+    }
+}
+
 class Parser
 {
   public:
@@ -1431,7 +1527,12 @@ class Dumper
 
 ParseResult parse(std::span<const curlee::lexer::Token> tokens)
 {
-    return Parser(tokens).parse_program();
+    auto result = Parser(tokens).parse_program();
+    if (auto* program = std::get_if<Program>(&result))
+    {
+        assign_expr_ids(*program);
+    }
+    return result;
 }
 
 std::string dump(const Program& program)
