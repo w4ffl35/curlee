@@ -96,9 +96,32 @@ int cmd_read_only(std::string_view cmd, const std::string& path)
 
     if (cmd == "check")
     {
-        std::cout << "curlee check: read " << file.contents.size() << " bytes from " << file.path
-                  << " (verifier not implemented yet)\n";
-        return kExitOk;
+        const auto lexed = lexer::lex(file.contents);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+        {
+            std::cerr << diag::render(std::get<diag::Diagnostic>(lexed), file);
+            return kExitError;
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+        {
+            const auto& ds = std::get<std::vector<diag::Diagnostic>>(parsed);
+            for (const auto& d : ds)
+            {
+                std::cerr << diag::render(d, file);
+            }
+            return kExitError;
+        }
+
+        // TODO: binder/types/contracts/verifier pipeline.
+        diag::Diagnostic d;
+        d.severity = diag::Severity::Error;
+        d.message = "check not implemented yet";
+        d.span = std::nullopt;
+        std::cerr << diag::render(d, file);
+        return kExitError;
     }
 
     if (cmd == "run")
