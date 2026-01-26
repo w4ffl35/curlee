@@ -3,6 +3,7 @@
 #include <curlee/diag/render.h>
 #include <curlee/lexer/lexer.h>
 #include <curlee/parser/parser.h>
+#include <curlee/resolver/resolver.h>
 #include <curlee/source/source_file.h>
 #include <iostream>
 #include <optional>
@@ -108,6 +109,18 @@ int cmd_read_only(std::string_view cmd, const std::string& path)
         if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
         {
             const auto& ds = std::get<std::vector<diag::Diagnostic>>(parsed);
+            for (const auto& d : ds)
+            {
+                std::cerr << diag::render(d, file);
+            }
+            return kExitError;
+        }
+
+        const auto& program = std::get<parser::Program>(parsed);
+        const auto resolved = resolver::resolve(program);
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(resolved))
+        {
+            const auto& ds = std::get<std::vector<diag::Diagnostic>>(resolved);
             for (const auto& d : ds)
             {
                 std::cerr << diag::render(d, file);

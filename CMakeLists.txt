@@ -26,6 +26,7 @@ add_executable(curlee
   src/diag/render.cpp
   src/lexer/lexer.cpp
   src/parser/parser.cpp
+  src/resolver/resolver.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
 )
@@ -70,6 +71,7 @@ add_executable(curlee_cli_diagnostics_golden_tests
   src/diag/render.cpp
   src/lexer/lexer.cpp
   src/parser/parser.cpp
+  src/resolver/resolver.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
 )
