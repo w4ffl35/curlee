@@ -3,6 +3,7 @@
 #include <curlee/parser/parser.h>
 #include <curlee/types/type.h>
 #include <curlee/types/type_check.h>
+#include <string_view>
 #include <iostream>
 
 static void fail(const std::string& msg)
@@ -123,6 +124,24 @@ int main()
             fail("expected type info for return expression");
         }
 
+        const auto* ret_bin = std::get_if<curlee::parser::BinaryExpr>(&return_expr.node);
+        if (ret_bin == nullptr)
+        {
+            fail("expected return expression to be a BinaryExpr");
+        }
+
+        const auto ret_lhs_t = info.type_of(ret_bin->lhs->id);
+        if (!ret_lhs_t.has_value() || ret_lhs_t->kind != TypeKind::Int)
+        {
+            fail("expected type info for return lhs");
+        }
+
+        const auto ret_rhs_t = info.type_of(ret_bin->rhs->id);
+        if (!ret_rhs_t.has_value() || ret_rhs_t->kind != TypeKind::Int)
+        {
+            fail("expected type info for return rhs");
+        }
+
         const auto span_text = source.substr(return_expr.span.start, return_expr.span.length());
         if (span_text != "x + 1")
         {
@@ -160,6 +179,49 @@ int main()
         if (let_it == info.expr_types.end() || let_it->second.kind != TypeKind::Bool)
         {
             fail("expected Bool type info for bool literal initializer");
+        }
+    }
+
+    {
+        // Span precision through typing: condition error should point at exactly `1`.
+        const std::string source = "fn main() -> Int { if 1 { return 0; } return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for span precision test");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for span precision test");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto typed = curlee::types::type_check(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(typed))
+        {
+            fail("expected type checking to fail for span precision test");
+        }
+
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(typed);
+        if (diags.empty())
+        {
+            fail("expected at least one diagnostic");
+        }
+
+        const auto& d = diags.front();
+        const std::string_view span_text =
+            std::string_view(source).substr(d.span.start, d.span.length());
+        if (span_text != "1")
+        {
+            fail("expected condition diagnostic span to cover exactly `1`");
+        }
+        if (d.message.find("if condition type mismatch") == std::string::npos)
+        {
+            fail("expected if condition type mismatch diagnostic message");
         }
     }
 
