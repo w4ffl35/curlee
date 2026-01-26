@@ -96,6 +96,61 @@ int main()
         }
     }
 
+    {
+        const std::string src = "let s = \"hi\\n\\\"there\";";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for string literal");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::KwLet, "let");
+        expect_token(toks, 1, TokenKind::Identifier, "s");
+            expect_token(toks, 2, TokenKind::Equal, "=");
+            expect_token(toks, 3, TokenKind::StringLiteral, "\"hi\\n\\\"there\"");
+        expect_token(toks, 4, TokenKind::Semicolon, ";");
+        expect_token(toks, 5, TokenKind::Eof, "");
+    }
+
+    {
+        const std::string src = "@";
+        const auto res = lex(src);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(res))
+        {
+            fail("expected error for invalid character");
+        }
+
+        const auto& d = std::get<curlee::diag::Diagnostic>(res);
+        if (d.message != "invalid character")
+        {
+            fail("unexpected diagnostic message for invalid character");
+        }
+        if (!d.span.has_value() || d.span->start != 0 || d.span->end != 1)
+        {
+            fail("unexpected span for invalid character");
+        }
+    }
+
+    {
+        const std::string src = "\"unterminated";
+        const auto res = lex(src);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(res))
+        {
+            fail("expected error for unterminated string literal");
+        }
+
+        const auto& d = std::get<curlee::diag::Diagnostic>(res);
+        if (d.message != "unterminated string literal")
+        {
+            fail("unexpected diagnostic message for unterminated string literal");
+        }
+        if (!d.span.has_value())
+        {
+            fail("expected span for unterminated string literal");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

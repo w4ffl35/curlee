@@ -63,6 +63,53 @@ class Lexer
                 continue;
             }
 
+            // Strings (MVP: double-quoted, basic escapes; no interpolation)
+            if (c == '"')
+            {
+                advance();
+                while (!is_at_end())
+                {
+                    const char ch = peek();
+                    if (ch == '"')
+                    {
+                        advance();
+                        const std::string_view lexeme = input_.substr(start, pos_ - start);
+                        tokens.push_back(Token{
+                            .kind = TokenKind::StringLiteral,
+                            .lexeme = lexeme,
+                            .span = {start, pos_},
+                        });
+                        break;
+                    }
+
+                    if (ch == '\n' || ch == '\r')
+                    {
+                        return make_error(start, pos_, "unterminated string literal");
+                    }
+
+                    if (ch == '\\')
+                    {
+                        // Escape sequence: consume backslash + one char if present.
+                        advance();
+                        if (is_at_end())
+                        {
+                            return make_error(start, pos_, "unterminated string literal");
+                        }
+                        advance();
+                        continue;
+                    }
+
+                    advance();
+                }
+
+                if (is_at_end())
+                {
+                    return make_error(start, pos_, "unterminated string literal");
+                }
+
+                continue;
+            }
+
             // Two-character operators
             if (c == '-' && next == '>')
             {

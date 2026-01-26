@@ -12,6 +12,7 @@ enum class TokenKind
 
     Identifier,
     IntLiteral,
+    StringLiteral,
 
     // Keywords
     KwFn,
@@ -77,6 +78,8 @@ struct Token
         return "identifier";
     case TokenKind::IntLiteral:
         return "int";
+    case TokenKind::StringLiteral:
+        return "string";
 
     case TokenKind::KwFn:
         return "kw_fn";
