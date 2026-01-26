@@ -1,10 +1,6 @@
-#include <iostream>
+#include <curlee/cli/cli.h>
 
-int main(int argc, char **argv)
+int main(int argc, char** argv)
 {
-    (void)argc;
-    (void)argv;
-
-    std::cout << "curlee: compiler/runtime scaffold (C++23)\n";
-    return 0;
+    return curlee::cli::run(argc, argv);
 }
