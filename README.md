@@ -96,24 +96,13 @@ The MVP logic fragment is intentionally small and decidable.
 
 This repository is early-stage.
 
-- Current binary: builds and prints a scaffold message.
-- Upcoming milestones: spans/diagnostics → lexer → parser → Z3 verification → VM.
-
-The step-by-step execution checklist lives in [TODO.md](TODO.md).
-
 ---
 
 ## Docs
 
-User-facing documentation lives in the local `wiki/` folder (a clone of the GitHub wiki).
+User-facing documentation lives in the GitHub wiki:
 
-- [wiki/](wiki/)
-
-Note: `wiki/` is intentionally gitignored in the main repo so it stays available to local tooling/agents without being committed here.
-
-Project work tracking lives in:
-
-- [TODO.md](TODO.md)
+- https://github.com/w4ffl35/curlee/wiki
 
 ---
 
