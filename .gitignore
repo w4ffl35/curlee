@@ -3,3 +3,4 @@ build/
 # Private docs/workflow notes: keep locally, not in git.
 *.md
 !/README.md
+!/docs/*.md
