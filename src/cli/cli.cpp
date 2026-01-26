@@ -79,9 +79,13 @@ int cmd_read_only(std::string_view cmd, const std::string& path)
 
         const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
         const auto parsed = parser::parse(toks);
-        if (std::holds_alternative<diag::Diagnostic>(parsed))
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
         {
-            std::cerr << diag::render(std::get<diag::Diagnostic>(parsed), file);
+            const auto& ds = std::get<std::vector<diag::Diagnostic>>(parsed);
+            for (const auto& d : ds)
+            {
+                std::cerr << diag::render(d, file);
+            }
             return kExitError;
         }
 

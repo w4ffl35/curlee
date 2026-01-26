@@ -1,15 +1,16 @@
-#include <curlee/parser/parser.h>
-
-#include <curlee/lexer/token.h>
-
 #include <cassert>
 #include <cstddef>
+#include <curlee/lexer/token.h>
+#include <curlee/parser/parser.h>
 #include <optional>
 #include <sstream>
 #include <string_view>
+#include <vector>
 
-namespace curlee::parser {
-namespace {
+namespace curlee::parser
+{
+namespace
+{
 
 using curlee::lexer::Token;
 using curlee::lexer::TokenKind;
@@ -19,26 +20,44 @@ static curlee::source::Span span_cover(const curlee::source::Span& a, const curl
     return curlee::source::Span{.start = a.start, .end = b.end};
 }
 
-class Parser {
-public:
+class Parser
+{
+  public:
     explicit Parser(std::span<const Token> tokens) : tokens_(tokens) {}
 
     [[nodiscard]] ParseResult parse_program()
     {
         Program program;
-        while (!is_at_end()) {
+        while (!is_at_end())
+        {
+            if (!check(TokenKind::KwFn))
+            {
+                diagnostics_.push_back(error_at(peek(), "expected 'fn'"));
+                advance();
+                continue;
+            }
+
             auto fun = parse_function();
-            if (std::holds_alternative<curlee::diag::Diagnostic>(fun)) {
-                return std::get<curlee::diag::Diagnostic>(std::move(fun));
+            if (std::holds_alternative<curlee::diag::Diagnostic>(fun))
+            {
+                diagnostics_.push_back(std::get<curlee::diag::Diagnostic>(std::move(fun)));
+                synchronize_top_level();
+                continue;
             }
             program.functions.push_back(std::get<Function>(std::move(fun)));
+        }
+
+        if (!diagnostics_.empty())
+        {
+            return diagnostics_;
         }
         return program;
     }
 
-private:
+  private:
     std::span<const Token> tokens_;
     std::size_t pos_ = 0;
+        std::vector<curlee::diag::Diagnostic> diagnostics_;
 
     [[nodiscard]] bool is_at_end() const { return peek().kind == TokenKind::Eof; }
 
@@ -58,7 +77,8 @@ private:
 
     const Token& advance()
     {
-        if (!is_at_end()) {
+        if (!is_at_end())
+        {
             ++pos_;
         }
         return previous();
@@ -66,14 +86,47 @@ private:
 
     bool match(TokenKind kind)
     {
-        if (!check(kind)) {
+        if (!check(kind))
+        {
             return false;
         }
         advance();
         return true;
     }
 
-    [[nodiscard]] curlee::diag::Diagnostic error_at(const Token& token, std::string_view message) const
+    void synchronize_stmt()
+    {
+        // Make progress no matter what.
+        if (!is_at_end())
+        {
+            advance();
+        }
+
+        while (!is_at_end())
+        {
+            if (previous().kind == TokenKind::Semicolon)
+            {
+                return;
+            }
+            if (check(TokenKind::RBrace))
+            {
+                return;
+            }
+            advance();
+        }
+    }
+
+    void synchronize_top_level()
+    {
+        // Skip tokens until we reach the start of the next function or EOF.
+        while (!is_at_end() && !check(TokenKind::KwFn))
+        {
+            advance();
+        }
+    }
+
+    [[nodiscard]] curlee::diag::Diagnostic error_at(const Token& token,
+                                                    std::string_view message) const
     {
         curlee::diag::Diagnostic d;
         d.severity = curlee::diag::Severity::Error;
@@ -82,43 +135,423 @@ private:
         return d;
     }
 
-    [[nodiscard]] std::optional<curlee::diag::Diagnostic> consume(TokenKind kind, std::string_view message)
+    [[nodiscard]] std::optional<curlee::diag::Diagnostic> consume(TokenKind kind,
+                                                                  std::string_view message)
     {
-        if (check(kind)) {
+        if (check(kind))
+        {
             advance();
             return std::nullopt;
         }
         return error_at(peek(), message);
     }
 
-    [[nodiscard]] std::variant<Function, curlee::diag::Diagnostic> parse_function()
+    [[nodiscard]] std::variant<TypeName, curlee::diag::Diagnostic> parse_type()
     {
-        if (auto err = consume(TokenKind::KwFn, "expected 'fn'"); err.has_value()) {
+        if (!check(TokenKind::Identifier))
+        {
+            return error_at(peek(), "expected type name");
+        }
+        const Token t = advance();
+        return TypeName{.span = t.span, .name = t.lexeme};
+    }
+
+    [[nodiscard]] std::variant<Function::Param, curlee::diag::Diagnostic> parse_param()
+    {
+        if (!check(TokenKind::Identifier))
+        {
+            return error_at(peek(), "expected parameter name");
+        }
+        const Token name = advance();
+
+        if (auto err = consume(TokenKind::Colon, "expected ':' after parameter name");
+            err.has_value())
+        {
             return *err;
         }
 
-        if (!check(TokenKind::Identifier)) {
+        auto type_res = parse_type();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(type_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(type_res));
+        }
+        TypeName type = std::get<TypeName>(std::move(type_res));
+
+        std::optional<Pred> refinement;
+        if (match(TokenKind::KwWhere))
+        {
+            auto pred_res = parse_pred();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(pred_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(pred_res));
+            }
+            refinement = std::get<Pred>(std::move(pred_res));
+        }
+
+        const curlee::source::Span span = refinement.has_value()
+                                              ? span_cover(name.span, refinement->span)
+                                              : span_cover(name.span, type.span);
+        return Function::Param{.span = span,
+                               .name = name.lexeme,
+                               .type = std::move(type),
+                               .refinement = std::move(refinement)};
+    }
+
+    [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred()
+    {
+        return parse_pred_or();
+    }
+
+    [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred_or()
+    {
+        auto lhs_res = parse_pred_and();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
+        }
+        Pred pred = std::get<Pred>(std::move(lhs_res));
+
+        while (match(TokenKind::OrOr))
+        {
+            const Token op = previous();
+            auto rhs_res = parse_pred_and();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
+            }
+            Pred rhs = std::get<Pred>(std::move(rhs_res));
+
+            Pred combined;
+            combined.span = span_cover(pred.span, rhs.span);
+            combined.node = PredBinary{.op = op.kind,
+                                       .lhs = std::make_unique<Pred>(std::move(pred)),
+                                       .rhs = std::make_unique<Pred>(std::move(rhs))};
+            pred = std::move(combined);
+        }
+
+        return pred;
+    }
+
+    [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred_and()
+    {
+        auto lhs_res = parse_pred_equality();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
+        }
+        Pred pred = std::get<Pred>(std::move(lhs_res));
+
+        while (match(TokenKind::AndAnd))
+        {
+            const Token op = previous();
+            auto rhs_res = parse_pred_equality();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
+            }
+            Pred rhs = std::get<Pred>(std::move(rhs_res));
+
+            Pred combined;
+            combined.span = span_cover(pred.span, rhs.span);
+            combined.node = PredBinary{.op = op.kind,
+                                       .lhs = std::make_unique<Pred>(std::move(pred)),
+                                       .rhs = std::make_unique<Pred>(std::move(rhs))};
+            pred = std::move(combined);
+        }
+
+        return pred;
+    }
+
+    [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred_equality()
+    {
+        auto lhs_res = parse_pred_comparison();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
+        }
+        Pred pred = std::get<Pred>(std::move(lhs_res));
+
+        while (match(TokenKind::EqualEqual) || match(TokenKind::BangEqual))
+        {
+            const Token op = previous();
+            auto rhs_res = parse_pred_comparison();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
+            }
+            Pred rhs = std::get<Pred>(std::move(rhs_res));
+
+            Pred combined;
+            combined.span = span_cover(pred.span, rhs.span);
+            combined.node = PredBinary{.op = op.kind,
+                                       .lhs = std::make_unique<Pred>(std::move(pred)),
+                                       .rhs = std::make_unique<Pred>(std::move(rhs))};
+            pred = std::move(combined);
+        }
+
+        return pred;
+    }
+
+    [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred_comparison()
+    {
+        auto lhs_res = parse_pred_term();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
+        }
+        Pred pred = std::get<Pred>(std::move(lhs_res));
+
+        while (match(TokenKind::Less) || match(TokenKind::LessEqual) || match(TokenKind::Greater) ||
+               match(TokenKind::GreaterEqual))
+        {
+            const Token op = previous();
+            auto rhs_res = parse_pred_term();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
+            }
+            Pred rhs = std::get<Pred>(std::move(rhs_res));
+
+            Pred combined;
+            combined.span = span_cover(pred.span, rhs.span);
+            combined.node = PredBinary{.op = op.kind,
+                                       .lhs = std::make_unique<Pred>(std::move(pred)),
+                                       .rhs = std::make_unique<Pred>(std::move(rhs))};
+            pred = std::move(combined);
+        }
+
+        return pred;
+    }
+
+    [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred_term()
+    {
+        auto lhs_res = parse_pred_factor();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
+        }
+        Pred pred = std::get<Pred>(std::move(lhs_res));
+
+        while (match(TokenKind::Plus) || match(TokenKind::Minus))
+        {
+            const Token op = previous();
+            auto rhs_res = parse_pred_factor();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
+            }
+            Pred rhs = std::get<Pred>(std::move(rhs_res));
+
+            Pred combined;
+            combined.span = span_cover(pred.span, rhs.span);
+            combined.node = PredBinary{.op = op.kind,
+                                       .lhs = std::make_unique<Pred>(std::move(pred)),
+                                       .rhs = std::make_unique<Pred>(std::move(rhs))};
+            pred = std::move(combined);
+        }
+
+        return pred;
+    }
+
+    [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred_factor()
+    {
+        auto lhs_res = parse_pred_unary();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
+        }
+        Pred pred = std::get<Pred>(std::move(lhs_res));
+
+        while (match(TokenKind::Star) || match(TokenKind::Slash))
+        {
+            const Token op = previous();
+            auto rhs_res = parse_pred_unary();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
+            }
+            Pred rhs = std::get<Pred>(std::move(rhs_res));
+
+            Pred combined;
+            combined.span = span_cover(pred.span, rhs.span);
+            combined.node = PredBinary{.op = op.kind,
+                                       .lhs = std::make_unique<Pred>(std::move(pred)),
+                                       .rhs = std::make_unique<Pred>(std::move(rhs))};
+            pred = std::move(combined);
+        }
+
+        return pred;
+    }
+
+    [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred_unary()
+    {
+        if (match(TokenKind::Bang) || match(TokenKind::Minus))
+        {
+            const Token op = previous();
+            auto rhs_res = parse_pred_unary();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
+            }
+            Pred rhs = std::get<Pred>(std::move(rhs_res));
+
+            Pred pred;
+            pred.span = span_cover(op.span, rhs.span);
+            pred.node = PredUnary{.op = op.kind, .rhs = std::make_unique<Pred>(std::move(rhs))};
+            return pred;
+        }
+
+        return parse_pred_primary();
+    }
+
+    [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred_primary()
+    {
+        if (match(TokenKind::IntLiteral))
+        {
+            const Token lit = previous();
+            Pred pred;
+            pred.span = lit.span;
+            pred.node = PredInt{.lexeme = lit.lexeme};
+            return pred;
+        }
+
+        if (match(TokenKind::Identifier))
+        {
+            const Token name = previous();
+            Pred pred;
+            pred.span = name.span;
+            pred.node = PredName{.name = name.lexeme};
+            return pred;
+        }
+
+        if (match(TokenKind::LParen))
+        {
+            const Token l = previous();
+            auto inner_res = parse_pred();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(inner_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(inner_res));
+            }
+            Pred inner = std::get<Pred>(std::move(inner_res));
+
+            if (auto err = consume(TokenKind::RParen, "expected ')' after predicate");
+                err.has_value())
+            {
+                return *err;
+            }
+            const Token r = previous();
+
+            Pred pred;
+            pred.span = span_cover(l.span, r.span);
+            pred.node = PredGroup{.inner = std::make_unique<Pred>(std::move(inner))};
+            return pred;
+        }
+
+        return error_at(peek(), "expected predicate");
+    }
+
+    [[nodiscard]] std::variant<Function, curlee::diag::Diagnostic> parse_function()
+    {
+        if (auto err = consume(TokenKind::KwFn, "expected 'fn'"); err.has_value())
+        {
+            return *err;
+        }
+
+        if (!check(TokenKind::Identifier))
+        {
             return error_at(peek(), "expected function name");
         }
         const Token name = advance();
 
-        if (auto err = consume(TokenKind::LParen, "expected '(' after function name"); err.has_value()) {
-            return *err;
-        }
-        if (auto err = consume(TokenKind::RParen, "expected ')' after parameter list"); err.has_value()) {
+        if (auto err = consume(TokenKind::LParen, "expected '(' after function name");
+            err.has_value())
+        {
             return *err;
         }
 
-        std::optional<std::string_view> return_type;
-        if (match(TokenKind::Arrow)) {
-            if (!check(TokenKind::Identifier)) {
-                return error_at(peek(), "expected return type name after '->'");
+        std::vector<Function::Param> params;
+        if (!check(TokenKind::RParen))
+        {
+            while (true)
+            {
+                auto param_res = parse_param();
+                if (std::holds_alternative<curlee::diag::Diagnostic>(param_res))
+                {
+                    return std::get<curlee::diag::Diagnostic>(std::move(param_res));
+                }
+                params.push_back(std::get<Function::Param>(std::move(param_res)));
+
+                if (match(TokenKind::Comma))
+                {
+                    continue;
+                }
+                break;
             }
-            return_type = advance().lexeme;
+        }
+
+        if (auto err = consume(TokenKind::RParen, "expected ')' after parameter list");
+            err.has_value())
+        {
+            return *err;
+        }
+
+        std::optional<TypeName> return_type;
+        if (match(TokenKind::Arrow))
+        {
+            auto type_res = parse_type();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(type_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(type_res));
+            }
+            return_type = std::get<TypeName>(std::move(type_res));
+        }
+
+        std::vector<Pred> requires_clauses;
+        std::vector<Pred> ensures;
+        if (match(TokenKind::LBracket))
+        {
+            while (!check(TokenKind::RBracket) && !is_at_end())
+            {
+                if (match(TokenKind::KwRequires))
+                {
+                    auto pred_res = parse_pred();
+                    if (std::holds_alternative<curlee::diag::Diagnostic>(pred_res))
+                    {
+                        return std::get<curlee::diag::Diagnostic>(std::move(pred_res));
+                    }
+                    requires_clauses.push_back(std::get<Pred>(std::move(pred_res)));
+                }
+                else if (match(TokenKind::KwEnsures))
+                {
+                    auto pred_res = parse_pred();
+                    if (std::holds_alternative<curlee::diag::Diagnostic>(pred_res))
+                    {
+                        return std::get<curlee::diag::Diagnostic>(std::move(pred_res));
+                    }
+                    ensures.push_back(std::get<Pred>(std::move(pred_res)));
+                }
+                else
+                {
+                    return error_at(peek(), "expected 'requires' or 'ensures' in contract block");
+                }
+
+                if (auto err = consume(TokenKind::Semicolon, "expected ';' after contract clause");
+                    err.has_value())
+                {
+                    return *err;
+                }
+            }
+
+            if (auto err = consume(TokenKind::RBracket, "expected ']' to end contract block");
+                err.has_value())
+            {
+                return *err;
+            }
         }
 
         auto body_res = parse_block();
-        if (std::holds_alternative<curlee::diag::Diagnostic>(body_res)) {
+        if (std::holds_alternative<curlee::diag::Diagnostic>(body_res))
+        {
             return std::get<curlee::diag::Diagnostic>(std::move(body_res));
         }
 
@@ -127,6 +560,9 @@ private:
             .span = span_cover(name.span, body.span),
             .name = name.lexeme,
             .body = std::move(body),
+            .params = std::move(params),
+            .requires_clauses = std::move(requires_clauses),
+            .ensures = std::move(ensures),
             .return_type = return_type,
         };
         return fn;
@@ -134,21 +570,27 @@ private:
 
     [[nodiscard]] std::variant<Block, curlee::diag::Diagnostic> parse_block()
     {
-        if (auto err = consume(TokenKind::LBrace, "expected '{' to start block"); err.has_value()) {
+        if (auto err = consume(TokenKind::LBrace, "expected '{' to start block"); err.has_value())
+        {
             return *err;
         }
         const Token lbrace = previous();
 
         std::vector<Stmt> stmts;
-        while (!check(TokenKind::RBrace) && !is_at_end()) {
+        while (!check(TokenKind::RBrace) && !is_at_end())
+        {
             auto stmt_res = parse_stmt();
-            if (std::holds_alternative<curlee::diag::Diagnostic>(stmt_res)) {
-                return std::get<curlee::diag::Diagnostic>(std::move(stmt_res));
+            if (std::holds_alternative<curlee::diag::Diagnostic>(stmt_res))
+            {
+                diagnostics_.push_back(std::get<curlee::diag::Diagnostic>(std::move(stmt_res)));
+                synchronize_stmt();
+                continue;
             }
             stmts.push_back(std::get<Stmt>(std::move(stmt_res)));
         }
 
-        if (auto err = consume(TokenKind::RBrace, "expected '}' to end block"); err.has_value()) {
+        if (auto err = consume(TokenKind::RBrace, "expected '}' to end block"); err.has_value())
+        {
             return *err;
         }
         const Token rbrace = previous();
@@ -160,44 +602,82 @@ private:
     {
         const std::size_t start_pos = pos_;
 
-        if (match(TokenKind::KwLet)) {
+        if (match(TokenKind::KwLet))
+        {
             const Token kw = previous();
-            if (!check(TokenKind::Identifier)) {
+            if (!check(TokenKind::Identifier))
+            {
                 return error_at(peek(), "expected identifier after 'let'");
             }
             const Token name = advance();
 
-            if (auto err = consume(TokenKind::Equal, "expected '=' in let statement"); err.has_value()) {
+            if (auto err = consume(TokenKind::Colon, "expected ':' after let name");
+                err.has_value())
+            {
+                return *err;
+            }
+
+            auto type_res = parse_type();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(type_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(type_res));
+            }
+            TypeName type = std::get<TypeName>(std::move(type_res));
+
+            std::optional<Pred> refinement;
+            if (match(TokenKind::KwWhere))
+            {
+                auto pred_res = parse_pred();
+                if (std::holds_alternative<curlee::diag::Diagnostic>(pred_res))
+                {
+                    return std::get<curlee::diag::Diagnostic>(std::move(pred_res));
+                }
+                refinement = std::get<Pred>(std::move(pred_res));
+            }
+
+            if (auto err = consume(TokenKind::Equal, "expected '=' in let statement");
+                err.has_value())
+            {
                 return *err;
             }
 
             auto expr_res = parse_expr();
-            if (std::holds_alternative<curlee::diag::Diagnostic>(expr_res)) {
+            if (std::holds_alternative<curlee::diag::Diagnostic>(expr_res))
+            {
                 return std::get<curlee::diag::Diagnostic>(std::move(expr_res));
             }
             Expr value = std::get<Expr>(std::move(expr_res));
 
-            if (auto err = consume(TokenKind::Semicolon, "expected ';' after let statement"); err.has_value()) {
+            if (auto err = consume(TokenKind::Semicolon, "expected ';' after let statement");
+                err.has_value())
+            {
                 return *err;
             }
             const Token semi = previous();
 
             Stmt stmt{
                 .span = span_cover(kw.span, semi.span),
-                .node = LetStmt{.name = name.lexeme, .value = std::move(value)},
+                .node = LetStmt{.name = name.lexeme,
+                                .type = std::move(type),
+                                .refinement = std::move(refinement),
+                                .value = std::move(value)},
             };
             return stmt;
         }
 
-        if (match(TokenKind::KwReturn)) {
+        if (match(TokenKind::KwReturn))
+        {
             const Token kw = previous();
             auto expr_res = parse_expr();
-            if (std::holds_alternative<curlee::diag::Diagnostic>(expr_res)) {
+            if (std::holds_alternative<curlee::diag::Diagnostic>(expr_res))
+            {
                 return std::get<curlee::diag::Diagnostic>(std::move(expr_res));
             }
             Expr value = std::get<Expr>(std::move(expr_res));
 
-            if (auto err = consume(TokenKind::Semicolon, "expected ';' after return statement"); err.has_value()) {
+            if (auto err = consume(TokenKind::Semicolon, "expected ';' after return statement");
+                err.has_value())
+            {
                 return *err;
             }
             const Token semi = previous();
@@ -211,12 +691,15 @@ private:
 
         // Expression statement
         auto expr_res = parse_expr();
-        if (std::holds_alternative<curlee::diag::Diagnostic>(expr_res)) {
+        if (std::holds_alternative<curlee::diag::Diagnostic>(expr_res))
+        {
             return std::get<curlee::diag::Diagnostic>(std::move(expr_res));
         }
         Expr expr = std::get<Expr>(std::move(expr_res));
 
-        if (auto err = consume(TokenKind::Semicolon, "expected ';' after expression"); err.has_value()) {
+        if (auto err = consume(TokenKind::Semicolon, "expected ';' after expression");
+            err.has_value())
+        {
             return *err;
         }
         const Token semi = previous();
@@ -235,15 +718,18 @@ private:
     [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_or()
     {
         auto lhs_res = parse_and();
-        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res)) {
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
             return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
         }
         Expr expr = std::get<Expr>(std::move(lhs_res));
 
-        while (match(TokenKind::OrOr)) {
+        while (match(TokenKind::OrOr))
+        {
             const Token op = previous();
             auto rhs_res = parse_and();
-            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res)) {
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
                 return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
             }
             Expr rhs = std::get<Expr>(std::move(rhs_res));
@@ -264,15 +750,18 @@ private:
     [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_and()
     {
         auto lhs_res = parse_equality();
-        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res)) {
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
             return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
         }
         Expr expr = std::get<Expr>(std::move(lhs_res));
 
-        while (match(TokenKind::AndAnd)) {
+        while (match(TokenKind::AndAnd))
+        {
             const Token op = previous();
             auto rhs_res = parse_equality();
-            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res)) {
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
                 return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
             }
             Expr rhs = std::get<Expr>(std::move(rhs_res));
@@ -293,15 +782,18 @@ private:
     [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_equality()
     {
         auto lhs_res = parse_comparison();
-        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res)) {
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
             return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
         }
         Expr expr = std::get<Expr>(std::move(lhs_res));
 
-        while (match(TokenKind::EqualEqual) || match(TokenKind::BangEqual)) {
+        while (match(TokenKind::EqualEqual) || match(TokenKind::BangEqual))
+        {
             const Token op = previous();
             auto rhs_res = parse_comparison();
-            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res)) {
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
                 return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
             }
             Expr rhs = std::get<Expr>(std::move(rhs_res));
@@ -322,16 +814,19 @@ private:
     [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_comparison()
     {
         auto lhs_res = parse_term();
-        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res)) {
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
             return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
         }
         Expr expr = std::get<Expr>(std::move(lhs_res));
 
         while (match(TokenKind::Less) || match(TokenKind::LessEqual) || match(TokenKind::Greater) ||
-               match(TokenKind::GreaterEqual)) {
+               match(TokenKind::GreaterEqual))
+        {
             const Token op = previous();
             auto rhs_res = parse_term();
-            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res)) {
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
                 return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
             }
             Expr rhs = std::get<Expr>(std::move(rhs_res));
@@ -352,15 +847,18 @@ private:
     [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_term()
     {
         auto lhs_res = parse_factor();
-        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res)) {
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
             return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
         }
         Expr expr = std::get<Expr>(std::move(lhs_res));
 
-        while (match(TokenKind::Plus) || match(TokenKind::Minus)) {
+        while (match(TokenKind::Plus) || match(TokenKind::Minus))
+        {
             const Token op = previous();
             auto rhs_res = parse_factor();
-            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res)) {
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
                 return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
             }
             Expr rhs = std::get<Expr>(std::move(rhs_res));
@@ -381,15 +879,18 @@ private:
     [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_factor()
     {
         auto lhs_res = parse_unary();
-        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res)) {
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
             return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
         }
         Expr expr = std::get<Expr>(std::move(lhs_res));
 
-        while (match(TokenKind::Star) || match(TokenKind::Slash)) {
+        while (match(TokenKind::Star) || match(TokenKind::Slash))
+        {
             const Token op = previous();
             auto rhs_res = parse_unary();
-            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res)) {
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
                 return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
             }
             Expr rhs = std::get<Expr>(std::move(rhs_res));
@@ -409,10 +910,12 @@ private:
 
     [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_unary()
     {
-        if (match(TokenKind::Bang) || match(TokenKind::Minus)) {
+        if (match(TokenKind::Bang) || match(TokenKind::Minus))
+        {
             const Token op = previous();
             auto rhs_res = parse_unary();
-            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res)) {
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
                 return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
             }
             Expr rhs = std::get<Expr>(std::move(rhs_res));
@@ -429,32 +932,40 @@ private:
     [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_call()
     {
         auto callee_res = parse_primary();
-        if (std::holds_alternative<curlee::diag::Diagnostic>(callee_res)) {
+        if (std::holds_alternative<curlee::diag::Diagnostic>(callee_res))
+        {
             return std::get<curlee::diag::Diagnostic>(std::move(callee_res));
         }
 
         Expr expr = std::get<Expr>(std::move(callee_res));
 
-        while (match(TokenKind::LParen)) {
+        while (match(TokenKind::LParen))
+        {
             const Token lparen = previous();
 
             std::vector<Expr> args;
-            if (!check(TokenKind::RParen)) {
-                while (true) {
+            if (!check(TokenKind::RParen))
+            {
+                while (true)
+                {
                     auto arg_res = parse_expr();
-                    if (std::holds_alternative<curlee::diag::Diagnostic>(arg_res)) {
+                    if (std::holds_alternative<curlee::diag::Diagnostic>(arg_res))
+                    {
                         return std::get<curlee::diag::Diagnostic>(std::move(arg_res));
                     }
                     args.push_back(std::get<Expr>(std::move(arg_res)));
 
-                    if (match(TokenKind::Comma)) {
+                    if (match(TokenKind::Comma))
+                    {
                         continue;
                     }
                     break;
                 }
             }
 
-            if (auto err = consume(TokenKind::RParen, "expected ')' after arguments"); err.has_value()) {
+            if (auto err = consume(TokenKind::RParen, "expected ')' after arguments");
+                err.has_value())
+            {
                 return *err;
             }
             const Token rparen = previous();
@@ -474,7 +985,8 @@ private:
 
     [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_primary()
     {
-        if (match(TokenKind::IntLiteral)) {
+        if (match(TokenKind::IntLiteral))
+        {
             const Token lit = previous();
             Expr expr;
             expr.span = lit.span;
@@ -482,7 +994,8 @@ private:
             return expr;
         }
 
-        if (match(TokenKind::StringLiteral)) {
+        if (match(TokenKind::StringLiteral))
+        {
             const Token lit = previous();
             Expr expr;
             expr.span = lit.span;
@@ -490,7 +1003,8 @@ private:
             return expr;
         }
 
-        if (match(TokenKind::Identifier)) {
+        if (match(TokenKind::Identifier))
+        {
             const Token name = previous();
             Expr expr;
             expr.span = name.span;
@@ -498,15 +1012,19 @@ private:
             return expr;
         }
 
-        if (match(TokenKind::LParen)) {
+        if (match(TokenKind::LParen))
+        {
             const Token l = previous();
             auto inner_res = parse_expr();
-            if (std::holds_alternative<curlee::diag::Diagnostic>(inner_res)) {
+            if (std::holds_alternative<curlee::diag::Diagnostic>(inner_res))
+            {
                 return std::get<curlee::diag::Diagnostic>(std::move(inner_res));
             }
             Expr inner = std::get<Expr>(std::move(inner_res));
 
-            if (auto err = consume(TokenKind::RParen, "expected ')' after expression"); err.has_value()) {
+            if (auto err = consume(TokenKind::RParen, "expected ')' after expression");
+                err.has_value())
+            {
                 return *err;
             }
             const Token r = previous();
@@ -521,28 +1039,65 @@ private:
     }
 };
 
-class Dumper {
-public:
+class Dumper
+{
+  public:
     explicit Dumper(std::ostringstream& out) : out_(out) {}
 
     void dump_program(const Program& p)
     {
-        for (std::size_t i = 0; i < p.functions.size(); ++i) {
+        for (std::size_t i = 0; i < p.functions.size(); ++i)
+        {
             dump_function(p.functions[i]);
-            if (i + 1 < p.functions.size()) {
+            if (i + 1 < p.functions.size())
+            {
                 out_ << "\n";
             }
         }
     }
 
-private:
+  private:
     std::ostringstream& out_;
 
     void dump_function(const Function& f)
     {
-        out_ << "fn " << f.name << "()";
-        if (f.return_type.has_value()) {
-            out_ << " -> " << *f.return_type;
+        out_ << "fn " << f.name << "(";
+        for (std::size_t i = 0; i < f.params.size(); ++i)
+        {
+            const auto& p = f.params[i];
+            out_ << p.name << ": " << p.type.name;
+            if (p.refinement.has_value())
+            {
+                out_ << " where ";
+                dump_pred(*p.refinement);
+            }
+            if (i + 1 < f.params.size())
+            {
+                out_ << ", ";
+            }
+        }
+        out_ << ")";
+        if (f.return_type.has_value())
+        {
+            out_ << " -> " << f.return_type->name;
+        }
+
+        if (!f.requires_clauses.empty() || !f.ensures.empty())
+        {
+            out_ << " [";
+            for (const auto& r : f.requires_clauses)
+            {
+                out_ << " requires ";
+                dump_pred(r);
+                out_ << ";";
+            }
+            for (const auto& e : f.ensures)
+            {
+                out_ << " ensures ";
+                dump_pred(e);
+                out_ << ";";
+            }
+            out_ << " ]";
         }
         out_ << " ";
         dump_block(f.body);
@@ -551,7 +1106,8 @@ private:
     void dump_block(const Block& b)
     {
         out_ << "{";
-        for (const auto& s : b.stmts) {
+        for (const auto& s : b.stmts)
+        {
             out_ << " ";
             dump_stmt(s);
         }
@@ -565,7 +1121,13 @@ private:
 
     void dump_stmt_node(const LetStmt& s)
     {
-        out_ << "let " << s.name << " = ";
+        out_ << "let " << s.name << ": " << s.type.name;
+        if (s.refinement.has_value())
+        {
+            out_ << " where ";
+            dump_pred(*s.refinement);
+        }
+        out_ << " = ";
         dump_expr(s.value);
         out_ << ";";
     }
@@ -618,12 +1180,44 @@ private:
     {
         dump_expr(*e.callee);
         out_ << "(";
-        for (std::size_t i = 0; i < e.args.size(); ++i) {
+        for (std::size_t i = 0; i < e.args.size(); ++i)
+        {
             dump_expr(e.args[i]);
-            if (i + 1 < e.args.size()) {
+            if (i + 1 < e.args.size())
+            {
                 out_ << ", ";
             }
         }
+        out_ << ")";
+    }
+
+    void dump_pred(const Pred& p)
+    {
+        std::visit([&](const auto& node) { dump_pred_node(node); }, p.node);
+    }
+
+    void dump_pred_node(const PredInt& p) { out_ << p.lexeme; }
+    void dump_pred_node(const PredName& p) { out_ << p.name; }
+
+    void dump_pred_node(const PredGroup& p)
+    {
+        out_ << "(";
+        dump_pred(*p.inner);
+        out_ << ")";
+    }
+
+    void dump_pred_node(const PredUnary& p)
+    {
+        out_ << curlee::lexer::to_string(p.op) << " ";
+        dump_pred(*p.rhs);
+    }
+
+    void dump_pred_node(const PredBinary& p)
+    {
+        out_ << "(";
+        dump_pred(*p.lhs);
+        out_ << " " << curlee::lexer::to_string(p.op) << " ";
+        dump_pred(*p.rhs);
         out_ << ")";
     }
 };
