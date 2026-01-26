@@ -112,7 +112,7 @@ struct LetStmt
 
 struct ReturnStmt
 {
-    Expr value;
+    std::optional<Expr> value;
 };
 
 struct ExprStmt

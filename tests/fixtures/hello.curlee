@@ -1,7 +1,8 @@
 fn print(s: String) -> Unit {
-  return 0;
+  return;
 }
 
 fn main() -> Unit {
   print("hello, world");
+  return;
 }

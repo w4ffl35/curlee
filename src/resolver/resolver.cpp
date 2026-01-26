@@ -1,5 +1,4 @@
 #include <curlee/resolver/resolver.h>
-
 #include <unordered_map>
 #include <vector>
 
@@ -12,10 +11,10 @@ using curlee::diag::Diagnostic;
 using curlee::diag::Related;
 using curlee::diag::Severity;
 using curlee::parser::BinaryExpr;
+using curlee::parser::BlockStmt;
 using curlee::parser::CallExpr;
 using curlee::parser::Expr;
 using curlee::parser::ExprStmt;
-using curlee::parser::BlockStmt;
 using curlee::parser::Function;
 using curlee::parser::GroupExpr;
 using curlee::parser::LetStmt;
@@ -95,7 +94,8 @@ class Resolver
             d.severity = Severity::Error;
             d.message = std::string(kind) + ": '" + std::string(name) + "'";
             d.span = span;
-            d.notes.push_back(Related{.message = "previous definition is here", .span = it->second.span});
+            d.notes.push_back(
+                Related{.message = "previous definition is here", .span = it->second.span});
             diagnostics_.push_back(std::move(d));
             return;
         }
@@ -156,7 +156,13 @@ class Resolver
         }
     }
 
-    void resolve_stmt_node(const ReturnStmt& s, Span) { resolve_expr(s.value); }
+    void resolve_stmt_node(const ReturnStmt& s, Span)
+    {
+        if (s.value.has_value())
+        {
+            resolve_expr(*s.value);
+        }
+    }
     void resolve_stmt_node(const ExprStmt& s, Span) { resolve_expr(s.expr); }
 
     void resolve_stmt_node(const BlockStmt& s, Span)
@@ -179,10 +185,7 @@ class Resolver
     void resolve_expr_node(const curlee::parser::IntExpr&, Span) {}
     void resolve_expr_node(const curlee::parser::StringExpr&, Span) {}
 
-    void resolve_expr_node(const curlee::parser::UnaryExpr& e, Span)
-    {
-        resolve_expr(*e.rhs);
-    }
+    void resolve_expr_node(const curlee::parser::UnaryExpr& e, Span) { resolve_expr(*e.rhs); }
 
     void resolve_expr_node(const BinaryExpr& e, Span)
     {

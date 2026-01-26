@@ -57,7 +57,7 @@ class Parser
   private:
     std::span<const Token> tokens_;
     std::size_t pos_ = 0;
-        std::vector<curlee::diag::Diagnostic> diagnostics_;
+    std::vector<curlee::diag::Diagnostic> diagnostics_;
 
     [[nodiscard]] bool is_at_end() const { return peek().kind == TokenKind::Eof; }
 
@@ -682,12 +682,16 @@ class Parser
         if (match(TokenKind::KwReturn))
         {
             const Token kw = previous();
-            auto expr_res = parse_expr();
-            if (std::holds_alternative<curlee::diag::Diagnostic>(expr_res))
+            std::optional<Expr> value;
+            if (!check(TokenKind::Semicolon))
             {
-                return std::get<curlee::diag::Diagnostic>(std::move(expr_res));
+                auto expr_res = parse_expr();
+                if (std::holds_alternative<curlee::diag::Diagnostic>(expr_res))
+                {
+                    return std::get<curlee::diag::Diagnostic>(std::move(expr_res));
+                }
+                value = std::get<Expr>(std::move(expr_res));
             }
-            Expr value = std::get<Expr>(std::move(expr_res));
 
             if (auto err = consume(TokenKind::Semicolon, "expected ';' after return statement");
                 err.has_value())
@@ -1148,8 +1152,14 @@ class Dumper
 
     void dump_stmt_node(const ReturnStmt& s)
     {
+        if (!s.value.has_value())
+        {
+            out_ << "return;";
+            return;
+        }
+
         out_ << "return ";
-        dump_expr(s.value);
+        dump_expr(*s.value);
         out_ << ";";
     }
 
@@ -1159,10 +1169,7 @@ class Dumper
         out_ << ";";
     }
 
-    void dump_stmt_node(const BlockStmt& s)
-    {
-        dump_block(*s.block);
-    }
+    void dump_stmt_node(const BlockStmt& s) { dump_block(*s.block); }
 
     void dump_expr(const Expr& e)
     {
