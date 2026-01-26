@@ -109,3 +109,10 @@ add_executable(curlee_resolver_tests
 target_include_directories(curlee_resolver_tests PRIVATE include)
 
 add_test(NAME curlee_resolver_tests COMMAND curlee_resolver_tests)
+
+add_executable(curlee_types_tests
+  tests/types_tests.cpp
+)
+target_include_directories(curlee_types_tests PRIVATE include)
+
+add_test(NAME curlee_types_tests COMMAND curlee_types_tests)
