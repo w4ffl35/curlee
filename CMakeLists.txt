@@ -23,6 +23,8 @@ endif()
 add_executable(curlee
   src/main.cpp
   src/cli/cli.cpp
+  src/diag/render.cpp
+  src/source/line_map.cpp
   src/source/source_file.cpp
 )
 
@@ -39,3 +41,23 @@ add_test(NAME curlee_missing_file COMMAND curlee lex ${CMAKE_SOURCE_DIR}/tests/f
 set_tests_properties(curlee_missing_file PROPERTIES WILL_FAIL TRUE)
 
 add_test(NAME curlee_lex_reads_file COMMAND curlee lex ${CMAKE_SOURCE_DIR}/tests/fixtures/hello.cur)
+
+add_executable(curlee_line_map_tests
+  tests/line_map_tests.cpp
+  src/source/line_map.cpp
+)
+target_include_directories(curlee_line_map_tests PRIVATE include)
+
+add_test(NAME curlee_line_map_tests COMMAND curlee_line_map_tests)
+
+add_executable(curlee_diagnostic_golden_tests
+  tests/diagnostic_golden_tests.cpp
+  src/diag/render.cpp
+  src/source/line_map.cpp
+)
+target_include_directories(curlee_diagnostic_golden_tests PRIVATE include)
+
+add_test(
+  NAME curlee_diagnostic_golden_tests
+  COMMAND curlee_diagnostic_golden_tests ${CMAKE_SOURCE_DIR}/tests/diagnostics
+)

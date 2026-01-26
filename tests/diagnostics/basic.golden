@@ -1,0 +1,4 @@
+basic.cur:1:11: error: test error
+  |
+  | let x = 1 + 2;
+  |           ^
