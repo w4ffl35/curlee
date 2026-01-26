@@ -229,6 +229,29 @@ target_include_directories(curlee_interop_tests PRIVATE include)
 
 add_test(NAME curlee_interop_tests COMMAND curlee_interop_tests)
 
+add_executable(curlee_e2e_tests
+  tests/e2e_tests.cpp
+  src/compiler/emitter.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+  src/resolver/resolver.cpp
+  src/source/line_map.cpp
+  src/source/source_file.cpp
+  src/types/type_check.cpp
+  src/verification/checker.cpp
+  src/verification/predicate_lowering.cpp
+  src/verification/solver.cpp
+  src/vm/vm.cpp
+)
+target_include_directories(curlee_e2e_tests PRIVATE include)
+target_link_libraries(curlee_e2e_tests PRIVATE Z3::Z3)
+
+add_test(
+  NAME curlee_e2e_tests
+  COMMAND curlee_e2e_tests ${CMAKE_SOURCE_DIR}/tests/run ${CMAKE_SOURCE_DIR}/tests/correct_samples
+)
+set_tests_properties(curlee_e2e_tests PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(curlee_compiler_tests
   tests/compiler_tests.cpp
   src/compiler/emitter.cpp

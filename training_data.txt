@@ -1,0 +1,2002 @@
+# Curlee correct_samples dataset
+# seed=1337
+# count=500
+fn main() -> Int {
+  return (599 + (793 + 844) + 315);
+}
+---
+fn main() -> Int {
+  return ((373 + 111) + 921 + 66 + (755 + 819) + 361);
+}
+---
+fn main() -> Int {
+  return (707 + 619 + 468 + 992 + 633 + 73 + 417);
+}
+---
+fn main() -> Int {
+  return 201;
+}
+---
+fn main() -> Int {
+  return 291;
+}
+---
+fn main() -> Int {
+  return 767;
+}
+---
+fn main() -> Int {
+  return (814 + 341 + 442) + 568;
+}
+---
+fn main() -> Int {
+  return 912;
+}
+---
+fn main() -> Int {
+  return 997;
+}
+---
+fn main() -> Int {
+  return 539;
+}
+---
+fn main() -> Int {
+  return (506 + 597 + 466) + (669 + 746 + 817 + 582);
+}
+---
+fn main() -> Int {
+  return 80 + 975 + 54;
+}
+---
+fn main() -> Int {
+  return ((953 + 43) + 159 + 57) + 360;
+}
+---
+fn main() -> Int {
+  return (218 + 495);
+}
+---
+fn main() -> Int {
+  return (226 + ((402 + 639) + (639 + 951)));
+}
+---
+fn main() -> Int {
+  return (30 + 447 + 965);
+}
+---
+fn main() -> Int {
+  return 939 + 450;
+}
+---
+fn main() -> Int {
+  return (638 + (242 + 394 + 710));
+}
+---
+fn main() -> Int {
+  return (930 + 398 + 965 + 654);
+}
+---
+fn main() -> Int {
+  return (503 + 547 + 283);
+}
+---
+fn main() -> Int {
+  return ((605 + 687 + (508 + 303)) + 664 + 750 + (752 + 739));
+}
+---
+fn main() -> Int {
+  return (((818 + 451) + 689 + 314) + (104 + 803) + 929 + 306);
+}
+---
+fn main() -> Int {
+  return 80;
+}
+---
+fn main() -> Int {
+  return 657;
+}
+---
+fn main() -> Int {
+  return ((936 + 440 + 232) + (762 + 198) + 665);
+}
+---
+fn main() -> Int {
+  return 959 + 250 + 60 + 865 + 667;
+}
+---
+fn main() -> Int {
+  return (940 + 871);
+}
+---
+fn main() -> Int {
+  return 680 + 774;
+}
+---
+fn main() -> Int {
+  return 810;
+}
+---
+fn main() -> Int {
+  return 780;
+}
+---
+fn main() -> Int {
+  return 446;
+}
+---
+fn main() -> Int {
+  return 177 + 990;
+}
+---
+fn main() -> Int {
+  return 75;
+}
+---
+fn main() -> Int {
+  return (563 + ((161 + 427) + (82 + 979)));
+}
+---
+fn main() -> Int {
+  return (106 + 730 + 52 + 333 + 369);
+}
+---
+fn main() -> Int {
+  return (551 + 972);
+}
+---
+fn main() -> Int {
+  return 39 + 659 + 629;
+}
+---
+fn main() -> Int {
+  return 329;
+}
+---
+fn main() -> Int {
+  return ((979 + 218) + 689 + 877 + 149);
+}
+---
+fn main() -> Int {
+  return (678 + (395 + 495)) + 844;
+}
+---
+fn main() -> Int {
+  return (((690 + 951) + 748) + 921);
+}
+---
+fn main() -> Int {
+  return 676 + 242;
+}
+---
+fn main() -> Int {
+  return 204;
+}
+---
+fn main() -> Int {
+  return (537 + 585 + (413 + 92)) + (965 + 718 + 58 + 741);
+}
+---
+fn main() -> Int {
+  return 896;
+}
+---
+fn main() -> Int {
+  return 44;
+}
+---
+fn main() -> Int {
+  return 328;
+}
+---
+fn main() -> Int {
+  return 91;
+}
+---
+fn main() -> Int {
+  return ((548 + 282) + 852) + 508;
+}
+---
+fn main() -> Int {
+  return 384 + (674 + 21) + (754 + 317) + 692 + 627;
+}
+---
+fn main() -> Int {
+  return (764 + 78);
+}
+---
+fn main() -> Int {
+  return 658;
+}
+---
+fn main() -> Int {
+  return (102 + 133 + 356) + 156;
+}
+---
+fn main() -> Int {
+  return (564 + 17 + 394 + ((31 + 104) + (792 + 156)));
+}
+---
+fn main() -> Int {
+  return 46 + 598 + 586 + 711 + (304 + (310 + 960));
+}
+---
+fn main() -> Int {
+  return 183 + 628;
+}
+---
+fn main() -> Int {
+  return 102;
+}
+---
+fn main() -> Int {
+  return 457 + 4 + (530 + 187);
+}
+---
+fn main() -> Int {
+  return 181;
+}
+---
+fn main() -> Int {
+  return 548;
+}
+---
+fn main() -> Int {
+  return (28 + ((537 + 488) + 784));
+}
+---
+fn main() -> Int {
+  return (448 + 696) + (472 + (566 + 593));
+}
+---
+fn main() -> Int {
+  return ((191 + 490 + (304 + 589)) + (553 + 476 + (426 + 445)));
+}
+---
+fn main() -> Int {
+  return (108 + ((958 + 251) + 642));
+}
+---
+fn main() -> Int {
+  return 508;
+}
+---
+fn main() -> Int {
+  return 644;
+}
+---
+fn main() -> Int {
+  return 943;
+}
+---
+fn main() -> Int {
+  return 706;
+}
+---
+fn main() -> Int {
+  return (517 + (421 + 697 + 892 + 870));
+}
+---
+fn main() -> Int {
+  return (575 + 500 + 534) + 512 + 550;
+}
+---
+fn main() -> Int {
+  return 553;
+}
+---
+fn main() -> Int {
+  return (((453 + 292) + 971) + (283 + 685));
+}
+---
+fn main() -> Int {
+  return (143 + 640);
+}
+---
+fn main() -> Int {
+  return 643;
+}
+---
+fn main() -> Int {
+  return 534;
+}
+---
+fn main() -> Int {
+  return 915 + 197 + 314 + ((705 + 388) + 537 + 263);
+}
+---
+fn main() -> Int {
+  return 507;
+}
+---
+fn main() -> Int {
+  return ((442 + 763) + (963 + 580)) + (625 + 321) + 560;
+}
+---
+fn main() -> Int {
+  return ((877 + 817) + 736 + 189) + 330;
+}
+---
+fn main() -> Int {
+  return 380;
+}
+---
+fn main() -> Int {
+  return (799 + (640 + (419 + 236)));
+}
+---
+fn main() -> Int {
+  return (306 + (678 + 414 + 647));
+}
+---
+fn main() -> Int {
+  return 327;
+}
+---
+fn main() -> Int {
+  return ((643 + 154) + 520 + 214) + ((569 + 382) + 251);
+}
+---
+fn main() -> Int {
+  return 890;
+}
+---
+fn main() -> Int {
+  return 502;
+}
+---
+fn main() -> Int {
+  return (119 + (587 + 859));
+}
+---
+fn main() -> Int {
+  return (((760 + 130) + (531 + 23)) + (391 + 354) + 933);
+}
+---
+fn main() -> Int {
+  return 352;
+}
+---
+fn main() -> Int {
+  return 463;
+}
+---
+fn main() -> Int {
+  return ((671 + 97) + 217) + (920 + 792 + (332 + 251));
+}
+---
+fn main() -> Int {
+  return 231;
+}
+---
+fn main() -> Int {
+  return 99 + 599 + ((523 + 916) + 565 + 180);
+}
+---
+fn main() -> Int {
+  return (755 + (445 + 251) + (419 + 713));
+}
+---
+fn main() -> Int {
+  return (330 + (988 + 420 + (133 + 161)));
+}
+---
+fn main() -> Int {
+  return (939 + (115 + 249 + (229 + 635)));
+}
+---
+fn main() -> Int {
+  return (880 + 38 + (730 + 455) + 785);
+}
+---
+fn main() -> Int {
+  return (169 + (571 + 466)) + 322 + 832;
+}
+---
+fn main() -> Int {
+  return (256 + 151) + (268 + 366 + 29);
+}
+---
+fn main() -> Int {
+  return (227 + 384);
+}
+---
+fn main() -> Int {
+  return (921 + 174 + 830) + ((276 + 320) + 679 + 905);
+}
+---
+fn main() -> Int {
+  return ((264 + 821 + 74 + 290) + (646 + 40) + 539);
+}
+---
+fn main() -> Int {
+  return ((642 + 268 + 265) + (801 + 855 + 938 + 503));
+}
+---
+fn main() -> Int {
+  return 477;
+}
+---
+fn main() -> Int {
+  return 545;
+}
+---
+fn main() -> Int {
+  return (((930 + 916) + 57) + 438);
+}
+---
+fn main() -> Int {
+  return 199 + 180 + 739 + 455;
+}
+---
+fn main() -> Int {
+  return 75;
+}
+---
+fn main() -> Int {
+  return (33 + 916);
+}
+---
+fn main() -> Int {
+  return (521 + 948) + 459 + ((619 + 871) + 244 + 882);
+}
+---
+fn main() -> Int {
+  return (217 + 348);
+}
+---
+fn main() -> Int {
+  return ((440 + 786) + (944 + 780) + 413);
+}
+---
+fn main() -> Int {
+  return (949 + 222 + 425 + 213);
+}
+---
+fn main() -> Int {
+  return 63;
+}
+---
+fn main() -> Int {
+  return (616 + 665 + 447 + 913);
+}
+---
+fn main() -> Int {
+  return (532 + (743 + 592)) + (621 + (813 + 383));
+}
+---
+fn main() -> Int {
+  return 691;
+}
+---
+fn main() -> Int {
+  return 287 + 724 + 140 + 142;
+}
+---
+fn main() -> Int {
+  return 874;
+}
+---
+fn main() -> Int {
+  return 828;
+}
+---
+fn main() -> Int {
+  return 587 + 175;
+}
+---
+fn main() -> Int {
+  return ((15 + 307 + 480) + (753 + 257));
+}
+---
+fn main() -> Int {
+  return 220;
+}
+---
+fn main() -> Int {
+  return 545 + 52;
+}
+---
+fn main() -> Int {
+  return (632 + 525 + (34 + 766 + 183));
+}
+---
+fn main() -> Int {
+  return 688;
+}
+---
+fn main() -> Int {
+  return 558 + (680 + 979) + 570 + 782;
+}
+---
+fn main() -> Int {
+  return (543 + 677 + 145) + 995;
+}
+---
+fn main() -> Int {
+  return (89 + 206);
+}
+---
+fn main() -> Int {
+  return 851;
+}
+---
+fn main() -> Int {
+  return 824 + 563 + 466 + ((179 + 414) + 70 + 42);
+}
+---
+fn main() -> Int {
+  return 128;
+}
+---
+fn main() -> Int {
+  return (508 + 350 + 644 + (141 + 843));
+}
+---
+fn main() -> Int {
+  return (234 + (163 + 431) + 202);
+}
+---
+fn main() -> Int {
+  return 949;
+}
+---
+fn main() -> Int {
+  return 732 + 190 + 863 + 283 + (620 + 428 + 110 + 27);
+}
+---
+fn main() -> Int {
+  return 768;
+}
+---
+fn main() -> Int {
+  return (310 + 328 + (31 + 75)) + (594 + 541);
+}
+---
+fn main() -> Int {
+  return 762;
+}
+---
+fn main() -> Int {
+  return 251;
+}
+---
+fn main() -> Int {
+  return 66;
+}
+---
+fn main() -> Int {
+  return 18;
+}
+---
+fn main() -> Int {
+  return ((11 + 353) + 845 + 679 + ((575 + 854) + (41 + 75)));
+}
+---
+fn main() -> Int {
+  return 190;
+}
+---
+fn main() -> Int {
+  return 515;
+}
+---
+fn main() -> Int {
+  return 170;
+}
+---
+fn main() -> Int {
+  return 551;
+}
+---
+fn main() -> Int {
+  return 986 + (472 + 879 + (298 + 592));
+}
+---
+fn main() -> Int {
+  return 334;
+}
+---
+fn main() -> Int {
+  return ((40 + 100 + 363) + 724 + 555 + 738);
+}
+---
+fn main() -> Int {
+  return (148 + (817 + 118) + 11);
+}
+---
+fn main() -> Int {
+  return (353 + 626) + (758 + 247) + 845 + 505 + (49 + 808);
+}
+---
+fn main() -> Int {
+  return (869 + 45 + 551 + 705 + (405 + 538));
+}
+---
+fn main() -> Int {
+  return ((498 + 389) + 293);
+}
+---
+fn main() -> Int {
+  return (308 + 284 + 13 + (243 + 954));
+}
+---
+fn main() -> Int {
+  return 906;
+}
+---
+fn main() -> Int {
+  return 26;
+}
+---
+fn main() -> Int {
+  return (315 + 13) + 445 + 488;
+}
+---
+fn main() -> Int {
+  return 520;
+}
+---
+fn main() -> Int {
+  return 330 + (93 + 169) + 99;
+}
+---
+fn main() -> Int {
+  return (568 + 365 + (823 + 265) + (987 + 977));
+}
+---
+fn main() -> Int {
+  return 700;
+}
+---
+fn main() -> Int {
+  return 446;
+}
+---
+fn main() -> Int {
+  return (398 + 205 + 896) + 690;
+}
+---
+fn main() -> Int {
+  return ((987 + 427 + 729 + 731) + 763 + 220 + 957);
+}
+---
+fn main() -> Int {
+  return 763;
+}
+---
+fn main() -> Int {
+  return (((990 + 193) + 122) + 119);
+}
+---
+fn main() -> Int {
+  return 730 + 352 + 982 + ((167 + 158) + 83);
+}
+---
+fn main() -> Int {
+  return 484;
+}
+---
+fn main() -> Int {
+  return 112;
+}
+---
+fn main() -> Int {
+  return ((45 + 246) + (936 + 143) + 237);
+}
+---
+fn main() -> Int {
+  return 261 + 808 + 489 + 150;
+}
+---
+fn main() -> Int {
+  return (346 + 822 + 496) + 776 + 470 + 474;
+}
+---
+fn main() -> Int {
+  return (670 + 691) + 358 + 728;
+}
+---
+fn main() -> Int {
+  return 187;
+}
+---
+fn main() -> Int {
+  return 614;
+}
+---
+fn main() -> Int {
+  return (494 + 784);
+}
+---
+fn main() -> Int {
+  return 963 + 446 + 797 + 130 + (995 + 127 + 413);
+}
+---
+fn main() -> Int {
+  return (823 + (25 + 529 + 516 + 713));
+}
+---
+fn main() -> Int {
+  return 457;
+}
+---
+fn main() -> Int {
+  return 410;
+}
+---
+fn main() -> Int {
+  return 189 + 171 + 343 + 660;
+}
+---
+fn main() -> Int {
+  return 429;
+}
+---
+fn main() -> Int {
+  return (926 + 887 + 472 + 144);
+}
+---
+fn main() -> Int {
+  return 688;
+}
+---
+fn main() -> Int {
+  return 783;
+}
+---
+fn main() -> Int {
+  return 627 + 832;
+}
+---
+fn main() -> Int {
+  return 49;
+}
+---
+fn main() -> Int {
+  return 552;
+}
+---
+fn main() -> Int {
+  return 845;
+}
+---
+fn main() -> Int {
+  return 519 + 842 + 263 + 113;
+}
+---
+fn main() -> Int {
+  return 271;
+}
+---
+fn main() -> Int {
+  return (142 + 430 + 438 + (145 + 2));
+}
+---
+fn main() -> Int {
+  return 476;
+}
+---
+fn main() -> Int {
+  return 576 + 487 + 932 + 583;
+}
+---
+fn main() -> Int {
+  return 530;
+}
+---
+fn main() -> Int {
+  return (972 + (721 + 395 + 104));
+}
+---
+fn main() -> Int {
+  return (675 + 763) + (395 + 530) + (693 + 762);
+}
+---
+fn main() -> Int {
+  return 369;
+}
+---
+fn main() -> Int {
+  return ((599 + 402 + 521) + ((505 + 890) + 135 + 66));
+}
+---
+fn main() -> Int {
+  return (640 + ((963 + 304) + 87));
+}
+---
+fn main() -> Int {
+  return ((165 + 56) + 773 + 707) + 712;
+}
+---
+fn main() -> Int {
+  return 931;
+}
+---
+fn main() -> Int {
+  return ((197 + 908 + 449) + 223);
+}
+---
+fn main() -> Int {
+  return 529;
+}
+---
+fn main() -> Int {
+  return 576;
+}
+---
+fn main() -> Int {
+  return (666 + 825);
+}
+---
+fn main() -> Int {
+  return ((609 + 575 + 950) + ((600 + 621) + 982));
+}
+---
+fn main() -> Int {
+  return (641 + 868);
+}
+---
+fn main() -> Int {
+  return 644;
+}
+---
+fn main() -> Int {
+  return 466 + 540 + 117;
+}
+---
+fn main() -> Int {
+  return 835;
+}
+---
+fn main() -> Int {
+  return 222;
+}
+---
+fn main() -> Int {
+  return 318 + 531 + 329 + 875 + 524;
+}
+---
+fn main() -> Int {
+  return 72;
+}
+---
+fn main() -> Int {
+  return 440;
+}
+---
+fn main() -> Int {
+  return (425 + 428 + 700 + (780 + 542));
+}
+---
+fn main() -> Int {
+  return 321;
+}
+---
+fn main() -> Int {
+  return ((376 + 714 + 257) + (282 + 903) + 610 + 384);
+}
+---
+fn main() -> Int {
+  return 121;
+}
+---
+fn main() -> Int {
+  return (((571 + 271) + 336) + (10 + (142 + 869)));
+}
+---
+fn main() -> Int {
+  return ((645 + 308) + 445 + 213);
+}
+---
+fn main() -> Int {
+  return 941;
+}
+---
+fn main() -> Int {
+  return 383 + 22;
+}
+---
+fn main() -> Int {
+  return (33 + 639 + (330 + 661) + 947);
+}
+---
+fn main() -> Int {
+  return 734;
+}
+---
+fn main() -> Int {
+  return 834 + 89 + 890 + 604 + 773;
+}
+---
+fn main() -> Int {
+  return 604;
+}
+---
+fn main() -> Int {
+  return ((606 + 444) + 521);
+}
+---
+fn main() -> Int {
+  return (14 + ((264 + 560) + 506 + 714));
+}
+---
+fn main() -> Int {
+  return 0;
+}
+---
+fn main() -> Int {
+  return (615 + 912 + 753);
+}
+---
+fn main() -> Int {
+  return (32 + 497 + 189 + (308 + 911));
+}
+---
+fn main() -> Int {
+  return 512 + 297;
+}
+---
+fn main() -> Int {
+  return 505 + 371;
+}
+---
+fn main() -> Int {
+  return 79;
+}
+---
+fn main() -> Int {
+  return ((84 + 451) + 850);
+}
+---
+fn main() -> Int {
+  return (438 + 14 + 499) + 957 + 999 + 682 + 919;
+}
+---
+fn main() -> Int {
+  return 640;
+}
+---
+fn main() -> Int {
+  return (240 + 948 + 889) + (955 + 301 + 959);
+}
+---
+fn main() -> Int {
+  return (991 + 684 + 443 + 671 + (165 + 206 + 696));
+}
+---
+fn main() -> Int {
+  return 442;
+}
+---
+fn main() -> Int {
+  return ((551 + 710) + 43 + 561) + (395 + 301 + 689);
+}
+---
+fn main() -> Int {
+  return 893 + (12 + 255) + (144 + 388) + (356 + 867);
+}
+---
+fn main() -> Int {
+  return 57;
+}
+---
+fn main() -> Int {
+  return (111 + 797) + (775 + 727) + 191;
+}
+---
+fn main() -> Int {
+  return 753;
+}
+---
+fn main() -> Int {
+  return 678;
+}
+---
+fn main() -> Int {
+  return 664;
+}
+---
+fn main() -> Int {
+  return (686 + 874);
+}
+---
+fn main() -> Int {
+  return (583 + (401 + 87) + 656 + 689 + (77 + 903));
+}
+---
+fn main() -> Int {
+  return 630;
+}
+---
+fn main() -> Int {
+  return 205;
+}
+---
+fn main() -> Int {
+  return (49 + 460 + (900 + 787));
+}
+---
+fn main() -> Int {
+  return 96 + 768;
+}
+---
+fn main() -> Int {
+  return 125;
+}
+---
+fn main() -> Int {
+  return (((316 + 613) + 256 + 910) + 531 + 625 + 309);
+}
+---
+fn main() -> Int {
+  return 861 + 836;
+}
+---
+fn main() -> Int {
+  return ((184 + (865 + 612)) + 987);
+}
+---
+fn main() -> Int {
+  return 88;
+}
+---
+fn main() -> Int {
+  return ((276 + (305 + 316)) + 659);
+}
+---
+fn main() -> Int {
+  return ((183 + 205) + (659 + 26) + (730 + 966 + (706 + 748)));
+}
+---
+fn main() -> Int {
+  return (242 + ((786 + 479) + 481 + 586));
+}
+---
+fn main() -> Int {
+  return 783 + 424;
+}
+---
+fn main() -> Int {
+  return ((436 + 167 + 168) + 130);
+}
+---
+fn main() -> Int {
+  return 172 + 227 + 420 + 197;
+}
+---
+fn main() -> Int {
+  return 160;
+}
+---
+fn main() -> Int {
+  return (538 + (670 + 790 + 724));
+}
+---
+fn main() -> Int {
+  return 152 + (603 + 529) + 442;
+}
+---
+fn main() -> Int {
+  return 101 + (549 + 782);
+}
+---
+fn main() -> Int {
+  return 295;
+}
+---
+fn main() -> Int {
+  return ((650 + 153 + (312 + 789)) + ((277 + 552) + (822 + 847)));
+}
+---
+fn main() -> Int {
+  return (977 + 976);
+}
+---
+fn main() -> Int {
+  return ((464 + 805 + 867) + 992 + 2 + 499 + 845);
+}
+---
+fn main() -> Int {
+  return 979 + 375 + 609 + (532 + 246 + 494);
+}
+---
+fn main() -> Int {
+  return 690 + (525 + 716 + 33 + 762);
+}
+---
+fn main() -> Int {
+  return 482;
+}
+---
+fn main() -> Int {
+  return ((969 + 793) + 648) + (5 + 649);
+}
+---
+fn main() -> Int {
+  return 357;
+}
+---
+fn main() -> Int {
+  return 403;
+}
+---
+fn main() -> Int {
+  return 927;
+}
+---
+fn main() -> Int {
+  return 790;
+}
+---
+fn main() -> Int {
+  return 451;
+}
+---
+fn main() -> Int {
+  return 713;
+}
+---
+fn main() -> Int {
+  return 65;
+}
+---
+fn main() -> Int {
+  return (703 + 226);
+}
+---
+fn main() -> Int {
+  return (411 + 464 + 916);
+}
+---
+fn main() -> Int {
+  return 13;
+}
+---
+fn main() -> Int {
+  return 243;
+}
+---
+fn main() -> Int {
+  return (646 + 620 + 572 + 984 + 397 + 948 + (587 + 673));
+}
+---
+fn main() -> Int {
+  return 367;
+}
+---
+fn main() -> Int {
+  return 468;
+}
+---
+fn main() -> Int {
+  return 988;
+}
+---
+fn main() -> Int {
+  return 745;
+}
+---
+fn main() -> Int {
+  return 48;
+}
+---
+fn main() -> Int {
+  return (515 + 779 + 791 + 721);
+}
+---
+fn main() -> Int {
+  return (((453 + 375) + 935) + 46 + 858);
+}
+---
+fn main() -> Int {
+  return 315 + 255 + 603 + 781;
+}
+---
+fn main() -> Int {
+  return 324;
+}
+---
+fn main() -> Int {
+  return (318 + (103 + 817)) + (63 + 70 + (763 + 325));
+}
+---
+fn main() -> Int {
+  return ((171 + (598 + 413)) + ((163 + 132) + 355));
+}
+---
+fn main() -> Int {
+  return 406;
+}
+---
+fn main() -> Int {
+  return 51 + 3 + 776;
+}
+---
+fn main() -> Int {
+  return (231 + (256 + 448));
+}
+---
+fn main() -> Int {
+  return (5 + 986) + 10 + ((929 + 156) + 948);
+}
+---
+fn main() -> Int {
+  return 69 + 189 + 566 + 319;
+}
+---
+fn main() -> Int {
+  return 475;
+}
+---
+fn main() -> Int {
+  return 450;
+}
+---
+fn main() -> Int {
+  return 979;
+}
+---
+fn main() -> Int {
+  return 264;
+}
+---
+fn main() -> Int {
+  return ((967 + 118) + 542 + 108 + ((76 + 641) + (815 + 38)));
+}
+---
+fn main() -> Int {
+  return 365 + 128 + 44;
+}
+---
+fn main() -> Int {
+  return ((198 + 65) + (918 + 435)) + (19 + 101 + 80 + 806);
+}
+---
+fn main() -> Int {
+  return ((723 + 549) + 201 + 477);
+}
+---
+fn main() -> Int {
+  return 236;
+}
+---
+fn main() -> Int {
+  return (135 + 943 + 679 + 102 + 829);
+}
+---
+fn main() -> Int {
+  return (855 + (809 + 149) + 990);
+}
+---
+fn main() -> Int {
+  return 817 + 251;
+}
+---
+fn main() -> Int {
+  return (702 + 188 + 809);
+}
+---
+fn main() -> Int {
+  return ((885 + 982) + 20 + 424);
+}
+---
+fn main() -> Int {
+  return 946 + 551 + 656 + (277 + 787);
+}
+---
+fn main() -> Int {
+  return 588;
+}
+---
+fn main() -> Int {
+  return (957 + 545) + (633 + 253);
+}
+---
+fn main() -> Int {
+  return (495 + (56 + 282 + 339));
+}
+---
+fn main() -> Int {
+  return (386 + 206 + 628) + (464 + 187 + 954);
+}
+---
+fn main() -> Int {
+  return 141;
+}
+---
+fn main() -> Int {
+  return 402;
+}
+---
+fn main() -> Int {
+  return 731 + 773;
+}
+---
+fn main() -> Int {
+  return 974;
+}
+---
+fn main() -> Int {
+  return (489 + 760) + (364 + 880 + (766 + 6));
+}
+---
+fn main() -> Int {
+  return 977 + 306 + 544 + 929 + 131;
+}
+---
+fn main() -> Int {
+  return (878 + (790 + 180 + 172));
+}
+---
+fn main() -> Int {
+  return (418 + 993 + 287 + 540) + (241 + 878 + 974);
+}
+---
+fn main() -> Int {
+  return (475 + 36 + ((868 + 69) + 774 + 565));
+}
+---
+fn main() -> Int {
+  return ((249 + 499) + 130 + 156 + 689 + 581);
+}
+---
+fn main() -> Int {
+  return 631;
+}
+---
+fn main() -> Int {
+  return 205;
+}
+---
+fn main() -> Int {
+  return 756 + 150;
+}
+---
+fn main() -> Int {
+  return 846;
+}
+---
+fn main() -> Int {
+  return ((362 + 825) + (569 + 391) + (756 + 722 + 794));
+}
+---
+fn main() -> Int {
+  return 412;
+}
+---
+fn main() -> Int {
+  return 245 + 121 + 681;
+}
+---
+fn main() -> Int {
+  return ((623 + 372) + (331 + 548) + 645 + (943 + 282));
+}
+---
+fn main() -> Int {
+  return (441 + 433 + 484 + 991 + 41);
+}
+---
+fn main() -> Int {
+  return 183 + (493 + 180) + 540;
+}
+---
+fn main() -> Int {
+  return 874;
+}
+---
+fn main() -> Int {
+  return (((655 + 390) + 813 + 134) + ((306 + 492) + 263));
+}
+---
+fn main() -> Int {
+  return 928 + 20;
+}
+---
+fn main() -> Int {
+  return (980 + (786 + 956) + 50 + 32 + 236 + 382);
+}
+---
+fn main() -> Int {
+  return (660 + 53);
+}
+---
+fn main() -> Int {
+  return ((133 + 173) + (953 + 743)) + (105 + (454 + 817));
+}
+---
+fn main() -> Int {
+  return (584 + 907 + 183 + 477 + 797);
+}
+---
+fn main() -> Int {
+  return 393;
+}
+---
+fn main() -> Int {
+  return ((809 + 167) + 464 + 757);
+}
+---
+fn main() -> Int {
+  return 399;
+}
+---
+fn main() -> Int {
+  return 517;
+}
+---
+fn main() -> Int {
+  return 384;
+}
+---
+fn main() -> Int {
+  return 616;
+}
+---
+fn main() -> Int {
+  return (736 + 112);
+}
+---
+fn main() -> Int {
+  return 246 + 81;
+}
+---
+fn main() -> Int {
+  return (52 + (8 + 691) + 178 + 927);
+}
+---
+fn main() -> Int {
+  return 447;
+}
+---
+fn main() -> Int {
+  return (468 + 655 + (359 + 798));
+}
+---
+fn main() -> Int {
+  return (114 + 804 + (136 + 724));
+}
+---
+fn main() -> Int {
+  return (532 + 177) + 135 + 705 + 222 + 324 + 815;
+}
+---
+fn main() -> Int {
+  return ((930 + 253) + 6 + 622) + 607 + 581;
+}
+---
+fn main() -> Int {
+  return 849 + 267 + 91 + 615;
+}
+---
+fn main() -> Int {
+  return (((562 + 60) + 959) + 452);
+}
+---
+fn main() -> Int {
+  return (888 + 576) + (312 + 758) + 936 + 973 + (473 + 951);
+}
+---
+fn main() -> Int {
+  return (849 + 613 + 226 + 374);
+}
+---
+fn main() -> Int {
+  return 591;
+}
+---
+fn main() -> Int {
+  return (344 + 468);
+}
+---
+fn main() -> Int {
+  return 714;
+}
+---
+fn main() -> Int {
+  return 705 + 41 + (921 + 98) + 705;
+}
+---
+fn main() -> Int {
+  return 507;
+}
+---
+fn main() -> Int {
+  return (380 + 632);
+}
+---
+fn main() -> Int {
+  return (317 + 674);
+}
+---
+fn main() -> Int {
+  return (219 + 797 + 182) + 203;
+}
+---
+fn main() -> Int {
+  return 891;
+}
+---
+fn main() -> Int {
+  return (397 + ((71 + 43) + (936 + 518)));
+}
+---
+fn main() -> Int {
+  return 562;
+}
+---
+fn main() -> Int {
+  return 974;
+}
+---
+fn main() -> Int {
+  return 72;
+}
+---
+fn main() -> Int {
+  return (847 + 197 + 680 + (310 + 241));
+}
+---
+fn main() -> Int {
+  return (835 + 912) + 154;
+}
+---
+fn main() -> Int {
+  return (788 + (127 + 552) + 317);
+}
+---
+fn main() -> Int {
+  return (341 + 915 + 678 + 399);
+}
+---
+fn main() -> Int {
+  return ((158 + 203 + 722 + 848) + 89 + 361 + 507 + 189);
+}
+---
+fn main() -> Int {
+  return 700;
+}
+---
+fn main() -> Int {
+  return 56;
+}
+---
+fn main() -> Int {
+  return (258 + 518 + 672 + 623);
+}
+---
+fn main() -> Int {
+  return 788;
+}
+---
+fn main() -> Int {
+  return (614 + 459) + 478 + 362;
+}
+---
+fn main() -> Int {
+  return (954 + 397);
+}
+---
+fn main() -> Int {
+  return (201 + 494) + (643 + 375) + 87;
+}
+---
+fn main() -> Int {
+  return (873 + 97 + (792 + 281) + (932 + 862 + 995));
+}
+---
+fn main() -> Int {
+  return (352 + 794);
+}
+---
+fn main() -> Int {
+  return 54 + 137;
+}
+---
+fn main() -> Int {
+  return 886;
+}
+---
+fn main() -> Int {
+  return 938 + (702 + 944) + 429 + (86 + 498);
+}
+---
+fn main() -> Int {
+  return 92;
+}
+---
+fn main() -> Int {
+  return (253 + 49);
+}
+---
+fn main() -> Int {
+  return 442;
+}
+---
+fn main() -> Int {
+  return 496;
+}
+---
+fn main() -> Int {
+  return 990;
+}
+---
+fn main() -> Int {
+  return 599;
+}
+---
+fn main() -> Int {
+  return (502 + 262) + 934;
+}
+---
+fn main() -> Int {
+  return ((389 + 455 + 217) + 775);
+}
+---
+fn main() -> Int {
+  return 407;
+}
+---
+fn main() -> Int {
+  return 410;
+}
+---
+fn main() -> Int {
+  return 596 + 590;
+}
+---
+fn main() -> Int {
+  return 94 + 39 + ((597 + 358) + 88);
+}
+---
+fn main() -> Int {
+  return 764;
+}
+---
+fn main() -> Int {
+  return (569 + 893 + (464 + 896)) + 663 + 221;
+}
+---
+fn main() -> Int {
+  return (625 + 231 + 992 + 430);
+}
+---
+fn main() -> Int {
+  return 292;
+}
+---
+fn main() -> Int {
+  return 771 + 288 + 163 + 619 + (526 + 124 + 156);
+}
+---
+fn main() -> Int {
+  return (892 + 868 + (750 + 837)) + 515;
+}
+---
+fn main() -> Int {
+  return (157 + ((738 + 853) + (502 + 843)));
+}
+---
+fn main() -> Int {
+  return 236;
+}
+---
+fn main() -> Int {
+  return 667;
+}
+---
+fn main() -> Int {
+  return 974;
+}
+---
+fn main() -> Int {
+  return 351 + 11;
+}
+---
+fn main() -> Int {
+  return 277;
+}
+---
+fn main() -> Int {
+  return 105;
+}
+---
+fn main() -> Int {
+  return (875 + ((99 + 6) + 826));
+}
+---
+fn main() -> Int {
+  return (193 + (982 + 543) + (450 + 584));
+}
+---
+fn main() -> Int {
+  return 837;
+}
+---
+fn main() -> Int {
+  return 241;
+}
+---
+fn main() -> Int {
+  return 197;
+}
+---
+fn main() -> Int {
+  return 366;
+}
+---
+fn main() -> Int {
+  return 446 + 371 + 37 + 808;
+}
+---
+fn main() -> Int {
+  return 618;
+}
+---
+fn main() -> Int {
+  return 377;
+}
+---
+fn main() -> Int {
+  return (624 + 492 + (460 + 707)) + 771;
+}
+---
+fn main() -> Int {
+  return ((119 + 486) + 600 + 224 + 278);
+}
+---
+fn main() -> Int {
+  return 222;
+}
+---
+fn main() -> Int {
+  return ((463 + 775) + 598) + ((964 + 186) + 411 + 750);
+}
+---
+fn main() -> Int {
+  return 169 + (495 + 783 + (347 + 309));
+}
+---
+fn main() -> Int {
+  return 322 + ((510 + 172) + 777 + 83);
+}
+---
+fn main() -> Int {
+  return 441 + 322 + (315 + 553);
+}
+---
+fn main() -> Int {
+  return (240 + 491 + 758 + (669 + (250 + 649)));
+}
+---
+fn main() -> Int {
+  return 424;
+}
+---
+fn main() -> Int {
+  return 65;
+}
+---
+fn main() -> Int {
+  return (593 + 727);
+}
+---
+fn main() -> Int {
+  return (((78 + 554) + 281 + 386) + 820);
+}
+---
+fn main() -> Int {
+  return (779 + 275 + 824 + 640 + (647 + 299));
+}
+---
+fn main() -> Int {
+  return 393;
+}
+---
+fn main() -> Int {
+  return 746;
+}
+---
+fn main() -> Int {
+  return 487;
+}
+---
+fn main() -> Int {
+  return 511;
+}
+---
+fn main() -> Int {
+  return (((49 + 852) + 77 + 908) + 128);
+}
+---
+fn main() -> Int {
+  return 555 + 171 + 442;
+}
+---
+fn main() -> Int {
+  return 704;
+}
+---
+fn main() -> Int {
+  return (635 + (1 + 979));
+}
+---
+fn main() -> Int {
+  return ((510 + 629) + 899) + 1000 + 176 + 335;
+}
+---
+fn main() -> Int {
+  return (798 + 235);
+}
+---
+fn main() -> Int {
+  return (111 + (141 + 817 + 303));
+}
+---
+fn main() -> Int {
+  return ((369 + 67) + 322);
+}
+---
+fn main() -> Int {
+  return ((194 + 959) + 358 + 339) + 522;
+}
+---
+fn main() -> Int {
+  return 521;
+}
+---
+fn main() -> Int {
+  return ((153 + 792) + 484 + 287 + 820);
+}
+---
+fn main() -> Int {
+  return (600 + 363 + 214);
+}
+---
+fn main() -> Int {
+  return 391;
+}
+---
+fn main() -> Int {
+  return 212 + 21 + (150 + 169 + 38);
+}
+---
+fn main() -> Int {
+  return 697;
+}
+---
+fn main() -> Int {
+  return (499 + 871);
+}
+---
+fn main() -> Int {
+  return 267;
+}
+---
+fn main() -> Int {
+  return 713;
+}
+---
+fn main() -> Int {
+  return (625 + 595);
+}
+---
+fn main() -> Int {
+  return 439;
+}
+---
+fn main() -> Int {
+  return 129;
+}
+---
+fn main() -> Int {
+  return 969;
+}
+---
+fn main() -> Int {
+  return 653 + 942;
+}
+---
+fn main() -> Int {
+  return (358 + 540);
+}
+---
+fn main() -> Int {
+  return 269 + 619 + 656 + 256 + (590 + 349);
+}
+---
+fn main() -> Int {
+  return 42;
+}
+---
+fn main() -> Int {
+  return 448;
+}
+---
+fn main() -> Int {
+  return (585 + 716 + 654 + 385 + 974);
+}
+---
+fn main() -> Int {
+  return 585 + 873 + 560 + 275 + 416 + 340;
+}
+---
+fn main() -> Int {
+  return 947 + 49;
+}
+---
+fn main() -> Int {
+  return (412 + (108 + 861) + 558);
+}
+---
+fn main() -> Int {
+  return 996;
+}
+---
+fn main() -> Int {
+  return 331;
+}
+---
+fn main() -> Int {
+  return 924;
+}
+---
+fn main() -> Int {
+  return (640 + 844 + 432);
+}
+---
+fn main() -> Int {
+  return (299 + 144 + 182 + 66 + 43);
+}
+---
+fn main() -> Int {
+  return 7 + (655 + (404 + 193));
+}
+---
+fn main() -> Int {
+  return 212 + 767 + 650 + 959;
+}
+---
+fn main() -> Int {
+  return 943;
+}
+---
+fn main() -> Int {
+  return 193 + (173 + 645 + 450);
+}
+---
+fn main() -> Int {
+  return ((924 + 453) + (96 + 209) + 460);
+}
+---
+fn main() -> Int {
+  return ((772 + 272) + 995 + 659) + ((9 + 877) + 375 + 510);
+}
+---
+fn main() -> Int {
+  return ((622 + 256 + 803) + 225 + (841 + 19));
+}
+---
+fn main() -> Int {
+  return (37 + ((682 + 428) + 711));
+}
+---
+fn main() -> Int {
+  return 508;
+}
+---
+fn main() -> Int {
+  return 162;
+}
+---
+fn main() -> Int {
+  return 224;
+}
+---
+fn main() -> Int {
+  return 85 + 413 + 101 + (455 + (695 + 636));
+}
+---
+fn main() -> Int {
+  return (822 + 655 + (724 + 16));
+}

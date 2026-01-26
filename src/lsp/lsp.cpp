@@ -1,3 +1,7 @@
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
 #include <curlee/diag/diagnostic.h>
 #include <curlee/lexer/lexer.h>
 #include <curlee/parser/ast.h>
@@ -7,11 +11,6 @@
 #include <curlee/source/source_file.h>
 #include <curlee/types/type.h>
 #include <curlee/types/type_check.h>
-
-#include <algorithm>
-#include <cctype>
-#include <cstdio>
-#include <cstdlib>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -543,9 +542,9 @@ LspRange to_lsp_range(const curlee::source::Span& span, const curlee::source::Li
 std::string lsp_range_to_json(const LspRange& range)
 {
     std::ostringstream oss;
-    oss << "{\"start\":{\"line\":" << range.start.line << ",\"character\":"
-        << range.start.character << "},\"end\":{\"line\":" << range.end.line
-        << ",\"character\":" << range.end.character << "}}";
+    oss << "{\"start\":{\"line\":" << range.start.line << ",\"character\":" << range.start.character
+        << "},\"end\":{\"line\":" << range.end.line << ",\"character\":" << range.end.character
+        << "}}";
     return oss.str();
 }
 
@@ -631,9 +630,8 @@ std::optional<Analysis> analyze(const curlee::source::SourceFile& file)
     }
 
     const auto& type_info = std::get<curlee::types::TypeInfo>(typed);
-    return Analysis{.program = std::move(program),
-                    .resolution = resolution,
-                    .type_info = type_info};
+    return Analysis{
+        .program = std::move(program), .resolution = resolution, .type_info = type_info};
 }
 
 bool span_contains(const curlee::source::Span& span, std::size_t offset)
@@ -641,9 +639,8 @@ bool span_contains(const curlee::source::Span& span, std::size_t offset)
     return offset >= span.start && offset < span.end;
 }
 
-const curlee::parser::Expr* find_expr_at(const curlee::parser::Expr& expr,
-                                        std::size_t offset,
-                                        const curlee::parser::Expr* best)
+const curlee::parser::Expr* find_expr_at(const curlee::parser::Expr& expr, std::size_t offset,
+                                         const curlee::parser::Expr* best)
 {
     if (span_contains(expr.span, offset))
     {
@@ -693,8 +690,7 @@ const curlee::parser::Expr* find_expr_at(const curlee::parser::Expr& expr,
     return best;
 }
 
-void find_exprs_in_stmt(const curlee::parser::Stmt& stmt,
-                        std::size_t offset,
+void find_exprs_in_stmt(const curlee::parser::Stmt& stmt, std::size_t offset,
                         const curlee::parser::Expr*& best)
 {
     if (const auto* let_stmt = std::get_if<curlee::parser::LetStmt>(&stmt.node))
@@ -754,7 +750,7 @@ void find_exprs_in_stmt(const curlee::parser::Stmt& stmt,
 }
 
 std::string diagnostics_to_json(const std::vector<curlee::diag::Diagnostic>& diags,
-                               const curlee::source::LineMap& map)
+                                const curlee::source::LineMap& map)
 {
     std::string out = "[";
     for (std::size_t i = 0; i < diags.size(); ++i)
@@ -940,8 +936,9 @@ int main()
             }
             const auto& doc = doc_it->second;
             curlee::source::LineMap map(doc.text);
-            const auto offset_opt = offset_from_position(map, LspPosition{static_cast<std::size_t>(*line),
-                                                                         static_cast<std::size_t>(*character)});
+            const auto offset_opt =
+                offset_from_position(map, LspPosition{static_cast<std::size_t>(*line),
+                                                      static_cast<std::size_t>(*character)});
             if (!offset_opt.has_value())
             {
                 continue;
@@ -982,12 +979,18 @@ int main()
                 if (target_span)
                 {
                     const auto range = to_lsp_range(*target_span, map);
-                    response["result"] = Json{Json::Object{{"uri", Json{*uri}},
-                                                          {"range", Json{Json::Object{
-                                                                        {"start", Json{Json::Object{{"line", Json{static_cast<double>(range.start.line)}},
-                                                                                                    {"character", Json{static_cast<double>(range.start.character)}}}}},
-                                                                        {"end", Json{Json::Object{{"line", Json{static_cast<double>(range.end.line)}},
-                                                                                                  {"character", Json{static_cast<double>(range.end.character)}}}}}}}}}};
+                    response["result"] = Json{Json::Object{
+                        {"uri", Json{*uri}},
+                        {"range",
+                         Json{Json::Object{
+                             {"start", Json{Json::Object{
+                                           {"line", Json{static_cast<double>(range.start.line)}},
+                                           {"character",
+                                            Json{static_cast<double>(range.start.character)}}}}},
+                             {"end",
+                              Json{Json::Object{{"line", Json{static_cast<double>(range.end.line)}},
+                                                {"character", Json{static_cast<double>(
+                                                                  range.end.character)}}}}}}}}}};
                 }
                 else
                 {
