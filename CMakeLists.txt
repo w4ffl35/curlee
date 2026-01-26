@@ -97,3 +97,13 @@ add_executable(curlee_parser_tests
 target_include_directories(curlee_parser_tests PRIVATE include)
 
 add_test(NAME curlee_parser_tests COMMAND curlee_parser_tests)
+
+add_executable(curlee_resolver_tests
+  tests/resolver_tests.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+  src/resolver/resolver.cpp
+)
+target_include_directories(curlee_resolver_tests PRIVATE include)
+
+add_test(NAME curlee_resolver_tests COMMAND curlee_resolver_tests)
