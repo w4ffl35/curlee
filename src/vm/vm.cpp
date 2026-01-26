@@ -30,6 +30,7 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel)
 {
     stack_.clear();
     std::vector<Value> locals(chunk.max_locals, Value::unit_v());
+    std::vector<std::size_t> call_stack;
 
     std::size_t ip = 0;
     while (ip < chunk.code.size())
@@ -167,6 +168,106 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel)
                                 .error_span = span};
             }
             return VmResult{.ok = true, .value = *result, .error = {}, .error_span = std::nullopt};
+        }
+        case OpCode::Jump:
+        {
+            if (ip + 1 >= chunk.code.size())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "truncated jump target",
+                                .error_span = span};
+            }
+            const std::uint16_t lo = chunk.code[ip++];
+            const std::uint16_t hi = chunk.code[ip++];
+            const std::uint16_t target = static_cast<std::uint16_t>(lo | (hi << 8));
+            if (static_cast<std::size_t>(target) >= chunk.code.size())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "jump target out of range",
+                                .error_span = span};
+            }
+            ip = static_cast<std::size_t>(target);
+            break;
+        }
+        case OpCode::JumpIfFalse:
+        {
+            if (ip + 1 >= chunk.code.size())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "truncated jump target",
+                                .error_span = span};
+            }
+            const std::uint16_t lo = chunk.code[ip++];
+            const std::uint16_t hi = chunk.code[ip++];
+            const std::uint16_t target = static_cast<std::uint16_t>(lo | (hi << 8));
+
+            auto cond = pop();
+            if (!cond.has_value())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "stack underflow",
+                                .error_span = span};
+            }
+            if (cond->kind != ValueKind::Bool)
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "jump-if-false expects Bool",
+                                .error_span = span};
+            }
+            if (!cond->bool_value)
+            {
+                if (static_cast<std::size_t>(target) >= chunk.code.size())
+                {
+                    return VmResult{.ok = false,
+                                    .value = Value::unit_v(),
+                                    .error = "jump target out of range",
+                                    .error_span = span};
+                }
+                ip = static_cast<std::size_t>(target);
+            }
+            break;
+        }
+        case OpCode::Call:
+        {
+            if (ip + 1 >= chunk.code.size())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "truncated call target",
+                                .error_span = span};
+            }
+            const std::uint16_t lo = chunk.code[ip++];
+            const std::uint16_t hi = chunk.code[ip++];
+            const std::uint16_t target = static_cast<std::uint16_t>(lo | (hi << 8));
+            if (static_cast<std::size_t>(target) >= chunk.code.size())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "call target out of range",
+                                .error_span = span};
+            }
+
+            call_stack.push_back(ip);
+            ip = static_cast<std::size_t>(target);
+            break;
+        }
+        case OpCode::Ret:
+        {
+            if (call_stack.empty())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "return with empty call stack",
+                                .error_span = span};
+            }
+            ip = call_stack.back();
+            call_stack.pop_back();
+            break;
         }
         }
     }

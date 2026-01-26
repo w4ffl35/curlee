@@ -17,6 +17,10 @@ enum class OpCode : std::uint8_t
     Add,
     Pop,
     Return,
+    Jump,
+    JumpIfFalse,
+    Call,
+    Ret,
 };
 
 struct Chunk
