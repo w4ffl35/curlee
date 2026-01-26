@@ -10,7 +10,7 @@ LoadResult load_source_file(const std::string& path)
     std::ifstream in(path, std::ios::in | std::ios::binary);
     if (!in)
     {
-        return LoadError{.message = "failed to open file: " + path};
+        return LoadError{.message = "failed to open file"};
     }
 
     std::ostringstream buffer;
@@ -18,7 +18,7 @@ LoadResult load_source_file(const std::string& path)
 
     if (!in.good() && !in.eof())
     {
-        return LoadError{.message = "failed while reading file: " + path};
+        return LoadError{.message = "failed while reading file"};
     }
 
     return SourceFile{.path = path, .contents = buffer.str()};

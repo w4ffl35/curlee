@@ -1,7 +1,9 @@
 #include <cstdlib>
 #include <curlee/cli/cli.h>
+#include <curlee/diag/render.h>
 #include <curlee/source/source_file.h>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -36,7 +38,15 @@ int cmd_read_only(std::string_view cmd, const std::string& path)
     auto loaded = source::load_source_file(path);
     if (auto* err = std::get_if<source::LoadError>(&loaded))
     {
-        std::cerr << "error: " << err->message << "\n";
+        const source::SourceFile pseudo_file{.path = path, .contents = ""};
+        const diag::Diagnostic diag{
+            .severity = diag::Severity::Error,
+            .message = err->message,
+            .span = std::nullopt,
+            .notes = {},
+        };
+
+        std::cerr << diag::render(diag, pseudo_file);
         return kExitError;
     }
 

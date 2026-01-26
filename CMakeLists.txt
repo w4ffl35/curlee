@@ -61,3 +61,18 @@ add_test(
   NAME curlee_diagnostic_golden_tests
   COMMAND curlee_diagnostic_golden_tests ${CMAKE_SOURCE_DIR}/tests/diagnostics
 )
+
+add_executable(curlee_cli_diagnostics_golden_tests
+  tests/cli_diagnostics_golden_tests.cpp
+  src/cli/cli.cpp
+  src/diag/render.cpp
+  src/source/line_map.cpp
+  src/source/source_file.cpp
+)
+target_include_directories(curlee_cli_diagnostics_golden_tests PRIVATE include)
+
+add_test(
+  NAME curlee_cli_diagnostics_golden_tests
+  COMMAND curlee_cli_diagnostics_golden_tests ${CMAKE_SOURCE_DIR}/tests/cli_diagnostics
+)
+set_tests_properties(curlee_cli_diagnostics_golden_tests PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
