@@ -27,6 +27,11 @@ struct PredInt
     std::string_view lexeme;
 };
 
+struct PredBool
+{
+    bool value = false;
+};
+
 struct PredName
 {
     std::string_view name;
@@ -53,7 +58,7 @@ struct PredGroup
 struct Pred
 {
     curlee::source::Span span;
-    std::variant<PredInt, PredName, PredUnary, PredBinary, PredGroup> node;
+    std::variant<PredInt, PredBool, PredName, PredUnary, PredBinary, PredGroup> node;
 };
 
 struct Expr;
@@ -61,6 +66,11 @@ struct Expr;
 struct IntExpr
 {
     std::string_view lexeme;
+};
+
+struct BoolExpr
+{
+    bool value = false;
 };
 
 struct StringExpr
@@ -101,7 +111,9 @@ struct Expr
 {
     std::size_t id = 0;
     curlee::source::Span span;
-    std::variant<IntExpr, StringExpr, NameExpr, UnaryExpr, BinaryExpr, CallExpr, GroupExpr> node;
+    std::variant<IntExpr, BoolExpr, StringExpr, NameExpr, UnaryExpr, BinaryExpr, CallExpr,
+                 GroupExpr>
+        node;
 };
 
 struct LetStmt

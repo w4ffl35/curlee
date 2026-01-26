@@ -277,6 +277,14 @@ class Lexer
         {
             return TokenKind::KwReturn;
         }
+        if (lexeme == "true")
+        {
+            return TokenKind::KwTrue;
+        }
+        if (lexeme == "false")
+        {
+            return TokenKind::KwFalse;
+        }
         if (lexeme == "requires")
         {
             return TokenKind::KwRequires;

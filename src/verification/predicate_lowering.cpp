@@ -40,6 +40,10 @@ TypedResult lower_node(const curlee::parser::Pred& pred, const LoweringContext& 
                 const std::string literal(node.lexeme);
                 return TypedExpr{ctx.ctx.int_val(literal.c_str()), PredType::Int, true};
             }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PredBool>)
+            {
+                return TypedExpr{ctx.ctx.bool_val(node.value), PredType::Bool, true};
+            }
             else if constexpr (std::is_same_v<Node, curlee::parser::PredName>)
             {
                 if (node.name == "result")

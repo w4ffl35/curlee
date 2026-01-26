@@ -130,6 +130,39 @@ int main()
         }
     }
 
+    {
+        const std::string source = "fn main() -> Bool { let b: Bool = true; return b; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for bool literal type test");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for bool literal type test");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto typed = curlee::types::type_check(program);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(typed))
+        {
+            fail("expected type checking to succeed for bool literal type test");
+        }
+
+        const auto& info = std::get<curlee::types::TypeInfo>(typed);
+        const auto& main_fn = program.functions.at(0);
+        const auto& let_stmt = std::get<curlee::parser::LetStmt>(main_fn.body.stmts.at(0).node);
+        const auto let_it = info.expr_types.find(let_stmt.value.id);
+        if (let_it == info.expr_types.end() || let_it->second.kind != TypeKind::Bool)
+        {
+            fail("expected Bool type info for bool literal initializer");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

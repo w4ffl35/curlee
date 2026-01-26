@@ -272,6 +272,7 @@ class Resolver
     void resolve_expr_node(const NameExpr& e, Span span) { use_name(e.name, span); }
 
     void resolve_expr_node(const curlee::parser::IntExpr&, Span) {}
+    void resolve_expr_node(const curlee::parser::BoolExpr&, Span) {}
     void resolve_expr_node(const curlee::parser::StringExpr&, Span) {}
 
     void resolve_expr_node(const curlee::parser::UnaryExpr& e, Span) { resolve_expr(*e.rhs); }
@@ -301,6 +302,7 @@ class Resolver
     void resolve_pred_node(const curlee::parser::PredName& p, Span span) { use_name(p.name, span); }
 
     void resolve_pred_node(const curlee::parser::PredInt&, Span) {}
+    void resolve_pred_node(const curlee::parser::PredBool&, Span) {}
 
     void resolve_pred_node(const curlee::parser::PredGroup& p, Span) { resolve_pred(*p.inner); }
 

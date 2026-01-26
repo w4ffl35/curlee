@@ -97,6 +97,28 @@ int main()
     }
 
     {
+        const std::string src = "let b = true; let c = false;";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for boolean literals");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::KwLet, "let");
+        expect_token(toks, 1, TokenKind::Identifier, "b");
+        expect_token(toks, 2, TokenKind::Equal, "=");
+        expect_token(toks, 3, TokenKind::KwTrue, "true");
+        expect_token(toks, 4, TokenKind::Semicolon, ";");
+        expect_token(toks, 5, TokenKind::KwLet, "let");
+        expect_token(toks, 6, TokenKind::Identifier, "c");
+        expect_token(toks, 7, TokenKind::Equal, "=");
+        expect_token(toks, 8, TokenKind::KwFalse, "false");
+        expect_token(toks, 9, TokenKind::Semicolon, ";");
+        expect_token(toks, 10, TokenKind::Eof, "");
+    }
+
+    {
         const std::string src = "import foo.bar;";
         const auto res = lex(src);
         if (!std::holds_alternative<std::vector<Token>>(res))

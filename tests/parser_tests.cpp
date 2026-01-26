@@ -234,6 +234,37 @@ int main()
     }
 
     {
+        const std::string src = R"(fn main() -> Bool {
+  let b: Bool = true;
+  return b;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on bool literal program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on bool literal program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("true") == std::string::npos)
+        {
+            fail("dump missing bool literal");
+        }
+        if (dumped.find("let b: Bool") == std::string::npos)
+        {
+            fail("dump missing Bool-typed let binding");
+        }
+    }
+
+    {
         const std::string src = R"(import foo.bar;
 
 fn main() -> Unit {

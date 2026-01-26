@@ -22,6 +22,9 @@ enum class TokenKind
     KwWhile,
     KwReturn,
 
+    KwTrue,
+    KwFalse,
+
     KwRequires,
     KwEnsures,
     KwWhere,
@@ -95,6 +98,11 @@ struct Token
         return "kw_while";
     case TokenKind::KwReturn:
         return "kw_return";
+
+    case TokenKind::KwTrue:
+        return "kw_true";
+    case TokenKind::KwFalse:
+        return "kw_false";
 
     case TokenKind::KwRequires:
         return "kw_requires";

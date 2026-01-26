@@ -13,38 +13,76 @@ static void fail(const std::string& msg)
 
 int main()
 {
-    const std::string source = "fn main() -> Int { let x: Int = 1; return x + 2; }";
-
-    const auto lexed = curlee::lexer::lex(source);
-    if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
     {
-        fail("expected lexing to succeed in compiler test");
+        const std::string source = "fn main() -> Int { let x: Int = 1; return x + 2; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed in compiler test");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed in compiler test");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected bytecode emission to succeed");
+        }
+
+        const auto& chunk = std::get<curlee::vm::Chunk>(emitted);
+        curlee::vm::VM vm;
+        const auto res = vm.run(chunk);
+        if (!res.ok)
+        {
+            fail("expected VM to run compiled chunk");
+        }
+        if (!(res.value == curlee::vm::Value::int_v(3)))
+        {
+            fail("expected compiled result to equal 3");
+        }
     }
 
-    const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
-    const auto parsed = curlee::parser::parse(tokens);
-    if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
     {
-        fail("expected parsing to succeed in compiler test");
-    }
+        const std::string source = "fn main() -> Bool { return true; }";
 
-    const auto& program = std::get<curlee::parser::Program>(parsed);
-    const auto emitted = curlee::compiler::emit_bytecode(program);
-    if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
-    {
-        fail("expected bytecode emission to succeed");
-    }
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed in bool compiler test");
+        }
 
-    const auto& chunk = std::get<curlee::vm::Chunk>(emitted);
-    curlee::vm::VM vm;
-    const auto res = vm.run(chunk);
-    if (!res.ok)
-    {
-        fail("expected VM to run compiled chunk");
-    }
-    if (!(res.value == curlee::vm::Value::int_v(3)))
-    {
-        fail("expected compiled result to equal 3");
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed in bool compiler test");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected bytecode emission to succeed for bool literal");
+        }
+
+        const auto& chunk = std::get<curlee::vm::Chunk>(emitted);
+        curlee::vm::VM vm;
+        const auto res = vm.run(chunk);
+        if (!res.ok)
+        {
+            fail("expected VM to run compiled bool chunk");
+        }
+        if (!(res.value == curlee::vm::Value::bool_v(true)))
+        {
+            fail("expected compiled result to equal true");
+        }
     }
 
     std::cout << "OK\n";

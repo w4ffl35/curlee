@@ -12,6 +12,7 @@ using curlee::diag::Diagnostic;
 using curlee::diag::Severity;
 using curlee::parser::BinaryExpr;
 using curlee::parser::BlockStmt;
+using curlee::parser::BoolExpr;
 using curlee::parser::CallExpr;
 using curlee::parser::Expr;
 using curlee::parser::ExprStmt;
@@ -147,6 +148,11 @@ class Emitter
         const std::string literal(expr.lexeme);
         const long long value = std::stoll(literal);
         chunk_.emit_constant(Value::int_v(value), span);
+    }
+
+    void emit_expr_node(const BoolExpr& expr, Span span)
+    {
+        chunk_.emit_constant(Value::bool_v(expr.value), span);
     }
 
     void emit_expr_node(const curlee::parser::StringExpr&, Span span)

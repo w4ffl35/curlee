@@ -561,6 +561,15 @@ class Parser
             return pred;
         }
 
+        if (match(TokenKind::KwTrue) || match(TokenKind::KwFalse))
+        {
+            const Token lit = previous();
+            Pred pred;
+            pred.span = lit.span;
+            pred.node = PredBool{.value = (lit.kind == TokenKind::KwTrue)};
+            return pred;
+        }
+
         if (match(TokenKind::Identifier))
         {
             const Token name = previous();
@@ -1247,6 +1256,15 @@ class Parser
             return expr;
         }
 
+        if (match(TokenKind::KwTrue) || match(TokenKind::KwFalse))
+        {
+            const Token lit = previous();
+            Expr expr;
+            expr.span = lit.span;
+            expr.node = BoolExpr{.value = (lit.kind == TokenKind::KwTrue)};
+            return expr;
+        }
+
         if (match(TokenKind::StringLiteral))
         {
             const Token lit = previous();
@@ -1452,6 +1470,7 @@ class Dumper
     }
 
     void dump_expr_node(const IntExpr& e) { out_ << e.lexeme; }
+    void dump_expr_node(const BoolExpr& e) { out_ << (e.value ? "true" : "false"); }
     void dump_expr_node(const StringExpr& e) { out_ << e.lexeme; }
     void dump_expr_node(const NameExpr& e) { out_ << e.name; }
 
@@ -1498,6 +1517,7 @@ class Dumper
     }
 
     void dump_pred_node(const PredInt& p) { out_ << p.lexeme; }
+    void dump_pred_node(const PredBool& p) { out_ << (p.value ? "true" : "false"); }
     void dump_pred_node(const PredName& p) { out_ << p.name; }
 
     void dump_pred_node(const PredGroup& p)

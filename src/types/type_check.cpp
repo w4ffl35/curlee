@@ -292,6 +292,11 @@ class Checker
         return Type{.kind = TypeKind::Int};
     }
 
+    [[nodiscard]] std::optional<Type> check_expr_node(const curlee::parser::BoolExpr&, Span)
+    {
+        return Type{.kind = TypeKind::Bool};
+    }
+
     [[nodiscard]] std::optional<Type> check_expr_node(const curlee::parser::StringExpr&, Span)
     {
         return Type{.kind = TypeKind::String};
