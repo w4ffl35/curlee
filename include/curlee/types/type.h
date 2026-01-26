@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string_view>
+#include <vector>
 
 namespace curlee::types
 {
@@ -20,6 +21,17 @@ struct Type
 };
 
 [[nodiscard]] constexpr bool operator==(Type a, Type b) { return a.kind == b.kind; }
+
+struct FunctionType
+{
+    std::vector<Type> params;
+    Type result;
+};
+
+[[nodiscard]] inline bool operator==(const FunctionType& a, const FunctionType& b)
+{
+    return a.params == b.params && a.result == b.result;
+}
 
 [[nodiscard]] constexpr std::string_view to_string(TypeKind kind)
 {

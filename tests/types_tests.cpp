@@ -33,6 +33,32 @@ int main()
         fail("expected unknown type name to map to nullopt");
     }
 
+    {
+        const FunctionType ft{
+            .params = {Type{.kind = TypeKind::Int}, Type{.kind = TypeKind::Bool}},
+            .result = Type{.kind = TypeKind::Unit},
+        };
+
+        const FunctionType same{
+            .params = {Type{.kind = TypeKind::Int}, Type{.kind = TypeKind::Bool}},
+            .result = Type{.kind = TypeKind::Unit},
+        };
+
+        const FunctionType different{
+            .params = {Type{.kind = TypeKind::Int}},
+            .result = Type{.kind = TypeKind::Unit},
+        };
+
+        if (!(ft == same))
+        {
+            fail("expected function type equality to hold");
+        }
+        if (ft == different)
+        {
+            fail("expected different function types to compare unequal");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }
