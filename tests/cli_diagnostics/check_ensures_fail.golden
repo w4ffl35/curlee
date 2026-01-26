@@ -1,0 +1,8 @@
+tests/fixtures/check_ensures_fail.curlee:2:13: error: ensures clause not satisfied
+  |
+  |   [ ensures result == 0; ]
+  |             ^^^^^^^^^^^
+note: goal: (result == 0)
+note: model:
+result = 1
+note: hint: add or strengthen preconditions/refinements to satisfy this contract
