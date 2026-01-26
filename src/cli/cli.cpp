@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <curlee/cli/cli.h>
 #include <curlee/diag/render.h>
+#include <curlee/lexer/lexer.h>
 #include <curlee/source/source_file.h>
 #include <iostream>
 #include <optional>
@@ -54,8 +55,15 @@ int cmd_read_only(std::string_view cmd, const std::string& path)
 
     if (cmd == "lex")
     {
-        std::cout << "curlee lex: read " << file.contents.size() << " bytes from " << file.path
-                  << "\n";
+        const auto res = lexer::lex(file.contents);
+        if (std::holds_alternative<diag::Diagnostic>(res))
+        {
+            std::cerr << diag::render(std::get<diag::Diagnostic>(res), file);
+            return kExitError;
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(res);
+        std::cout << "curlee lex: " << toks.size() << " tokens\n";
         return kExitOk;
     }
 

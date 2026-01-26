@@ -24,6 +24,7 @@ add_executable(curlee
   src/main.cpp
   src/cli/cli.cpp
   src/diag/render.cpp
+  src/lexer/lexer.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
 )
@@ -40,7 +41,7 @@ set_tests_properties(curlee_no_args PROPERTIES WILL_FAIL TRUE)
 add_test(NAME curlee_missing_file COMMAND curlee lex ${CMAKE_SOURCE_DIR}/tests/fixtures/does_not_exist.cur)
 set_tests_properties(curlee_missing_file PROPERTIES WILL_FAIL TRUE)
 
-add_test(NAME curlee_lex_reads_file COMMAND curlee lex ${CMAKE_SOURCE_DIR}/tests/fixtures/hello.cur)
+add_test(NAME curlee_lex_reads_file COMMAND curlee lex ${CMAKE_SOURCE_DIR}/tests/fixtures/lexable.cur)
 
 add_executable(curlee_line_map_tests
   tests/line_map_tests.cpp
@@ -66,6 +67,7 @@ add_executable(curlee_cli_diagnostics_golden_tests
   tests/cli_diagnostics_golden_tests.cpp
   src/cli/cli.cpp
   src/diag/render.cpp
+  src/lexer/lexer.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
 )
@@ -76,3 +78,11 @@ add_test(
   COMMAND curlee_cli_diagnostics_golden_tests ${CMAKE_SOURCE_DIR}/tests/cli_diagnostics
 )
 set_tests_properties(curlee_cli_diagnostics_golden_tests PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(curlee_lexer_tests
+  tests/lexer_tests.cpp
+  src/lexer/lexer.cpp
+)
+target_include_directories(curlee_lexer_tests PRIVATE include)
+
+add_test(NAME curlee_lexer_tests COMMAND curlee_lexer_tests)
