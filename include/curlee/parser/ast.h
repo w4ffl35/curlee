@@ -161,8 +161,15 @@ struct Function
     std::optional<TypeName> return_type;
 };
 
+struct ImportDecl
+{
+    curlee::source::Span span;
+    std::vector<std::string_view> path;
+};
+
 struct Program
 {
+    std::vector<ImportDecl> imports;
     std::vector<Function> functions;
 };
 

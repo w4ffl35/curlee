@@ -191,6 +191,9 @@ class Lexer
             case ':':
                 tokens.push_back(make_token(TokenKind::Colon, start, pos_));
                 break;
+            case '.':
+                tokens.push_back(make_token(TokenKind::Dot, start, pos_));
+                break;
             case '+':
                 tokens.push_back(make_token(TokenKind::Plus, start, pos_));
                 break;

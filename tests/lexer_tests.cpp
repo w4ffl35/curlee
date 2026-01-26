@@ -78,6 +78,23 @@ int main()
     }
 
     {
+        const std::string src = "import foo.bar;";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for import path");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::KwImport, "import");
+        expect_token(toks, 1, TokenKind::Identifier, "foo");
+        expect_token(toks, 2, TokenKind::Dot, ".");
+        expect_token(toks, 3, TokenKind::Identifier, "bar");
+        expect_token(toks, 4, TokenKind::Semicolon, ";");
+        expect_token(toks, 5, TokenKind::Eof, "");
+    }
+
+    {
         const std::string src = "/* unterminated";
         const auto res = lex(src);
         if (!std::holds_alternative<curlee::diag::Diagnostic>(res))

@@ -40,6 +40,7 @@ enum class TokenKind
     Semicolon,
     Comma,
     Colon,
+    Dot,
 
     Arrow,      // ->
     Equal,      // =
@@ -125,6 +126,8 @@ struct Token
         return "comma";
     case TokenKind::Colon:
         return "colon";
+    case TokenKind::Dot:
+        return "dot";
 
     case TokenKind::Arrow:
         return "arrow";

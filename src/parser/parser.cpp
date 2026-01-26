@@ -30,21 +30,34 @@ class Parser
         Program program;
         while (!is_at_end())
         {
-            if (!check(TokenKind::KwFn))
+            if (check(TokenKind::KwImport))
             {
-                diagnostics_.push_back(error_at(peek(), "expected 'fn'"));
-                advance();
+                auto imp = parse_import();
+                if (std::holds_alternative<curlee::diag::Diagnostic>(imp))
+                {
+                    diagnostics_.push_back(std::get<curlee::diag::Diagnostic>(std::move(imp)));
+                    synchronize_top_level();
+                    continue;
+                }
+                program.imports.push_back(std::get<ImportDecl>(std::move(imp)));
                 continue;
             }
 
-            auto fun = parse_function();
-            if (std::holds_alternative<curlee::diag::Diagnostic>(fun))
+            if (check(TokenKind::KwFn))
             {
-                diagnostics_.push_back(std::get<curlee::diag::Diagnostic>(std::move(fun)));
-                synchronize_top_level();
+                auto fun = parse_function();
+                if (std::holds_alternative<curlee::diag::Diagnostic>(fun))
+                {
+                    diagnostics_.push_back(std::get<curlee::diag::Diagnostic>(std::move(fun)));
+                    synchronize_top_level();
+                    continue;
+                }
+                program.functions.push_back(std::get<Function>(std::move(fun)));
                 continue;
             }
-            program.functions.push_back(std::get<Function>(std::move(fun)));
+
+            diagnostics_.push_back(error_at(peek(), "expected 'import' or 'fn'"));
+            advance();
         }
 
         if (!diagnostics_.empty())
@@ -118,8 +131,8 @@ class Parser
 
     void synchronize_top_level()
     {
-        // Skip tokens until we reach the start of the next function or EOF.
-        while (!is_at_end() && !check(TokenKind::KwFn))
+        // Skip tokens until we reach the start of the next top-level item or EOF.
+        while (!is_at_end() && !check(TokenKind::KwFn) && !check(TokenKind::KwImport))
         {
             advance();
         }
@@ -154,6 +167,43 @@ class Parser
         }
         const Token t = advance();
         return TypeName{.span = t.span, .name = t.lexeme};
+    }
+
+    [[nodiscard]] std::variant<ImportDecl, curlee::diag::Diagnostic> parse_import()
+    {
+        if (auto err = consume(TokenKind::KwImport, "expected 'import'"); err.has_value())
+        {
+            return *err;
+        }
+        const Token kw = previous();
+
+        if (!check(TokenKind::Identifier))
+        {
+            return error_at(peek(), "expected module name after 'import'");
+        }
+
+        std::vector<std::string_view> path;
+        const Token first = advance();
+        path.push_back(first.lexeme);
+
+        while (match(TokenKind::Dot))
+        {
+            if (!check(TokenKind::Identifier))
+            {
+                return error_at(peek(), "expected identifier after '.' in import path");
+            }
+            const Token seg = advance();
+            path.push_back(seg.lexeme);
+        }
+
+        if (auto err = consume(TokenKind::Semicolon, "expected ';' after import declaration");
+            err.has_value())
+        {
+            return *err;
+        }
+        const Token semi = previous();
+
+        return ImportDecl{.span = span_cover(kw.span, semi.span), .path = std::move(path)};
     }
 
     [[nodiscard]] std::variant<Function::Param, curlee::diag::Diagnostic> parse_param()
@@ -1064,6 +1114,25 @@ class Dumper
 
     void dump_program(const Program& p)
     {
+        for (const auto& imp : p.imports)
+        {
+            out_ << "import ";
+            for (std::size_t i = 0; i < imp.path.size(); ++i)
+            {
+                out_ << imp.path[i];
+                if (i + 1 < imp.path.size())
+                {
+                    out_ << ".";
+                }
+            }
+            out_ << ";\n";
+        }
+
+        if (!p.imports.empty() && !p.functions.empty())
+        {
+            out_ << "\n";
+        }
+
         for (std::size_t i = 0; i < p.functions.size(); ++i)
         {
             dump_function(p.functions[i]);

@@ -39,6 +39,15 @@ class Resolver
   public:
     [[nodiscard]] ResolveResult run(const curlee::parser::Program& program)
     {
+        for (const auto& imp : program.imports)
+        {
+            Diagnostic d;
+            d.severity = Severity::Error;
+            d.message = "imports are not implemented yet";
+            d.span = imp.span;
+            diagnostics_.push_back(std::move(d));
+        }
+
         // First pass: declare top-level functions.
         push_scope();
         for (const auto& f : program.functions)

@@ -123,6 +123,36 @@ fn main() -> Unit {
         }
     }
 
+    {
+        const std::string src = R"(import foo.bar;
+
+fn main() -> Unit {
+  return 0;
+})";
+
+        const auto program = parse_ok(src);
+        const auto res = resolver::resolve(program);
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
+        {
+            fail("expected resolver error when imports are present");
+        }
+
+        const auto& ds = std::get<std::vector<diag::Diagnostic>>(res);
+        bool found = false;
+        for (const auto& d : ds)
+        {
+            if (d.message.find("imports are not implemented") != std::string::npos)
+            {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+        {
+            fail("expected import-not-implemented diagnostic");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

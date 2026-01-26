@@ -182,6 +182,34 @@ int main()
     }
 
     {
+        const std::string src = R"(import foo.bar;
+
+fn main() -> Unit {
+  return 0;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on import program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on import program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("import foo.bar;") == std::string::npos)
+        {
+            fail("dump missing import declaration");
+        }
+    }
+
+    {
         const std::string src =
             "fn main() { let x = 1 }"; // missing semicolon + missing closing brace
         const auto lexed = lexer::lex(src);
