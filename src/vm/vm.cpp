@@ -1,6 +1,17 @@
 #include <curlee/vm/vm.h>
 #include <limits>
 
+namespace
+{
+
+const curlee::vm::VM::Capabilities& empty_caps()
+{
+    static const curlee::vm::VM::Capabilities caps;
+    return caps;
+}
+
+} // namespace
+
 namespace curlee::vm
 {
 
@@ -23,10 +34,20 @@ std::optional<Value> VM::pop()
 
 VmResult VM::run(const Chunk& chunk)
 {
-    return run(chunk, std::numeric_limits<std::size_t>::max());
+    return run(chunk, std::numeric_limits<std::size_t>::max(), empty_caps());
 }
 
 VmResult VM::run(const Chunk& chunk, std::size_t fuel)
+{
+    return run(chunk, fuel, empty_caps());
+}
+
+VmResult VM::run(const Chunk& chunk, const Capabilities& capabilities)
+{
+    return run(chunk, std::numeric_limits<std::size_t>::max(), capabilities);
+}
+
+VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capabilities)
 {
     stack_.clear();
     std::vector<Value> locals(chunk.max_locals, Value::unit_v());
@@ -267,6 +288,27 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel)
             }
             ip = call_stack.back();
             call_stack.pop_back();
+            break;
+        }
+        case OpCode::Print:
+        {
+            if (!capabilities.contains("io:stdout"))
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "missing capability io:stdout",
+                                .error_span = span};
+            }
+            auto value = pop();
+            if (!value.has_value())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "stack underflow",
+                                .error_span = span};
+            }
+            // MVP: stub effect. No ambient IO; host can later wire an output sink.
+            push(Value::unit_v());
             break;
         }
         }

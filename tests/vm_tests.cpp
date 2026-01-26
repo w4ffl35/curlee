@@ -133,6 +133,39 @@ int main()
         }
     }
 
+    // Capability-gated builtin (stdout print).
+    {
+        Chunk chunk;
+        const curlee::source::Span span{.start = 1, .end = 2};
+        chunk.emit_constant(Value::int_v(42), span);
+        chunk.emit(OpCode::Print, span);
+        chunk.emit_constant(Value::int_v(1), span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+
+        // Denied by default (no capabilities).
+        const auto denied = vm.run(chunk);
+        if (denied.ok || denied.error != "missing capability io:stdout")
+        {
+            fail("expected print to be denied without io:stdout capability");
+        }
+        if (!denied.error_span.has_value() || denied.error_span->start != span.start ||
+            denied.error_span->end != span.end)
+        {
+            fail("expected denied print to map span to print opcode");
+        }
+
+        // Allowed when capability present.
+        VM::Capabilities caps;
+        caps.insert("io:stdout");
+        const auto allowed = vm.run(chunk, caps);
+        if (!allowed.ok || !(allowed.value == Value::int_v(1)))
+        {
+            fail("expected print to succeed with io:stdout capability");
+        }
+    }
+
     {
         Chunk chunk;
         chunk.emit_constant(Value::int_v(1));

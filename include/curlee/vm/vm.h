@@ -5,6 +5,7 @@
 #include <curlee/vm/bytecode.h>
 #include <optional>
 #include <string>
+#include <unordered_set>
 
 namespace curlee::vm
 {
@@ -20,8 +21,14 @@ struct VmResult
 class VM
 {
   public:
+    using Capabilities = std::unordered_set<std::string>;
+
     [[nodiscard]] VmResult run(const Chunk& chunk);
     [[nodiscard]] VmResult run(const Chunk& chunk, std::size_t fuel);
+
+    [[nodiscard]] VmResult run(const Chunk& chunk, const Capabilities& capabilities);
+    [[nodiscard]] VmResult run(const Chunk& chunk, std::size_t fuel,
+                               const Capabilities& capabilities);
 
   private:
     std::vector<Value> stack_;
