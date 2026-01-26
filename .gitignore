@@ -8,3 +8,4 @@ build/
 !/docs/LSP.md
 !/docs/LSP_UX.md
 !/docs/QUALITY.md
+!/docs/TENSOR_IR.md

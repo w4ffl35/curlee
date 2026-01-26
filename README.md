@@ -115,6 +115,7 @@ The step-by-step execution checklist lives in [TODO.md](TODO.md).
 - [docs/LSP.md](docs/LSP.md) — minimal language server (diagnostics/hover/definition)
 - [docs/LSP_UX.md](docs/LSP_UX.md) — planned LSP UX for contracts and models
 - [docs/QUALITY.md](docs/QUALITY.md) — datasets, end-to-end tests, and versioning
+- [docs/TENSOR_IR.md](docs/TENSOR_IR.md) — future tensor-first IR milestone
 - [docs/LINEAR_TYPES.md](docs/LINEAR_TYPES.md) — future linear/ownership types
 - [docs/GEMINI_COVERAGE_CHECKLIST.md](docs/GEMINI_COVERAGE_CHECKLIST.md) — mapping from the original Gemini planning conversation
 
