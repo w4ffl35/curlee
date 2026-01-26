@@ -2,6 +2,7 @@
 #include <curlee/cli/cli.h>
 #include <curlee/diag/render.h>
 #include <curlee/lexer/lexer.h>
+#include <curlee/parser/parser.h>
 #include <curlee/source/source_file.h>
 #include <iostream>
 #include <optional>
@@ -69,8 +70,23 @@ int cmd_read_only(std::string_view cmd, const std::string& path)
 
     if (cmd == "parse")
     {
-        std::cout << "curlee parse: read " << file.contents.size() << " bytes from " << file.path
-                  << " (parser not implemented yet)\n";
+        const auto lexed = lexer::lex(file.contents);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+        {
+            std::cerr << diag::render(std::get<diag::Diagnostic>(lexed), file);
+            return kExitError;
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (std::holds_alternative<diag::Diagnostic>(parsed))
+        {
+            std::cerr << diag::render(std::get<diag::Diagnostic>(parsed), file);
+            return kExitError;
+        }
+
+        const auto& program = std::get<parser::Program>(parsed);
+        std::cout << parser::dump(program) << "\n";
         return kExitOk;
     }
 
