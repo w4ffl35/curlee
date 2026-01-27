@@ -1,5 +1,7 @@
 # Curlee
 
+![status: alpha](https://img.shields.io/badge/status-alpha-lightgrey)
+
 Curlee is an experimental **verification-first programming language** and C++23 compiler/runtime.
 
 Curlee is a safety harness for AI-generated (and human-written) code: it refuses to run a program unless it can prove your declared contracts within a small, decidable verification scope.
