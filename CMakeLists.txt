@@ -262,6 +262,19 @@ target_include_directories(curlee_interop_tests PRIVATE include)
 
 add_test(NAME curlee_interop_tests COMMAND curlee_interop_tests)
 
+add_executable(curlee_python_runner
+  src/interop/python_runner_main.cpp
+)
+
+add_executable(curlee_python_runner_tests
+  tests/python_runner_tests.cpp
+)
+
+add_test(
+  NAME curlee_python_runner_tests
+  COMMAND curlee_python_runner_tests $<TARGET_FILE:curlee_python_runner>
+)
+
 add_executable(curlee_e2e_tests
   tests/e2e_tests.cpp
   src/compiler/emitter.cpp
