@@ -6,6 +6,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <variant>
 
@@ -41,6 +43,15 @@ static curlee::resolver::ResolveResult resolve_with_source(const std::string& sr
     const auto program = parse_ok(src);
     const curlee::source::SourceFile file{.path = path, .contents = src};
     return curlee::resolver::resolve(program, file);
+}
+
+static curlee::resolver::ResolveResult
+resolve_with_source(const std::string& src, const std::string& path,
+                    std::optional<std::filesystem::path> entry_dir)
+{
+    const auto program = parse_ok(src);
+    const curlee::source::SourceFile file{.path = path, .contents = src};
+    return curlee::resolver::resolve(program, file, std::move(entry_dir));
 }
 
 static void write_file(const std::filesystem::path& path, const std::string& contents)
@@ -178,6 +189,41 @@ fn main() -> Unit {
     }
 
     {
+        // Cross-root resolution: module lives under a subdirectory, but it imports a sibling
+        // module that exists only in the entry directory.
+        // Entry dir: <base>
+        // Importing file dir: <base>/sub
+        // Import 'shared' must resolve via entry dir fallback.
+
+        namespace fs = std::filesystem;
+        const fs::path base = fs::temp_directory_path() / "curlee_resolver_tests_cross_root";
+        fs::create_directories(base / "sub");
+
+        write_file(base / "shared.curlee", "fn shared() -> Unit { return 0; }");
+        write_file(base / "sub" / "m.curlee",
+                   R"(import shared;
+
+fn m() -> Unit {
+  return 0;
+})");
+
+        const std::ifstream in((base / "sub" / "m.curlee").string(), std::ios::binary);
+        if (!in)
+        {
+            fail("failed to read module file");
+        }
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+
+        const auto res =
+            resolve_with_source(buffer.str(), (base / "sub" / "m.curlee").string(), base);
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for cross-root import resolution");
+        }
+    }
+
+    {
         const std::string src = R"(import missing.mod;
 
 fn main() -> Unit {
@@ -192,17 +238,30 @@ fn main() -> Unit {
 
         const auto& ds = std::get<std::vector<diag::Diagnostic>>(res);
         bool found = false;
+        bool has_expected_path_note = false;
         for (const auto& d : ds)
         {
             if (d.message.find("import not found") != std::string::npos)
             {
                 found = true;
+                for (const auto& note : d.notes)
+                {
+                    if (note.message.find("expected module at") != std::string::npos)
+                    {
+                        has_expected_path_note = true;
+                        break;
+                    }
+                }
                 break;
             }
         }
         if (!found)
         {
             fail("expected import-not-found diagnostic");
+        }
+        if (!has_expected_path_note)
+        {
+            fail("expected 'expected module at' note for missing import");
         }
     }
 

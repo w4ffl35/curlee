@@ -5,5 +5,4 @@ wiki/
 
 # Local prompt / training artifacts.
 training_data.txt
-.github/copilot-instructions.md
 .github/prompts/
