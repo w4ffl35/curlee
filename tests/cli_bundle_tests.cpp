@@ -171,13 +171,8 @@ int main()
 
         std::string out;
         std::string err;
-        const int rc = run_cli({"curlee",
-                                "run",
-                                "--bundle",
-                                bundle_path.string(),
-                                entry.string()},
-                               out,
-                               err);
+        const int rc =
+            run_cli({"curlee", "run", "--bundle", bundle_path.string(), entry.string()}, out, err);
         if (rc == 0)
         {
             fail("expected run to fail for unpinned import in bundle mode");
@@ -227,10 +222,8 @@ int main()
         {
             std::string out;
             std::string err;
-            const int rc =
-                run_cli({"curlee", "run", "--bundle", bundle_path.string(), entry.string()},
-                        out,
-                        err);
+            const int rc = run_cli(
+                {"curlee", "run", "--bundle", bundle_path.string(), entry.string()}, out, err);
             if (rc == 0)
             {
                 fail("expected run to fail when bundle capability is not granted");
@@ -246,15 +239,9 @@ int main()
         {
             std::string out;
             std::string err;
-            const int rc = run_cli({"curlee",
-                                    "run",
-                                    "--cap",
-                                    "python:ffi",
-                                    "--bundle",
-                                    bundle_path.string(),
-                                    entry.string()},
-                                   out,
-                                   err);
+            const int rc = run_cli({"curlee", "run", "--cap", "python:ffi", "--bundle",
+                                    bundle_path.string(), entry.string()},
+                                   out, err);
             if (rc != 0)
             {
                 fail("expected run to succeed when bundle capability is granted");

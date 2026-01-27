@@ -143,9 +143,13 @@ target_link_libraries(curlee_cli_diagnostics_golden_tests PRIVATE Z3::Z3)
 
 add_test(
   NAME curlee_cli_diagnostics_golden_tests
-  COMMAND curlee_cli_diagnostics_golden_tests ${CMAKE_SOURCE_DIR}/tests/cli_diagnostics
+  COMMAND curlee_cli_diagnostics_golden_tests ${CMAKE_SOURCE_DIR}/tests/cli_diagnostics $<TARGET_FILE:curlee_python_runner_fake_error>
 )
 set_tests_properties(curlee_cli_diagnostics_golden_tests PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(curlee_python_runner_fake_error
+  tests/python_runner_fake_error.cpp
+)
 
 add_executable(curlee_lexer_tests
   tests/lexer_tests.cpp

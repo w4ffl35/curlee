@@ -1,9 +1,9 @@
-#include <curlee/vm/vm.h>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
+#include <curlee/vm/vm.h>
 #include <fcntl.h>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <poll.h>
@@ -802,10 +802,8 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
                 {
                     msg = "python runner exec failed";
                 }
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = msg,
-                                .error_span = span};
+                return VmResult{
+                    .ok = false, .value = Value::unit_v(), .error = msg, .error_span = span};
             }
 
             push(Value::unit_v());

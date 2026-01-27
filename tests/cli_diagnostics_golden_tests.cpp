@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <curlee/cli/cli.h>
 #include <filesystem>
 #include <fstream>
@@ -619,13 +620,15 @@ static bool run_run_python_ffi_case(std::vector<std::string> argv_storage,
 
 int main(int argc, char** argv)
 {
-    if (argc != 2)
+    if (argc != 3)
     {
-        std::cerr << "usage: curlee_cli_diagnostics_golden_tests <tests/cli_diagnostics-dir>\n";
+        std::cerr << "usage: curlee_cli_diagnostics_golden_tests <tests/cli_diagnostics-dir> "
+                     "<fake-python-runner>\n";
         return 2;
     }
 
     const fs::path dir = fs::path(argv[1]);
+    const std::string fake_runner = argv[2];
     const fs::path golden = dir / "missing_file.golden";
     const fs::path check_requires_divide_golden = dir / "check_requires_divide.golden";
     const fs::path check_refinement_implies_golden = dir / "check_refinement_implies.golden";
@@ -648,6 +651,10 @@ int main(int argc, char** argv)
         dir / "run_python_ffi_not_implemented.stdout.golden";
     const fs::path run_python_ffi_not_implemented_err_golden =
         dir / "run_python_ffi_not_implemented.stderr.golden";
+    const fs::path run_python_ffi_runner_error_out_golden =
+        dir / "run_python_ffi_runner_error.stdout.golden";
+    const fs::path run_python_ffi_runner_error_err_golden =
+        dir / "run_python_ffi_runner_error.stderr.golden";
 
     try
     {
@@ -732,6 +739,23 @@ int main(int argc, char** argv)
             {
                 return 1;
             }
+        }
+
+        // Runner failure surfaced deterministically.
+        {
+            (void)setenv("CURLEE_PYTHON_RUNNER", fake_runner.c_str(), 1);
+
+            const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
+            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python:ffi",
+                                                           rel_path};
+            if (!run_run_python_ffi_case(argv_storage, run_python_ffi_runner_error_out_golden,
+                                         run_python_ffi_runner_error_err_golden,
+                                         "run-python-ffi-runner-error", 1))
+            {
+                return 1;
+            }
+
+            (void)unsetenv("CURLEE_PYTHON_RUNNER");
         }
     }
     catch (const std::exception& e)
