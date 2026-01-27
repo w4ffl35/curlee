@@ -23,7 +23,8 @@ struct Value
 
     static Value int_v(std::int64_t v)
     {
-        return Value{.kind = ValueKind::Int, .int_value = v, .bool_value = false, .string_value = {}};
+        return Value{
+            .kind = ValueKind::Int, .int_value = v, .bool_value = false, .string_value = {}};
     }
 
     static Value bool_v(bool v)

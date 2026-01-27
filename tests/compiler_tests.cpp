@@ -149,8 +149,7 @@ int main()
     }
 
     {
-        const std::string source =
-            "fn main() -> Int { while (true) { return 42; } return 0; }";
+        const std::string source = "fn main() -> Int { while (true) { return 42; } return 0; }";
 
         const auto chunk = compile_to_chunk(source);
         const auto res = run_chunk(chunk);
@@ -206,7 +205,8 @@ int main()
         const std::string source = "fn main() -> Int { return 10 - 3 * 2; }";
         const auto chunk = compile_to_chunk(source);
         const auto ops = decode_ops(chunk);
-        if (!contains_op(ops, curlee::vm::OpCode::Sub) || !contains_op(ops, curlee::vm::OpCode::Mul))
+        if (!contains_op(ops, curlee::vm::OpCode::Sub) ||
+            !contains_op(ops, curlee::vm::OpCode::Mul))
         {
             fail("expected '-' and '*' to emit Sub and Mul opcodes");
         }
@@ -221,7 +221,8 @@ int main()
         const std::string source = "fn main() -> Bool { return (1 < 2) && (3 >= 3); }";
         const auto chunk = compile_to_chunk(source);
         const auto ops = decode_ops(chunk);
-        if (!contains_op(ops, curlee::vm::OpCode::Less) || !contains_op(ops, curlee::vm::OpCode::GreaterEqual))
+        if (!contains_op(ops, curlee::vm::OpCode::Less) ||
+            !contains_op(ops, curlee::vm::OpCode::GreaterEqual))
         {
             fail("expected '<' and '>=' to emit comparison opcodes");
         }

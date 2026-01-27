@@ -14,7 +14,8 @@ int main()
 {
     using namespace curlee::vm;
 
-    auto run_twice_deterministic = [](const Chunk& chunk, Value expected) {
+    auto run_twice_deterministic = [](const Chunk& chunk, Value expected)
+    {
         VM vm;
         const auto res1 = vm.run(chunk);
         if (!res1.ok)

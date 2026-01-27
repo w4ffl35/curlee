@@ -5,6 +5,20 @@ If you notice it is being ignored, fix `.gitignore` rather than working around i
 
 You are working on **Curlee**, a C++23 (CMake) compiler/runtime project. Curlee is designed as an **AI-native safety harness**: code should not run unless it satisfies *declared contracts*.
 
+## Documentation
+
+- The primary user documentation lives in the **GitHub wiki** for this repository.
+- The wiki repo is in the `wiki` directory (locally gitignored).
+- You are allowed to edit the wiki but you'll need to commit changes within the wiki repo itself in the wiki directory.
+
+## Formatting policy
+
+- Formatting-only diffs are valid changes when they improve readability and match the project’s
+   style (e.g., `clang-format` output).
+- Do not revert sensible formatting just to keep a "clean diff".
+- Still avoid broad, unrelated reformatting across the repo: keep formatting changes scoped to
+   files you’re already touching, or to an explicit formatting-only issue.
+
 ## Core directives (do not violate)
 
 1. Verification-first

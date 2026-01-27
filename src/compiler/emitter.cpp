@@ -326,8 +326,8 @@ class Emitter
         chunk_.emit_constant(Value::bool_v(expr.value), span);
     }
 
-    [[nodiscard]] static std::optional<std::string> decode_string_literal(
-        std::string_view lexeme, std::string& error)
+    [[nodiscard]] static std::optional<std::string> decode_string_literal(std::string_view lexeme,
+                                                                          std::string& error)
     {
         if (lexeme.size() < 2 || lexeme.front() != '"' || lexeme.back() != '"')
         {
