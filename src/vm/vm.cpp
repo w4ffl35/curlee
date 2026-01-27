@@ -1,4 +1,5 @@
 #include <cerrno>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <curlee/vm/vm.h>
@@ -20,7 +21,12 @@ struct ProcResult
     int exit_code = -1;
     std::string out;
     std::string err;
+    bool timed_out = false;
+    bool output_limit_exceeded = false;
 };
+
+constexpr int kPythonRunnerTimeoutMs = 500;
+constexpr std::size_t kPythonRunnerMaxOutputBytes = 1 * 1024 * 1024;
 
 void set_nonblocking(int fd)
 {
@@ -32,7 +38,8 @@ void set_nonblocking(int fd)
     (void)fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
-void read_into(int fd, std::string& out, bool& eof)
+void read_into(int fd, std::string& out, bool& eof, std::size_t& total_bytes,
+               std::size_t max_total_bytes, bool& limit_hit)
 {
     char buf[4096];
     while (true)
@@ -40,7 +47,25 @@ void read_into(int fd, std::string& out, bool& eof)
         const ssize_t n = read(fd, buf, sizeof(buf));
         if (n > 0)
         {
-            out.append(buf, static_cast<std::size_t>(n));
+            const std::size_t count = static_cast<std::size_t>(n);
+            if (total_bytes >= max_total_bytes)
+            {
+                limit_hit = true;
+                eof = true;
+                return;
+            }
+
+            const std::size_t remaining = max_total_bytes - total_bytes;
+            const std::size_t to_append = (count <= remaining) ? count : remaining;
+            out.append(buf, to_append);
+            total_bytes += to_append;
+            if (to_append < count)
+            {
+                limit_hit = true;
+                eof = true;
+                return;
+            }
+
             continue;
         }
         if (n == 0)
@@ -57,7 +82,8 @@ void read_into(int fd, std::string& out, bool& eof)
     }
 }
 
-ProcResult run_process(const std::string& exe_path, const std::string& stdin_data)
+ProcResult run_process(const std::string& exe_path, const std::string& stdin_data, int timeout_ms,
+                       std::size_t max_output_bytes)
 {
     int in_pipe[2] = {-1, -1};
     int out_pipe[2] = {-1, -1};
@@ -125,23 +151,48 @@ ProcResult run_process(const std::string& exe_path, const std::string& stdin_dat
 
     bool out_eof = false;
     bool err_eof = false;
+    bool limit_hit = false;
+    std::size_t total_bytes = 0;
+    const auto start = std::chrono::steady_clock::now();
     while (!out_eof || !err_eof)
     {
+        const auto now = std::chrono::steady_clock::now();
+        const auto elapsed_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count();
+        if (elapsed_ms > timeout_ms)
+        {
+            result.timed_out = true;
+            break;
+        }
+
         struct pollfd fds[2];
         fds[0].fd = out_pipe[0];
         fds[0].events = POLLIN;
         fds[1].fd = err_pipe[0];
         fds[1].events = POLLIN;
-        (void)poll(fds, 2, 1000);
+        const int remaining_ms = timeout_ms - static_cast<int>(elapsed_ms);
+        const int poll_ms = (remaining_ms < 50) ? remaining_ms : 50;
+        (void)poll(fds, 2, poll_ms);
 
         if (!out_eof)
         {
-            read_into(out_pipe[0], result.out, out_eof);
+            read_into(out_pipe[0], result.out, out_eof, total_bytes, max_output_bytes, limit_hit);
         }
         if (!err_eof)
         {
-            read_into(err_pipe[0], result.err, err_eof);
+            read_into(err_pipe[0], result.err, err_eof, total_bytes, max_output_bytes, limit_hit);
         }
+
+        if (limit_hit)
+        {
+            result.output_limit_exceeded = true;
+            break;
+        }
+    }
+
+    if (result.timed_out || result.output_limit_exceeded)
+    {
+        (void)kill(pid, SIGKILL);
     }
 
     close(out_pipe[0]);
@@ -789,7 +840,23 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             const std::string runner = find_python_runner_path();
             const std::string request =
                 "{\"protocol_version\":1,\"id\":\"vm\",\"op\":\"handshake\"}\n";
-            const auto proc = run_process(runner, request);
+            const auto proc =
+                run_process(runner, request, kPythonRunnerTimeoutMs, kPythonRunnerMaxOutputBytes);
+
+            if (proc.timed_out)
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "python runner timed out",
+                                .error_span = span};
+            }
+            if (proc.output_limit_exceeded)
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "python runner output too large",
+                                .error_span = span};
+            }
 
             if (!response_ok_true(proc.out))
             {

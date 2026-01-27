@@ -620,15 +620,18 @@ static bool run_run_python_ffi_case(std::vector<std::string> argv_storage,
 
 int main(int argc, char** argv)
 {
-    if (argc != 3)
+    if (argc != 5)
     {
-        std::cerr << "usage: curlee_cli_diagnostics_golden_tests <tests/cli_diagnostics-dir> "
-                     "<fake-python-runner>\n";
+        std::cerr
+            << "usage: curlee_cli_diagnostics_golden_tests <tests/cli_diagnostics-dir> "
+               "<fake-python-runner-error> <fake-python-runner-hang> <fake-python-runner-spam>\n";
         return 2;
     }
 
     const fs::path dir = fs::path(argv[1]);
-    const std::string fake_runner = argv[2];
+    const std::string fake_runner_error = argv[2];
+    const std::string fake_runner_hang = argv[3];
+    const std::string fake_runner_spam = argv[4];
     const fs::path golden = dir / "missing_file.golden";
     const fs::path check_requires_divide_golden = dir / "check_requires_divide.golden";
     const fs::path check_refinement_implies_golden = dir / "check_refinement_implies.golden";
@@ -655,6 +658,14 @@ int main(int argc, char** argv)
         dir / "run_python_ffi_runner_error.stdout.golden";
     const fs::path run_python_ffi_runner_error_err_golden =
         dir / "run_python_ffi_runner_error.stderr.golden";
+    const fs::path run_python_ffi_runner_timeout_out_golden =
+        dir / "run_python_ffi_runner_timeout.stdout.golden";
+    const fs::path run_python_ffi_runner_timeout_err_golden =
+        dir / "run_python_ffi_runner_timeout.stderr.golden";
+    const fs::path run_python_ffi_runner_output_limit_out_golden =
+        dir / "run_python_ffi_runner_output_limit.stdout.golden";
+    const fs::path run_python_ffi_runner_output_limit_err_golden =
+        dir / "run_python_ffi_runner_output_limit.stderr.golden";
 
     try
     {
@@ -743,7 +754,7 @@ int main(int argc, char** argv)
 
         // Runner failure surfaced deterministically.
         {
-            (void)setenv("CURLEE_PYTHON_RUNNER", fake_runner.c_str(), 1);
+            (void)setenv("CURLEE_PYTHON_RUNNER", fake_runner_error.c_str(), 1);
 
             const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
             const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python:ffi",
@@ -751,6 +762,41 @@ int main(int argc, char** argv)
             if (!run_run_python_ffi_case(argv_storage, run_python_ffi_runner_error_out_golden,
                                          run_python_ffi_runner_error_err_golden,
                                          "run-python-ffi-runner-error", 1))
+            {
+                return 1;
+            }
+
+            (void)unsetenv("CURLEE_PYTHON_RUNNER");
+        }
+
+        // Runner timeout surfaced deterministically.
+        {
+            (void)setenv("CURLEE_PYTHON_RUNNER", fake_runner_hang.c_str(), 1);
+
+            const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
+            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python:ffi",
+                                                           rel_path};
+            if (!run_run_python_ffi_case(argv_storage, run_python_ffi_runner_timeout_out_golden,
+                                         run_python_ffi_runner_timeout_err_golden,
+                                         "run-python-ffi-runner-timeout", 1))
+            {
+                return 1;
+            }
+
+            (void)unsetenv("CURLEE_PYTHON_RUNNER");
+        }
+
+        // Runner output limit surfaced deterministically.
+        {
+            (void)setenv("CURLEE_PYTHON_RUNNER", fake_runner_spam.c_str(), 1);
+
+            const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
+            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python:ffi",
+                                                           rel_path};
+            if (!run_run_python_ffi_case(argv_storage,
+                                         run_python_ffi_runner_output_limit_out_golden,
+                                         run_python_ffi_runner_output_limit_err_golden,
+                                         "run-python-ffi-runner-output-limit", 1))
             {
                 return 1;
             }
