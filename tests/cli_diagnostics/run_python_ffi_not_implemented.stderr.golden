@@ -1,4 +1,0 @@
-tests/fixtures/run_python_ffi.curlee:2:12: error: python interop not implemented
-  |
-  |   unsafe { python_ffi.call(); }
-  |            ^^^^^^^^^^^^^^^^^

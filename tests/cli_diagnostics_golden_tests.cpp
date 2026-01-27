@@ -560,7 +560,8 @@ static bool run_check_python_ffi_requires_unsafe_case(const fs::path& golden_pat
 
 static bool run_run_python_ffi_case(std::vector<std::string> argv_storage,
                                     const fs::path& out_golden_path,
-                                    const fs::path& err_golden_path, const std::string& case_name)
+                                    const fs::path& err_golden_path, const std::string& case_name,
+                                    int expected_exit_code)
 {
     std::ostringstream captured_out;
     std::ostringstream captured_err;
@@ -585,7 +586,13 @@ static bool run_run_python_ffi_case(std::vector<std::string> argv_storage,
     const std::string expected_out = slurp(out_golden_path);
     const std::string expected_err = slurp(err_golden_path);
 
-    if (rc == 0)
+    if (expected_exit_code == 0 && rc != 0)
+    {
+        std::cerr << "expected exit code 0 for " << case_name << "\n";
+        return false;
+    }
+
+    if (expected_exit_code != 0 && rc == 0)
     {
         std::cerr << "expected non-zero exit code for " << case_name << "\n";
         return false;
@@ -709,7 +716,7 @@ int main(int argc, char** argv)
             const std::vector<std::string> argv_storage = {"curlee", "run", rel_path};
             if (!run_run_python_ffi_case(argv_storage, run_python_ffi_missing_cap_out_golden,
                                          run_python_ffi_missing_cap_err_golden,
-                                         "run-python-ffi-missing-cap"))
+                                         "run-python-ffi-missing-cap", 1))
             {
                 return 1;
             }
@@ -721,7 +728,7 @@ int main(int argc, char** argv)
                                                            rel_path};
             if (!run_run_python_ffi_case(argv_storage, run_python_ffi_not_implemented_out_golden,
                                          run_python_ffi_not_implemented_err_golden,
-                                         "run-python-ffi-not-implemented"))
+                                         "run-python-ffi-not-implemented", 0))
             {
                 return 1;
             }

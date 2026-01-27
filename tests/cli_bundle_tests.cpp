@@ -241,8 +241,8 @@ int main()
             }
         }
 
-        // Allowed past the bundle check when capability is granted; VM then errors deterministically
-        // because python interop is not implemented.
+        // Allowed past the bundle check when capability is granted; VM executes the runner
+        // round-trip (currently a no-op handshake) and continues.
         {
             std::string out;
             std::string err;
@@ -255,17 +255,17 @@ int main()
                                     entry.string()},
                                    out,
                                    err);
-            if (rc == 0)
+            if (rc != 0)
             {
-                fail("expected run to fail (python interop not implemented), but not due to capability");
+                fail("expected run to succeed when bundle capability is granted");
             }
-            if (err.find("python capability required") != std::string::npos)
+            if (!err.empty())
             {
-                fail("expected capability to be granted for python:ffi");
+                fail("expected stderr to be empty on success");
             }
-            if (err.find("python interop not implemented") == std::string::npos)
+            if (out.find("curlee run: result 0") == std::string::npos)
             {
-                fail("expected stderr to mention python interop not implemented");
+                fail("expected stdout to include result 0");
             }
         }
 

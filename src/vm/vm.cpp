@@ -1,8 +1,245 @@
 #include <curlee/vm/vm.h>
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <fcntl.h>
+#include <iostream>
 #include <limits>
+#include <poll.h>
+#include <string>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace
 {
+
+struct ProcResult
+{
+    int exit_code = -1;
+    std::string out;
+    std::string err;
+};
+
+void set_nonblocking(int fd)
+{
+    const int flags = fcntl(fd, F_GETFL, 0);
+    if (flags == -1)
+    {
+        return;
+    }
+    (void)fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+
+void read_into(int fd, std::string& out, bool& eof)
+{
+    char buf[4096];
+    while (true)
+    {
+        const ssize_t n = read(fd, buf, sizeof(buf));
+        if (n > 0)
+        {
+            out.append(buf, static_cast<std::size_t>(n));
+            continue;
+        }
+        if (n == 0)
+        {
+            eof = true;
+            return;
+        }
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+        {
+            return;
+        }
+        eof = true;
+        return;
+    }
+}
+
+ProcResult run_process(const std::string& exe_path, const std::string& stdin_data)
+{
+    int in_pipe[2] = {-1, -1};
+    int out_pipe[2] = {-1, -1};
+    int err_pipe[2] = {-1, -1};
+    ProcResult result;
+
+    if (pipe(in_pipe) != 0 || pipe(out_pipe) != 0 || pipe(err_pipe) != 0)
+    {
+        result.exit_code = 127;
+        return result;
+    }
+
+    const pid_t pid = fork();
+    if (pid < 0)
+    {
+        result.exit_code = 127;
+        return result;
+    }
+
+    if (pid == 0)
+    {
+        (void)dup2(in_pipe[0], STDIN_FILENO);
+        (void)dup2(out_pipe[1], STDOUT_FILENO);
+        (void)dup2(err_pipe[1], STDERR_FILENO);
+
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(out_pipe[1]);
+        close(err_pipe[0]);
+        close(err_pipe[1]);
+
+        std::vector<char*> argv;
+        argv.push_back(const_cast<char*>(exe_path.c_str()));
+        argv.push_back(nullptr);
+
+        execv(exe_path.c_str(), argv.data());
+        std::cerr << "execv failed: " << std::strerror(errno) << "\n";
+        std::exit(127);
+    }
+
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+    close(err_pipe[1]);
+
+    // Write input then close.
+    {
+        const char* data = stdin_data.data();
+        std::size_t remaining = stdin_data.size();
+        while (remaining > 0)
+        {
+            const ssize_t n = write(in_pipe[1], data, remaining);
+            if (n < 0)
+            {
+                break;
+            }
+            data += n;
+            remaining -= static_cast<std::size_t>(n);
+        }
+        close(in_pipe[1]);
+    }
+
+    set_nonblocking(out_pipe[0]);
+    set_nonblocking(err_pipe[0]);
+
+    bool out_eof = false;
+    bool err_eof = false;
+    while (!out_eof || !err_eof)
+    {
+        struct pollfd fds[2];
+        fds[0].fd = out_pipe[0];
+        fds[0].events = POLLIN;
+        fds[1].fd = err_pipe[0];
+        fds[1].events = POLLIN;
+        (void)poll(fds, 2, 1000);
+
+        if (!out_eof)
+        {
+            read_into(out_pipe[0], result.out, out_eof);
+        }
+        if (!err_eof)
+        {
+            read_into(err_pipe[0], result.err, err_eof);
+        }
+    }
+
+    close(out_pipe[0]);
+    close(err_pipe[0]);
+
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0)
+    {
+        result.exit_code = 127;
+        return result;
+    }
+    if (WIFEXITED(status))
+    {
+        result.exit_code = WEXITSTATUS(status);
+    }
+    else
+    {
+        result.exit_code = 128;
+    }
+    return result;
+}
+
+std::string find_python_runner_path()
+{
+    if (const char* env = std::getenv("CURLEE_PYTHON_RUNNER"); env != nullptr && *env != '\0')
+    {
+        return std::string(env);
+    }
+
+    char buf[4096];
+    const ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (n > 0)
+    {
+        buf[n] = '\0';
+        std::error_code ec;
+        const std::filesystem::path self(buf);
+        const auto candidate = self.parent_path() / "curlee_python_runner";
+        if (std::filesystem::exists(candidate, ec))
+        {
+            return candidate.string();
+        }
+    }
+
+    return "curlee_python_runner";
+}
+
+[[nodiscard]] bool response_ok_true(std::string_view json)
+{
+    return json.find("\"ok\":true") != std::string_view::npos;
+}
+
+std::optional<std::string> extract_error_message(std::string_view json)
+{
+    const std::string_view needle = "\"message\":\"";
+    const std::size_t start = json.find(needle);
+    if (start == std::string_view::npos)
+    {
+        return std::nullopt;
+    }
+    std::size_t i = start + needle.size();
+    std::string out;
+    while (i < json.size())
+    {
+        const char c = json[i++];
+        if (c == '"')
+        {
+            return out;
+        }
+        if (c == '\\' && i < json.size())
+        {
+            const char esc = json[i++];
+            switch (esc)
+            {
+            case '"':
+                out.push_back('"');
+                break;
+            case '\\':
+                out.push_back('\\');
+                break;
+            case 'n':
+                out.push_back('\n');
+                break;
+            case 'r':
+                out.push_back('\r');
+                break;
+            case 't':
+                out.push_back('\t');
+                break;
+            default:
+                // Keep deterministic: skip unknown escapes.
+                break;
+            }
+            continue;
+        }
+        out.push_back(c);
+    }
+    return std::nullopt;
+}
 
 const curlee::vm::VM::Capabilities& empty_caps()
 {
@@ -549,10 +786,30 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
                                 .error_span = span};
             }
 
-            return VmResult{.ok = false,
-                            .value = Value::unit_v(),
-                            .error = "python interop not implemented",
-                            .error_span = span};
+            const std::string runner = find_python_runner_path();
+            const std::string request =
+                "{\"protocol_version\":1,\"id\":\"vm\",\"op\":\"handshake\"}\n";
+            const auto proc = run_process(runner, request);
+
+            if (!response_ok_true(proc.out))
+            {
+                std::string msg = "python runner failed";
+                if (auto m = extract_error_message(proc.out); m.has_value())
+                {
+                    msg = *m;
+                }
+                else if (proc.exit_code == 127)
+                {
+                    msg = "python runner exec failed";
+                }
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = msg,
+                                .error_span = span};
+            }
+
+            push(Value::unit_v());
+            break;
         }
         }
     }
