@@ -3,13 +3,7 @@ build/
 # Local clone of the GitHub wiki (kept in-workspace for agents, not tracked).
 wiki/
 
-# Private docs/workflow notes: keep locally, not in git.
-*.md
-!/README.md
-!/docs/README.md
-!/docs/TENSOR_IR.md
-!/TODO.md
-!/.github/copilot-instructions.md
-
 # Local prompt / training artifacts.
 training_data.txt
+.github/copilot-instructions.md
+.github/prompts/
