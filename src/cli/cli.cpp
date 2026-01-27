@@ -698,7 +698,35 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
 
         const auto& chunk = std::get<vm::Chunk>(emitted);
         vm::VM machine;
-        const auto result = machine.run(chunk, 10000, granted_caps);
+
+        curlee::runtime::Capabilities effective_caps = granted_caps;
+        if (bundle_manifest != nullptr)
+        {
+            effective_caps.clear();
+            for (const auto& cap : bundle_manifest->capabilities)
+            {
+                if (!granted_caps.contains(cap))
+                {
+                    diag::Diagnostic d;
+                    d.severity = diag::Severity::Error;
+                    d.message = "missing capability required by bundle: " + cap;
+                    d.span = curlee::source::Span{.start = 0, .end = 0};
+                    d.notes.push_back(diag::Related{
+                        .message = "bundle manifest requires capability '" + cap + "'",
+                        .span = std::nullopt,
+                    });
+                    d.notes.push_back(diag::Related{
+                        .message = "grant it with: curlee run --cap " + cap + " --bundle <file.bundle> <file.curlee>",
+                        .span = std::nullopt,
+                    });
+                    std::cerr << diag::render(d, file);
+                    return kExitError;
+                }
+                effective_caps.insert(cap);
+            }
+        }
+
+        const auto result = machine.run(chunk, 10000, effective_caps);
         if (!result.ok)
         {
             diag::Diagnostic d;
