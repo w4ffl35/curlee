@@ -31,11 +31,17 @@ void print_usage(std::ostream& out)
     out << "curlee: verification-first language (early scaffold)\n\n";
     out << "usage:\n";
     out << "  curlee --help\n";
+    out << "  curlee <file.curlee>\n";
     out << "  curlee lex <file.curlee>\n";
     out << "  curlee parse <file.curlee>\n";
     out << "  curlee check <file.curlee>\n";
     out << "  curlee run <file.curlee>\n";
     out << "  curlee fmt [--check] <file>\n";
+}
+
+bool ends_with(std::string_view s, std::string_view suffix)
+{
+    return s.size() >= suffix.size() && s.substr(s.size() - suffix.size()) == suffix;
 }
 
 bool is_help_flag(std::string_view arg)
@@ -257,6 +263,12 @@ int run(int argc, char** argv)
     {
         print_usage(std::cout);
         return kExitOk;
+    }
+
+    // Python-style shorthand: `curlee path/to/file.curlee` is the same as `curlee run path/to/file.curlee`.
+    if (argc == 2 && !first.starts_with('-') && ends_with(first, ".curlee"))
+    {
+        return cmd_read_only("run", std::string(first));
     }
 
     const std::string_view cmd = argv[1];

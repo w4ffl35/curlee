@@ -101,7 +101,7 @@ This repository is early-stage.
 Curlee currently supports two useful workflows:
 
 - **MVP-check**: `curlee check <file.curlee>` runs lex → parse → resolve → type-check → verify (Z3). If a proof obligation can’t be discharged (or is out of scope), Curlee fails with a diagnostic.
-- **MVP-run**: `curlee run <file.curlee>` runs `check` first, then executes a small verified subset on the deterministic VM (fuel-bounded).
+- **MVP-run**: `curlee run <file.curlee>` (or `curlee <file.curlee>`) runs `check` first, then executes a small verified subset on the deterministic VM (fuel-bounded).
 
 The runnable subset is intentionally small:
 

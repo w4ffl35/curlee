@@ -8,7 +8,7 @@
 
 namespace fs = std::filesystem;
 
-static void fail(const std::string& msg)
+[[noreturn]] static void fail(const std::string& msg)
 {
     std::cerr << "FAIL: " << msg << "\n";
     std::exit(1);
@@ -34,6 +34,25 @@ static void write_file(const fs::path& path, const std::string& contents)
         fail("failed to write file: " + path.string());
     }
     out << contents;
+}
+
+static fs::path find_repo_relative(const fs::path& relative)
+{
+    fs::path dir = fs::current_path();
+    for (int i = 0; i < 8; ++i)
+    {
+        const fs::path candidate = dir / relative;
+        if (fs::exists(candidate))
+        {
+            return candidate;
+        }
+        if (!dir.has_parent_path())
+        {
+            break;
+        }
+        dir = dir.parent_path();
+    }
+    fail("unable to locate repo-relative path: " + relative.string());
 }
 
 int main()
@@ -84,6 +103,36 @@ int main()
         if (rc == 0)
         {
             fail("expected fmt --check to fail on unformatted file");
+        }
+    }
+
+    // Shorthand: `curlee <file.curlee>` behaves like `curlee run <file.curlee>`.
+    {
+        const fs::path fixture = find_repo_relative(fs::path("tests") / "fixtures" / "run_success.curlee");
+
+        std::ostringstream captured;
+        auto* old_buf = std::cout.rdbuf(captured.rdbuf());
+
+        std::vector<std::string> argv_storage = {"curlee", fixture.string()};
+        std::vector<char*> argv;
+        argv.reserve(argv_storage.size());
+        for (auto& s : argv_storage)
+        {
+            argv.push_back(s.data());
+        }
+
+        const int rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
+        std::cout.rdbuf(old_buf);
+
+        if (rc != 0)
+        {
+            fail("expected shorthand run to succeed");
+        }
+
+        const std::string out = captured.str();
+        if (out.find("curlee run: result 3") == std::string::npos)
+        {
+            fail("expected shorthand run output to include result");
         }
     }
 
