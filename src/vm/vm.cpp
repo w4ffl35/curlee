@@ -157,14 +157,20 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
                                 .error = "stack underflow",
                                 .error_span = span};
             }
-            if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
+            if (lhs->kind == ValueKind::Int && rhs->kind == ValueKind::Int)
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "add expects Int",
-                                .error_span = span};
+                push(Value::int_v(lhs->int_value + rhs->int_value));
+                break;
             }
-            push(Value::int_v(lhs->int_value + rhs->int_value));
+            if (lhs->kind == ValueKind::String && rhs->kind == ValueKind::String)
+            {
+                push(Value::string_v(lhs->string_value + rhs->string_value));
+                break;
+            }
+            return VmResult{.ok = false,
+                            .value = Value::unit_v(),
+                            .error = "add expects Int or String",
+                            .error_span = span};
             break;
         }
         case OpCode::Sub:

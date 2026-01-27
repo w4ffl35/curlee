@@ -45,6 +45,16 @@ int main()
 
     {
         Chunk chunk;
+        chunk.emit_constant(Value::string_v("a"));
+        chunk.emit_constant(Value::string_v("b"));
+        chunk.emit(OpCode::Add);
+        chunk.emit(OpCode::Return);
+
+        run_twice_deterministic(chunk, Value::string_v("ab"));
+    }
+
+    {
+        Chunk chunk;
         chunk.emit_constant(Value::int_v(42));
         chunk.emit(OpCode::Return);
 
@@ -208,7 +218,7 @@ int main()
 
         VM vm;
         const auto res = vm.run(chunk);
-        if (res.ok || res.error != "add expects Int")
+        if (res.ok || res.error != "add expects Int or String")
         {
             fail("expected add type error");
         }

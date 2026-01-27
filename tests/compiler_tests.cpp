@@ -43,6 +43,13 @@ static curlee::vm::VmResult run_chunk(const curlee::vm::Chunk& chunk)
     return vm.run(chunk);
 }
 
+static curlee::vm::VmResult run_chunk_with_caps(const curlee::vm::Chunk& chunk,
+                                                const curlee::vm::VM::Capabilities& caps)
+{
+    curlee::vm::VM vm;
+    return vm.run(chunk, caps);
+}
+
 static std::vector<curlee::vm::OpCode> decode_ops(const curlee::vm::Chunk& chunk)
 {
     using curlee::vm::OpCode;
@@ -246,6 +253,34 @@ int main()
         if (!res.ok || !(res.value == curlee::vm::Value::int_v(1)))
         {
             fail("expected || short-circuit to avoid RHS evaluation");
+        }
+    }
+
+    {
+        const std::string source = "fn main() -> String { return \"a\" + \"b\"; }";
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::string_v("ab")))
+        {
+            fail("expected string concatenation to evaluate to 'ab'");
+        }
+    }
+
+    {
+        const std::string source = "fn main() -> Int { print(\"hi\"); return 0; }";
+        const auto chunk = compile_to_chunk(source);
+        const auto ops = decode_ops(chunk);
+        if (!contains_op(ops, curlee::vm::OpCode::Print))
+        {
+            fail("expected print(...) to emit Print opcode");
+        }
+
+        curlee::vm::VM::Capabilities caps;
+        caps.insert("io:stdout");
+        const auto res = run_chunk_with_caps(chunk, caps);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(0)))
+        {
+            fail("expected print(...) program to run with io:stdout capability");
         }
     }
 
