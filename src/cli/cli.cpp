@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstdlib>
+#include <curlee/bundle/bundle.h>
 #include <curlee/cli/cli.h>
 #include <curlee/compiler/emitter.h>
 #include <curlee/diag/render.h>
@@ -48,6 +49,8 @@ void print_usage(std::ostream& out)
     out << "  curlee check <file.curlee>\n";
     out << "  curlee run [--cap <capability>]... <file.curlee>\n";
     out << "  curlee fmt [--check] <file>\n";
+    out << "  curlee bundle verify <file.bundle>\n";
+    out << "  curlee bundle info <file.bundle>\n";
 }
 
 bool ends_with(std::string_view s, std::string_view suffix)
@@ -58,6 +61,36 @@ bool ends_with(std::string_view s, std::string_view suffix)
 bool is_help_flag(std::string_view arg)
 {
     return arg == "--help" || arg == "-h" || arg == "help";
+}
+
+std::string join_csv(const std::vector<std::string>& xs)
+{
+    std::string out;
+    for (std::size_t i = 0; i < xs.size(); ++i)
+    {
+        if (i > 0)
+        {
+            out.push_back(',');
+        }
+        out.append(xs[i]);
+    }
+    return out;
+}
+
+std::string join_import_pins(const std::vector<curlee::bundle::ImportPin>& pins)
+{
+    std::string out;
+    for (std::size_t i = 0; i < pins.size(); ++i)
+    {
+        if (i > 0)
+        {
+            out.push_back(',');
+        }
+        out.append(pins[i].path);
+        out.push_back(':');
+        out.append(pins[i].hash);
+    }
+    return out;
 }
 
 int cmd_read_only(std::string_view cmd, const std::string& path,
@@ -722,6 +755,49 @@ int run(int argc, char** argv)
         }
 
         return cmd_fmt(std::string(args[0]), check);
+    }
+
+    if (cmd == "bundle")
+    {
+        if (args.size() != 2)
+        {
+            std::cerr << "error: expected curlee bundle <verify|info> <file.bundle>\n\n";
+            print_usage(std::cerr);
+            return kExitUsage;
+        }
+
+        const std::string_view sub = args[0];
+        const std::string path = std::string(args[1]);
+
+        const auto loaded = curlee::bundle::read_bundle(path);
+        if (auto* err = std::get_if<curlee::bundle::BundleError>(&loaded))
+        {
+            std::cerr << "error: bundle " << sub << " failed: " << err->message << "\n";
+            return kExitError;
+        }
+
+        const auto& b = std::get<curlee::bundle::Bundle>(loaded);
+
+        if (sub == "verify")
+        {
+            std::cout << "curlee bundle verify: ok\n";
+            return kExitOk;
+        }
+
+        if (sub == "info")
+        {
+            std::cout << "curlee bundle info:\n";
+            std::cout << "version: " << b.manifest.version << "\n";
+            std::cout << "bytecode_hash: " << b.manifest.bytecode_hash << "\n";
+            std::cout << "capabilities: " << join_csv(b.manifest.capabilities) << "\n";
+            std::cout << "imports: " << join_import_pins(b.manifest.imports) << "\n";
+            std::cout << "proof: " << (b.manifest.proof.has_value() ? "present" : "none") << "\n";
+            return kExitOk;
+        }
+
+        std::cerr << "error: unknown bundle subcommand: " << sub << "\n\n";
+        print_usage(std::cerr);
+        return kExitUsage;
     }
 
     if (cmd == "run")
