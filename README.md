@@ -2,21 +2,21 @@
 
 Curlee is an experimental **verification-first programming language** and C++23 compiler/runtime.
 
-It is built for the “AI code era”: instead of optimizing primarily for humans to *write* code, Curlee is designed to help humans (and agents) **refuse to run code unless it satisfies declared contracts**.
+Curlee is a safety harness for AI-generated (and human-written) code: it refuses to run a program unless it can prove your declared contracts within a small, decidable verification scope.
 
 ---
 
 ## Why build Curlee?
 
-Modern LLMs can generate a lot of code quickly—but a common failure mode is “almost correct” logic that compiles, runs, and silently does the wrong thing.
+Modern LLMs can generate a lot of code quickly - but a common failure mode is "almost correct" logic that compiles, runs, and silently does the wrong thing.
 
-Curlee’s goal is to be a **safety harness**:
+Curlee's goal is to be a **safety harness**:
 
 - You write *intent* as machine-checkable contracts (`requires` / `ensures`) and refinements (`where`).
 - The compiler uses an SMT solver (Z3) to prove obligations.
-- If an obligation can’t be proven (or the contract is outside the supported logic), Curlee **fails the build**.
+- If an obligation can't be proven (or the contract is outside the supported logic), Curlee **fails the build**.
 
-This shifts trust from “I hope the generated code is safe” to “I have a proof (or the program doesn’t run).”
+This shifts trust from "I hope the generated code is safe" to "I have a proof (or the program doesn't run)".
 
 ---
 
@@ -50,8 +50,8 @@ Curlee aims to support a world where agents exchange tasks safely.
 | --- | --- | --- |
 | Correctness | Tests + review + runtime errors | Compile-time contract proofs |
 | Security | Ambient authority + sandboxing | Capabilities + proofs + fuel |
-| AI-generated code | “Probably ok” | “Prove it or reject it” |
-| Interop | Big ecosystems | “Shield” legacy ecosystems via explicit `unsafe` boundaries |
+| AI-generated code | "Probably ok" | "Prove it or reject it" |
+| Interop | Big ecosystems | "Shield" legacy ecosystems via explicit `unsafe` boundaries |
 
 ---
 
@@ -65,9 +65,9 @@ flowchart LR
   L --> P[Parser]
   P --> R[Resolver]
   R --> T[Type Checker]
-  T --> V[Verifier (Z3)]
+  T --> V[Verifier Z3]
   V -->|only if proven| C[Bytecode Compiler]
-  C --> VM[Deterministic VM (fuel)]
+  C --> M[Deterministic VM fuel bounded]
 ```
 
 ### Contracts and proof obligations
@@ -85,8 +85,8 @@ fn divide(numerator: Int, denominator: Int) -> Int
 
 The compiler checks obligations like:
 
-- At call sites: prove the callee’s `requires` from the caller’s facts.
-- At returns: prove the function’s `ensures`.
+- At call sites: prove the callee's `requires` from the caller's facts.
+- At returns: prove the function's `ensures`.
 
 The MVP logic fragment is intentionally small and decidable.
 
@@ -94,13 +94,20 @@ The MVP logic fragment is intentionally small and decidable.
 
 ## Project status
 
-This repository is early-stage.
+This repository is early-stage (alpha research prototype).
+
+Expectations:
+
+- The language and bytecode are not stable yet.
+- Diagnostics, CLI output, and tests are expected to evolve.
+- Verification is intentionally limited to a small fragment; out-of-scope contracts are rejected.
+- If Curlee cannot prove a contract, it will not run the program.
 
 ### MVP scope (current)
 
 Curlee currently supports two useful workflows:
 
-- **MVP-check**: `curlee check <file.curlee>` runs lex → parse → resolve → type-check → verify (Z3). If a proof obligation can’t be discharged (or is out of scope), Curlee fails with a diagnostic.
+- **MVP-check**: `curlee check <file.curlee>` runs lex -> parse -> resolve -> type-check -> verify (Z3). If a proof obligation can't be discharged (or is out of scope), Curlee fails with a diagnostic.
 - **MVP-run**: `curlee run <file.curlee>` (or `curlee <file.curlee>`) runs `check` first, then executes a small verified subset on the deterministic VM (fuel-bounded).
 
 The runnable subset is intentionally small:
@@ -155,6 +162,48 @@ cmake --build --preset linux-debug
 ./build/linux-debug/curlee check examples/mvp_run_int.curlee
 ./build/linux-debug/curlee run examples/mvp_run_control_flow.curlee
 ```
+
+---
+
+## Quick start examples
+
+### 1) Small program that runs
+
+Create `hello.curlee`:
+
+```curlee
+fn main() -> Int {
+  return 1 + 2;
+}
+```
+
+Then:
+
+```bash
+./build/linux-debug/curlee check hello.curlee
+./build/linux-debug/curlee hello.curlee
+```
+
+### 2) Contracts that fail (expected)
+
+These fixtures are in the repo and should produce a diagnostic:
+
+```bash
+./build/linux-debug/curlee check tests/fixtures/check_requires_divide.curlee
+./build/linux-debug/curlee check tests/fixtures/check_ensures_fail.curlee
+```
+
+`curlee run` is verification-gated, so this should fail with the same diagnostic:
+
+```bash
+./build/linux-debug/curlee run tests/fixtures/check_ensures_fail.curlee
+```
+
+---
+
+## License
+
+MIT. See LICENSE.
 
 ---
 
