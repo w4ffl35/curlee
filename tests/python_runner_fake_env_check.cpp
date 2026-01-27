@@ -24,14 +24,16 @@ int main()
     if (!eq_env("PYTHONHASHSEED", "0") || !eq_env("LC_ALL", "C") || !eq_env("LANG", "C"))
     {
         std::cout << "{\"protocol_version\":1,\"id\":\"vm\",\"ok\":false,\"error\":{"
-                     "\"kind\":\"invalid_request\",\"message\":\"env check failed\",\"retryable\":false}}\n";
+                     "\"kind\":\"invalid_request\",\"message\":\"env check "
+                     "failed\",\"retryable\":false}}\n";
         return 2;
     }
 
     if (std::getenv("FOO") != nullptr)
     {
         std::cout << "{\"protocol_version\":1,\"id\":\"vm\",\"ok\":false,\"error\":{"
-                     "\"kind\":\"invalid_request\",\"message\":\"env not scrubbed\",\"retryable\":false}}\n";
+                     "\"kind\":\"invalid_request\",\"message\":\"env not "
+                     "scrubbed\",\"retryable\":false}}\n";
         return 2;
     }
 

@@ -816,9 +816,10 @@ int main(int argc, char** argv)
             (void)setenv("CURLEE_PYTHON_RUNNER", fake_runner_env_check.c_str(), 1);
 
             const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
-            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap",
-                                                           "python:ffi", rel_path};
-            if (!run_run_python_ffi_case(argv_storage, run_python_ffi_runner_env_sanitized_out_golden,
+            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python:ffi",
+                                                           rel_path};
+            if (!run_run_python_ffi_case(argv_storage,
+                                         run_python_ffi_runner_env_sanitized_out_golden,
                                          run_python_ffi_runner_env_sanitized_err_golden,
                                          "run-python-ffi-runner-env-sanitized", 0))
             {
