@@ -138,6 +138,66 @@ int main()
         }
     }
 
+    // Bundle mode: imports must be pinned (no dynamic resolution).
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_pins");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path entry = dir / "main.curlee";
+        const fs::path dep = dir / "dep.curlee";
+        const fs::path bundle_path = dir / "pins.bundle";
+
+        {
+            std::ofstream out(entry);
+            out << "import dep;\n";
+            out << "fn main() -> Int { return foo(); }\n";
+        }
+        {
+            std::ofstream out(dep);
+            out << "fn foo() -> Int { return 7; }\n";
+        }
+
+        Bundle bundle;
+        bundle.manifest.capabilities = {"io:stdout"};
+        bundle.manifest.imports = {}; // dep is intentionally unpinned
+        bundle.bytecode = {0x01, 0x02, 0x03, 0x04};
+
+        const auto write_err = write_bundle(bundle_path.string(), bundle);
+        if (!write_err.message.empty())
+        {
+            fail("expected bundle write to succeed");
+        }
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli({"curlee",
+                                "run",
+                                "--bundle",
+                                bundle_path.string(),
+                                entry.string()},
+                               out,
+                               err);
+        if (rc == 0)
+        {
+            fail("expected run to fail for unpinned import in bundle mode");
+        }
+        if (err.find("import not pinned: 'dep'") == std::string::npos)
+        {
+            fail("expected stderr to mention unpinned import");
+        }
+        if (err.find("expected pin 'dep:") == std::string::npos)
+        {
+            fail("expected stderr to mention expected pin for dep");
+        }
+        if (!out.empty())
+        {
+            fail("expected stdout to be empty on failure");
+        }
+
+        fs::remove_all(dir);
+    }
+
     fs::remove(ok_path);
     fs::remove(bad_path);
 
