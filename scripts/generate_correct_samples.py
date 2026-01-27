@@ -7,6 +7,11 @@ import random
 from pathlib import Path
 
 
+DATASET_VERSION = 1
+DATASET_BUMP_POLICY = "generator_or_language_scope_changes"
+DATASET_GENERATOR_ID = "scripts/generate_correct_samples.py"
+
+
 def gen_expr(rng: random.Random, depth: int) -> str:
     if depth <= 0 or rng.random() < 0.4:
         return str(rng.randint(0, 1000))
@@ -45,7 +50,14 @@ def main() -> int:
         (out_dir / name).write_text(program, encoding="utf-8")
         samples.append(program.strip())
 
-    header = f"# Curlee correct_samples dataset\n# seed={args.seed}\n# count={args.count}\n"
+    header = (
+        "# Curlee correct_samples dataset\n"
+        f"# dataset_version={DATASET_VERSION}\n"
+        f"# bump_dataset_version_when={DATASET_BUMP_POLICY}\n"
+        f"# generator={DATASET_GENERATOR_ID}\n"
+        f"# seed={args.seed}\n"
+        f"# count={args.count}\n"
+    )
     args.training.write_text(header + "\n---\n".join(samples) + "\n", encoding="utf-8")
     return 0
 

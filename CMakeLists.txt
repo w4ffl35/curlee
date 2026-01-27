@@ -185,6 +185,15 @@ target_include_directories(curlee_types_tests PRIVATE include)
 
 add_test(NAME curlee_types_tests COMMAND curlee_types_tests)
 
+add_executable(curlee_training_data_tests
+  tests/training_data_tests.cpp
+)
+
+add_test(
+  NAME curlee_training_data_tests
+  COMMAND curlee_training_data_tests ${CMAKE_SOURCE_DIR}/scripts/generate_correct_samples.py ${CMAKE_BINARY_DIR}
+)
+
 add_executable(curlee_cli_fmt_tests
   tests/cli_fmt_tests.cpp
   src/bundle/bundle.cpp
