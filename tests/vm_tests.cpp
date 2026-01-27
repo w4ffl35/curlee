@@ -111,6 +111,25 @@ int main()
         run_twice_deterministic(chunk, Value::int_v(8));
     }
 
+    // Call-related error should be span-mapped.
+    {
+        Chunk chunk;
+        const curlee::source::Span span{.start = 30, .end = 40};
+        chunk.emit(OpCode::Ret, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "return with empty call stack")
+        {
+            fail("expected return-with-empty-call-stack error");
+        }
+        if (!res.error_span.has_value() || res.error_span->start != span.start ||
+            res.error_span->end != span.end)
+        {
+            fail("expected call-related runtime error span to map to Ret opcode span");
+        }
+    }
+
     // Span mapping for new control-flow ops.
     {
         Chunk chunk;
