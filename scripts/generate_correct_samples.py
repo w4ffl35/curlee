@@ -28,6 +28,7 @@ def main() -> int:
     parser.add_argument("--count", type=int, default=500)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--out", type=Path, default=Path("tests/correct_samples"))
+    # `training_data.txt` is a generated export; repository policy keeps it untracked (gitignored).
     parser.add_argument("--training", type=Path, default=Path("training_data.txt"))
     args = parser.parse_args()
 

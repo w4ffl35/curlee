@@ -128,6 +128,12 @@ User-facing documentation lives in the GitHub wiki:
 
 - https://github.com/w4ffl35/curlee/wiki
 
+## Datasets
+
+- `tests/correct_samples/` is the small, deterministic corpus of verified samples used by tests.
+- `training_data.txt` is a **generated export** for downstream RAG/training workflows and is intentionally **gitignored**.
+  - Regenerate via `python3 scripts/generate_correct_samples.py` (writes both `tests/correct_samples/` and `training_data.txt`).
+
 ---
 
 ## Build & run (Linux)
