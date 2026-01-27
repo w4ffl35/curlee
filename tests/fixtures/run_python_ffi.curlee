@@ -1,0 +1,4 @@
+fn main() -> Int {
+  unsafe { python_ffi.call(); }
+  return 0;
+}

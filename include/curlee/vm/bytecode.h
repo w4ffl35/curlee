@@ -22,6 +22,7 @@ enum class OpCode : std::uint8_t
     Call,
     Ret,
     Print,
+    PythonCall,
 };
 
 struct Chunk

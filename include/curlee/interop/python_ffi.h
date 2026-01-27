@@ -1,5 +1,6 @@
 #pragma once
 
+#include <curlee/runtime/capabilities.h>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -15,7 +16,7 @@ struct PythonFfiError
 
 using PythonFfiResult = std::variant<std::monostate, PythonFfiError>;
 
-[[nodiscard]] PythonFfiResult call_python(const std::vector<std::string>& capabilities,
+[[nodiscard]] PythonFfiResult call_python(const curlee::runtime::Capabilities& capabilities,
                                           std::string_view module, std::string_view function,
                                           const std::vector<std::string>& args);
 

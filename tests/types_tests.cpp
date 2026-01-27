@@ -3,8 +3,8 @@
 #include <curlee/parser/parser.h>
 #include <curlee/types/type.h>
 #include <curlee/types/type_check.h>
-#include <string_view>
 #include <iostream>
+#include <string_view>
 
 static void fail(const std::string& msg)
 {
@@ -184,7 +184,7 @@ int main()
 
     {
         // Span precision through typing: condition error should point at exactly `1`.
-        const std::string source = "fn main() -> Int { if 1 { return 0; } return 0; }";
+        const std::string source = "fn main() -> Int { if (1) { return 0; } return 0; }";
 
         const auto lexed = curlee::lexer::lex(source);
         if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
@@ -213,8 +213,12 @@ int main()
         }
 
         const auto& d = diags.front();
+        if (!d.span.has_value())
+        {
+            fail("expected diagnostic to include a span");
+        }
         const std::string_view span_text =
-            std::string_view(source).substr(d.span.start, d.span.length());
+            std::string_view(source).substr(d.span->start, d.span->length());
         if (span_text != "1")
         {
             fail("expected condition diagnostic span to cover exactly `1`");

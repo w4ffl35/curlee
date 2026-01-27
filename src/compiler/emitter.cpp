@@ -20,9 +20,11 @@ using curlee::parser::ExprStmt;
 using curlee::parser::Function;
 using curlee::parser::IfStmt;
 using curlee::parser::LetStmt;
+using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
 using curlee::parser::Stmt;
+using curlee::parser::UnsafeStmt;
 using curlee::parser::WhileStmt;
 using curlee::source::Span;
 using curlee::vm::Chunk;
@@ -78,7 +80,7 @@ class Emitter
             if (addr > std::numeric_limits<std::uint16_t>::max())
             {
                 diags_.push_back(error_at({}, "function too large for 16-bit address '" +
-                                               std::string(name) + "'"));
+                                                  std::string(name) + "'"));
                 continue;
             }
             for (const auto pos : patches)
@@ -220,6 +222,14 @@ class Emitter
         }
     }
 
+    void emit_stmt_node(const UnsafeStmt& stmt, Span)
+    {
+        for (const auto& nested : stmt.body->stmts)
+        {
+            emit_stmt(nested);
+        }
+    }
+
     void emit_stmt_node(const IfStmt& stmt, Span)
     {
         emit_expr(stmt.cond);
@@ -322,6 +332,11 @@ class Emitter
         chunk_.emit_local(OpCode::LoadLocal, it->second, span);
     }
 
+    void emit_expr_node(const MemberExpr&, Span span)
+    {
+        diags_.push_back(error_at(span, "member access not supported in emitter yet"));
+    }
+
     void emit_expr_node(const curlee::parser::UnaryExpr&, Span span)
     {
         diags_.push_back(error_at(span, "unary operators not supported in emitter yet"));
@@ -356,6 +371,22 @@ class Emitter
         if (!expr.args.empty())
         {
             diags_.push_back(error_at(span, "call arguments not supported in emitter yet"));
+            return;
+        }
+
+        if (const auto* callee_member = std::get_if<MemberExpr>(&expr.callee->node);
+            callee_member != nullptr && callee_member->base != nullptr)
+        {
+            const auto* base_name =
+                std::get_if<curlee::parser::NameExpr>(&callee_member->base->node);
+            if (base_name != nullptr && base_name->name == "python_ffi" &&
+                callee_member->member == "call")
+            {
+                chunk_.emit(OpCode::PythonCall, span);
+                return;
+            }
+
+            diags_.push_back(error_at(span, "only name calls are supported in emitter yet"));
             return;
         }
 

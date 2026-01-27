@@ -22,9 +22,11 @@ using curlee::parser::Function;
 using curlee::parser::GroupExpr;
 using curlee::parser::IfStmt;
 using curlee::parser::LetStmt;
+using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
 using curlee::parser::Stmt;
+using curlee::parser::UnsafeStmt;
 using curlee::parser::WhileStmt;
 using curlee::source::Span;
 
@@ -42,8 +44,9 @@ struct Scope
 class Resolver
 {
   public:
-    explicit Resolver(std::optional<std::filesystem::path> base_path)
-        : base_path_(std::move(base_path))
+    Resolver(std::optional<std::filesystem::path> base_path,
+             std::optional<std::filesystem::path> entry_dir)
+        : base_path_(std::move(base_path)), entry_dir_(std::move(entry_dir))
     {
     }
 
@@ -76,6 +79,25 @@ class Resolver
     Resolution resolution_;
     std::vector<Diagnostic> diagnostics_;
     std::optional<std::filesystem::path> base_path_;
+    std::optional<std::filesystem::path> entry_dir_;
+    int unsafe_depth_ = 0;
+
+    static bool is_python_ffi_call(const Expr& callee)
+    {
+        const auto* member = std::get_if<MemberExpr>(&callee.node);
+        if (member == nullptr || member->base == nullptr)
+        {
+            return false;
+        }
+
+        const auto* base_name = std::get_if<NameExpr>(&member->base->node);
+        if (base_name == nullptr)
+        {
+            return false;
+        }
+
+        return base_name->name == "python_ffi" && member->member == "call";
+    }
 
     void resolve_imports(const curlee::parser::Program& program)
     {
@@ -91,28 +113,57 @@ class Resolver
                 continue;
             }
 
-            std::filesystem::path module_path = *base_path_;
             std::string import_name;
             for (std::size_t i = 0; i < imp.path.size(); ++i)
             {
-                module_path /= std::string(imp.path[i]);
                 import_name += std::string(imp.path[i]);
                 if (i + 1 < imp.path.size())
                 {
                     import_name += ".";
                 }
             }
-            module_path += ".curlee";
 
-            const auto loaded = source::load_source_file(module_path.string());
-            if (std::holds_alternative<source::LoadError>(loaded))
+            std::vector<std::filesystem::path> roots;
+            roots.push_back(*base_path_);
+            if (entry_dir_.has_value() && *entry_dir_ != *base_path_)
+            {
+                roots.push_back(*entry_dir_);
+            }
+
+            bool found = false;
+            std::filesystem::path first_expected = *base_path_;
+            for (const auto& part : imp.path)
+            {
+                first_expected /= std::string(part);
+            }
+            first_expected += ".curlee";
+
+            for (const auto& root : roots)
+            {
+                std::filesystem::path module_path = root;
+                for (const auto& part : imp.path)
+                {
+                    module_path /= std::string(part);
+                }
+                module_path += ".curlee";
+
+                const auto loaded = source::load_source_file(module_path.string());
+                if (std::holds_alternative<source::SourceFile>(loaded))
+                {
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found)
             {
                 Diagnostic d;
                 d.severity = Severity::Error;
                 d.message = "import not found: '" + import_name + "'";
                 d.span = imp.span;
-                d.notes.push_back(Related{.message = "expected module at " + module_path.string(),
-                                          .span = std::nullopt});
+                d.notes.push_back(
+                    Related{.message = "expected module at " + first_expected.string(),
+                            .span = std::nullopt});
                 diagnostics_.push_back(std::move(d));
                 continue;
             }
@@ -230,6 +281,18 @@ class Resolver
         pop_scope();
     }
 
+    void resolve_stmt_node(const UnsafeStmt& s, Span)
+    {
+        ++unsafe_depth_;
+        push_scope();
+        for (const auto& stmt : s.body->stmts)
+        {
+            resolve_stmt(stmt);
+        }
+        pop_scope();
+        --unsafe_depth_;
+    }
+
     void resolve_stmt_node(const IfStmt& s, Span)
     {
         resolve_expr(s.cond);
@@ -285,11 +348,37 @@ class Resolver
 
     void resolve_expr_node(const CallExpr& e, Span)
     {
+        if (is_python_ffi_call(*e.callee) && unsafe_depth_ == 0)
+        {
+            Diagnostic d;
+            d.severity = Severity::Error;
+            d.message = "python_ffi.call requires an unsafe context";
+            d.span = e.callee->span;
+            diagnostics_.push_back(std::move(d));
+        }
+
         resolve_expr(*e.callee);
         for (const auto& a : e.args)
         {
             resolve_expr(a);
         }
+    }
+
+    void resolve_expr_node(const MemberExpr& e, Span)
+    {
+        if (e.base == nullptr)
+        {
+            return;
+        }
+
+        if (const auto* base_name = std::get_if<NameExpr>(&e.base->node);
+            base_name != nullptr && base_name->name == "python_ffi")
+        {
+            // Builtin module name used for interop. Do not require declaration.
+            return;
+        }
+
+        resolve_expr(*e.base);
     }
 
     void resolve_expr_node(const GroupExpr& e, Span) { resolve_expr(*e.inner); }
@@ -319,20 +408,33 @@ class Resolver
 
 ResolveResult resolve(const curlee::parser::Program& program)
 {
-    return Resolver(std::nullopt).run(program);
+    Resolver r(std::nullopt, std::nullopt);
+    return r.run(program);
 }
 
 ResolveResult resolve(const curlee::parser::Program& program,
                       const curlee::source::SourceFile& source)
 {
-    std::filesystem::path base;
+    std::optional<std::filesystem::path> base;
     if (!source.path.empty())
     {
         base = std::filesystem::path(source.path).parent_path();
     }
-    const auto base_opt =
-        source.path.empty() ? std::nullopt : std::optional<std::filesystem::path>(base);
-    return Resolver(base_opt).run(program);
+    Resolver r(std::move(base), std::nullopt);
+    return r.run(program);
+}
+
+ResolveResult resolve(const curlee::parser::Program& program,
+                      const curlee::source::SourceFile& source,
+                      std::optional<std::filesystem::path> entry_dir)
+{
+    std::optional<std::filesystem::path> base;
+    if (!source.path.empty())
+    {
+        base = std::filesystem::path(source.path).parent_path();
+    }
+    Resolver r(std::move(base), std::move(entry_dir));
+    return r.run(program);
 }
 
 } // namespace curlee::resolver

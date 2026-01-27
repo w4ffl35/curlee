@@ -1,11 +1,11 @@
 #pragma once
 
 #include <cstddef>
+#include <curlee/runtime/capabilities.h>
 #include <curlee/source/span.h>
 #include <curlee/vm/bytecode.h>
 #include <optional>
 #include <string>
-#include <unordered_set>
 
 namespace curlee::vm
 {
@@ -21,7 +21,7 @@ struct VmResult
 class VM
 {
   public:
-    using Capabilities = std::unordered_set<std::string>;
+    using Capabilities = curlee::runtime::Capabilities;
 
     [[nodiscard]] VmResult run(const Chunk& chunk);
     [[nodiscard]] VmResult run(const Chunk& chunk, std::size_t fuel);

@@ -1,0 +1,4 @@
+fn main() -> Int {
+  python_ffi.call();
+  return 0;
+}

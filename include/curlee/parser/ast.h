@@ -83,6 +83,12 @@ struct NameExpr
     std::string_view name;
 };
 
+struct MemberExpr
+{
+    std::unique_ptr<Expr> base;
+    std::string_view member;
+};
+
 struct UnaryExpr
 {
     curlee::lexer::TokenKind op;
@@ -112,7 +118,7 @@ struct Expr
     std::size_t id = 0;
     curlee::source::Span span;
     std::variant<IntExpr, BoolExpr, StringExpr, NameExpr, UnaryExpr, BinaryExpr, CallExpr,
-                 GroupExpr>
+                 MemberExpr, GroupExpr>
         node;
 };
 
@@ -149,6 +155,11 @@ struct WhileStmt
     std::unique_ptr<Block> body;
 };
 
+struct UnsafeStmt
+{
+    std::unique_ptr<Block> body;
+};
+
 struct BlockStmt
 {
     std::unique_ptr<Block> block;
@@ -157,7 +168,7 @@ struct BlockStmt
 struct Stmt
 {
     curlee::source::Span span;
-    std::variant<LetStmt, ReturnStmt, ExprStmt, BlockStmt, IfStmt, WhileStmt> node;
+    std::variant<LetStmt, ReturnStmt, ExprStmt, BlockStmt, IfStmt, WhileStmt, UnsafeStmt> node;
 };
 
 struct Block

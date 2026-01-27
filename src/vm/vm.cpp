@@ -311,6 +311,21 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             push(Value::unit_v());
             break;
         }
+        case OpCode::PythonCall:
+        {
+            if (!capabilities.contains("python:ffi"))
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "python capability required",
+                                .error_span = span};
+            }
+
+            return VmResult{.ok = false,
+                            .value = Value::unit_v(),
+                            .error = "python interop not implemented",
+                            .error_span = span};
+        }
         }
     }
 

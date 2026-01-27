@@ -1,0 +1,4 @@
+tests/fixtures/check_python_ffi_requires_unsafe.curlee:2:3: error: python_ffi.call requires an unsafe context
+  |
+  |   python_ffi.call();
+  |   ^^^^^^^^^^^^^^^

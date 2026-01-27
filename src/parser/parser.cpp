@@ -107,7 +107,7 @@ void assign_expr_ids(curlee::parser::Expr& expr, std::size_t& next_id)
         expr.node);
 }
 
-void assign_expr_ids(curlee::parser::Program& program)
+void assign_expr_ids_program(curlee::parser::Program& program)
 {
     std::size_t next_id = 1;
     for (auto& function : program.functions)
@@ -124,10 +124,20 @@ class Parser
     [[nodiscard]] ParseResult parse_program()
     {
         Program program;
+        bool seen_function = false;
         while (!is_at_end())
         {
             if (check(TokenKind::KwImport))
             {
+                if (seen_function)
+                {
+                    diagnostics_.push_back(
+                        error_at(peek(), "imports must appear before any functions"));
+                    // Make progress: consume `import` and then skip to the next top-level item.
+                    advance();
+                    synchronize_top_level();
+                    continue;
+                }
                 auto imp = parse_import();
                 if (std::holds_alternative<curlee::diag::Diagnostic>(imp))
                 {
@@ -141,6 +151,7 @@ class Parser
 
             if (check(TokenKind::KwFn))
             {
+                seen_function = true;
                 auto fun = parse_function();
                 if (std::holds_alternative<curlee::diag::Diagnostic>(fun))
                 {
@@ -771,6 +782,27 @@ class Parser
             return stmt;
         }
 
+        if (match(TokenKind::KwUnsafe))
+        {
+            const Token kw = previous();
+            if (!check(TokenKind::LBrace))
+            {
+                return error_at(peek(), "expected '{' after 'unsafe'");
+            }
+
+            auto block_res = parse_block();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(block_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(block_res));
+            }
+            auto block = std::get<Block>(std::move(block_res));
+
+            Stmt stmt;
+            stmt.span = span_cover(kw.span, block.span);
+            stmt.node = UnsafeStmt{.body = std::make_unique<Block>(std::move(block))};
+            return stmt;
+        }
+
         if (match(TokenKind::KwLet))
         {
             const Token kw = previous();
@@ -1201,8 +1233,31 @@ class Parser
 
         Expr expr = std::get<Expr>(std::move(callee_res));
 
-        while (match(TokenKind::LParen))
+        while (true)
         {
+            if (match(TokenKind::Dot))
+            {
+                const Token dot = previous();
+                if (!check(TokenKind::Identifier))
+                {
+                    return error_at(peek(), "expected identifier after '.'");
+                }
+                const Token member = advance();
+
+                Expr access;
+                access.span = span_cover(expr.span, member.span);
+                access.node = MemberExpr{.base = std::make_unique<Expr>(std::move(expr)),
+                                         .member = member.lexeme};
+                (void)dot;
+                expr = std::move(access);
+                continue;
+            }
+
+            if (!match(TokenKind::LParen))
+            {
+                break;
+            }
+
             const Token lparen = previous();
 
             std::vector<Expr> args;
@@ -1443,6 +1498,12 @@ class Dumper
 
     void dump_stmt_node(const BlockStmt& s) { dump_block(*s.block); }
 
+    void dump_stmt_node(const UnsafeStmt& s)
+    {
+        out_ << "unsafe ";
+        dump_block(*s.body);
+    }
+
     void dump_stmt_node(const IfStmt& s)
     {
         out_ << "if (";
@@ -1473,6 +1534,12 @@ class Dumper
     void dump_expr_node(const BoolExpr& e) { out_ << (e.value ? "true" : "false"); }
     void dump_expr_node(const StringExpr& e) { out_ << e.lexeme; }
     void dump_expr_node(const NameExpr& e) { out_ << e.name; }
+
+    void dump_expr_node(const MemberExpr& e)
+    {
+        dump_expr(*e.base);
+        out_ << "." << e.member;
+    }
 
     void dump_expr_node(const GroupExpr& e)
     {
@@ -1550,9 +1617,14 @@ ParseResult parse(std::span<const curlee::lexer::Token> tokens)
     auto result = Parser(tokens).parse_program();
     if (auto* program = std::get_if<Program>(&result))
     {
-        assign_expr_ids(*program);
+        assign_expr_ids_program(*program);
     }
     return result;
+}
+
+void reassign_expr_ids(Program& program)
+{
+    assign_expr_ids_program(program);
 }
 
 std::string dump(const Program& program)

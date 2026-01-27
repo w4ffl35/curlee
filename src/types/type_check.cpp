@@ -22,9 +22,11 @@ using curlee::parser::Function;
 using curlee::parser::GroupExpr;
 using curlee::parser::IfStmt;
 using curlee::parser::LetStmt;
+using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
 using curlee::parser::Stmt;
+using curlee::parser::UnsafeStmt;
 using curlee::parser::WhileStmt;
 using curlee::source::Span;
 
@@ -66,6 +68,22 @@ class Checker
     std::vector<Scope> scopes_;
     std::vector<Diagnostic> diags_;
     TypeInfo info_;
+    int unsafe_depth_ = 0;
+
+    static bool is_python_ffi_call(const Expr& callee)
+    {
+        const auto* member = std::get_if<MemberExpr>(&callee.node);
+        if (member == nullptr || member->base == nullptr)
+        {
+            return false;
+        }
+        const auto* base_name = std::get_if<NameExpr>(&member->base->node);
+        if (base_name == nullptr)
+        {
+            return false;
+        }
+        return base_name->name == "python_ffi" && member->member == "call";
+    }
 
     void push_scope() { scopes_.push_back(Scope{}); }
     void pop_scope() { scopes_.pop_back(); }
@@ -230,6 +248,18 @@ class Checker
             check_stmt(stmt, expected_return);
         }
         pop_scope();
+    }
+
+    void check_stmt_node(const UnsafeStmt& s, Span, Type expected_return)
+    {
+        ++unsafe_depth_;
+        push_scope();
+        for (const auto& stmt : s.body->stmts)
+        {
+            check_stmt(stmt, expected_return);
+        }
+        pop_scope();
+        --unsafe_depth_;
     }
 
     void check_stmt_node(const IfStmt& s, Span, Type expected_return)
@@ -406,8 +436,35 @@ class Checker
         return std::nullopt;
     }
 
+    [[nodiscard]] std::optional<Type> check_expr_node(const MemberExpr& e, Span span)
+    {
+        if (e.base != nullptr)
+        {
+            (void)check_expr(*e.base);
+        }
+        error_at(span, "member access is only supported as a call target");
+        return std::nullopt;
+    }
+
     [[nodiscard]] std::optional<Type> check_expr_node(const CallExpr& e, Span span)
     {
+        if (is_python_ffi_call(*e.callee))
+        {
+            if (unsafe_depth_ == 0)
+            {
+                error_at(span, "python_ffi.call requires an unsafe context");
+                return std::nullopt;
+            }
+
+            if (!e.args.empty())
+            {
+                error_at(span, "python_ffi.call is stubbed and currently takes 0 arguments");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Unit};
+        }
+
         const auto* callee_name = std::get_if<NameExpr>(&e.callee->node);
         if (callee_name == nullptr)
         {
