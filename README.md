@@ -59,7 +59,7 @@ Curlee aims to support a world where agents exchange tasks safely.
 
 ## Architecture
 
-Curlee is structured as a non-toy compiler toolchain.
+Curlee is structured as a compiler toolchain.
 
 ```mermaid
 flowchart LR
@@ -68,7 +68,7 @@ flowchart LR
   P --> R[Resolver]
   R --> T[Type Checker]
   T --> V[Verifier Z3]
-  V -->|only if proven| C[Bytecode Compiler]
+  V -->|only after verification succeeds| C[Bytecode Compiler]
   C --> M[Deterministic VM fuel bounded]
 ```
 
