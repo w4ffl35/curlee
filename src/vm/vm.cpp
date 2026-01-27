@@ -12,6 +12,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <vector>
 
 namespace
 {
@@ -120,8 +121,48 @@ ProcResult run_process(const std::string& exe_path, const std::string& stdin_dat
         argv.push_back(const_cast<char*>(exe_path.c_str()));
         argv.push_back(nullptr);
 
-        execv(exe_path.c_str(), argv.data());
-        std::cerr << "execv failed: " << std::strerror(errno) << "\n";
+        const auto* parent_path = std::getenv("PATH");
+        const auto* parent_ld_library_path = std::getenv("LD_LIBRARY_PATH");
+        const auto* parent_asan_options = std::getenv("ASAN_OPTIONS");
+        const auto* parent_ubsan_options = std::getenv("UBSAN_OPTIONS");
+        const auto* parent_lsan_options = std::getenv("LSAN_OPTIONS");
+
+        std::vector<std::string> env_storage;
+        env_storage.emplace_back("LC_ALL=C");
+        env_storage.emplace_back("LANG=C");
+        env_storage.emplace_back("TZ=UTC");
+        env_storage.emplace_back("PYTHONHASHSEED=0");
+        if (parent_path != nullptr)
+        {
+            env_storage.emplace_back(std::string("PATH=") + parent_path);
+        }
+        if (parent_ld_library_path != nullptr)
+        {
+            env_storage.emplace_back(std::string("LD_LIBRARY_PATH=") + parent_ld_library_path);
+        }
+        if (parent_asan_options != nullptr)
+        {
+            env_storage.emplace_back(std::string("ASAN_OPTIONS=") + parent_asan_options);
+        }
+        if (parent_ubsan_options != nullptr)
+        {
+            env_storage.emplace_back(std::string("UBSAN_OPTIONS=") + parent_ubsan_options);
+        }
+        if (parent_lsan_options != nullptr)
+        {
+            env_storage.emplace_back(std::string("LSAN_OPTIONS=") + parent_lsan_options);
+        }
+
+        std::vector<char*> envp;
+        envp.reserve(env_storage.size() + 1);
+        for (auto& kv : env_storage)
+        {
+            envp.push_back(kv.data());
+        }
+        envp.push_back(nullptr);
+
+        execve(exe_path.c_str(), argv.data(), envp.data());
+        std::cerr << "execve failed: " << std::strerror(errno) << "\n";
         std::exit(127);
     }
 

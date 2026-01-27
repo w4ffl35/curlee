@@ -620,11 +620,12 @@ static bool run_run_python_ffi_case(std::vector<std::string> argv_storage,
 
 int main(int argc, char** argv)
 {
-    if (argc != 5)
+    if (argc != 6)
     {
         std::cerr
             << "usage: curlee_cli_diagnostics_golden_tests <tests/cli_diagnostics-dir> "
-               "<fake-python-runner-error> <fake-python-runner-hang> <fake-python-runner-spam>\n";
+               "<fake-python-runner-error> <fake-python-runner-hang> <fake-python-runner-spam> "
+               "<fake-python-runner-env-check>\n";
         return 2;
     }
 
@@ -632,6 +633,7 @@ int main(int argc, char** argv)
     const std::string fake_runner_error = argv[2];
     const std::string fake_runner_hang = argv[3];
     const std::string fake_runner_spam = argv[4];
+    const std::string fake_runner_env_check = argv[5];
     const fs::path golden = dir / "missing_file.golden";
     const fs::path check_requires_divide_golden = dir / "check_requires_divide.golden";
     const fs::path check_refinement_implies_golden = dir / "check_refinement_implies.golden";
@@ -666,6 +668,10 @@ int main(int argc, char** argv)
         dir / "run_python_ffi_runner_output_limit.stdout.golden";
     const fs::path run_python_ffi_runner_output_limit_err_golden =
         dir / "run_python_ffi_runner_output_limit.stderr.golden";
+    const fs::path run_python_ffi_runner_env_sanitized_out_golden =
+        dir / "run_python_ffi_runner_env_sanitized.stdout.golden";
+    const fs::path run_python_ffi_runner_env_sanitized_err_golden =
+        dir / "run_python_ffi_runner_env_sanitized.stderr.golden";
 
     try
     {
@@ -802,6 +808,25 @@ int main(int argc, char** argv)
             }
 
             (void)unsetenv("CURLEE_PYTHON_RUNNER");
+        }
+
+        // Runner environment is scrubbed/deterministic.
+        {
+            (void)setenv("FOO", "bar", 1);
+            (void)setenv("CURLEE_PYTHON_RUNNER", fake_runner_env_check.c_str(), 1);
+
+            const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
+            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap",
+                                                           "python:ffi", rel_path};
+            if (!run_run_python_ffi_case(argv_storage, run_python_ffi_runner_env_sanitized_out_golden,
+                                         run_python_ffi_runner_env_sanitized_err_golden,
+                                         "run-python-ffi-runner-env-sanitized", 0))
+            {
+                return 1;
+            }
+
+            (void)unsetenv("CURLEE_PYTHON_RUNNER");
+            (void)unsetenv("FOO");
         }
     }
     catch (const std::exception& e)
