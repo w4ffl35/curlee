@@ -8,6 +8,7 @@ wiki/
 !/README.md
 !/docs/README.md
 !/TODO.md
+!/.github/copilot-instructions.md
 
 # Local prompt / training artifacts.
 training_data.txt
