@@ -123,6 +123,7 @@ add_test(
 
 add_executable(curlee_cli_diagnostics_golden_tests
   tests/cli_diagnostics_golden_tests.cpp
+  src/bundle/bundle.cpp
   src/cli/cli.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
@@ -186,6 +187,7 @@ add_test(NAME curlee_types_tests COMMAND curlee_types_tests)
 
 add_executable(curlee_cli_fmt_tests
   tests/cli_fmt_tests.cpp
+  src/bundle/bundle.cpp
   src/cli/cli.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
