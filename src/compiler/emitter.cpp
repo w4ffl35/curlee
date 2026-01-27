@@ -337,26 +337,132 @@ class Emitter
         diags_.push_back(error_at(span, "member access not supported in emitter yet"));
     }
 
-    void emit_expr_node(const curlee::parser::UnaryExpr&, Span span)
+    void emit_expr_node(const curlee::parser::UnaryExpr& expr, Span span)
     {
-        diags_.push_back(error_at(span, "unary operators not supported in emitter yet"));
+        using curlee::lexer::TokenKind;
+
+        emit_expr(*expr.rhs);
+        if (!diags_.empty())
+        {
+            return;
+        }
+
+        switch (expr.op)
+        {
+        case TokenKind::Bang:
+            chunk_.emit(OpCode::Not, span);
+            return;
+        case TokenKind::Minus:
+            chunk_.emit(OpCode::Neg, span);
+            return;
+        default:
+            diags_.push_back(error_at(span, "unsupported unary operator in emitter"));
+            return;
+        }
     }
 
     void emit_expr_node(const BinaryExpr& expr, Span span)
     {
         using curlee::lexer::TokenKind;
-        if (expr.op != TokenKind::Plus)
+
+        if (expr.op == TokenKind::AndAnd)
         {
-            diags_.push_back(error_at(span, "only '+' is supported in emitter yet"));
+            // Short-circuit: if lhs is false, result is false without evaluating rhs.
+            emit_expr(*expr.lhs);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::JumpIfFalse, span);
+            const auto false_patch = emit_u16_placeholder(span);
+
+            emit_expr(*expr.rhs);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::Jump, span);
+            const auto end_patch = emit_u16_placeholder(span);
+
+            patch_u16(false_patch, static_cast<std::uint16_t>(ip()));
+            chunk_.emit_constant(Value::bool_v(false), span);
+            patch_u16(end_patch, static_cast<std::uint16_t>(ip()));
             return;
         }
+
+        if (expr.op == TokenKind::OrOr)
+        {
+            // Short-circuit: if lhs is true, result is true without evaluating rhs.
+            emit_expr(*expr.lhs);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::Not, span);
+            chunk_.emit(OpCode::JumpIfFalse, span);
+            const auto true_patch = emit_u16_placeholder(span);
+
+            emit_expr(*expr.rhs);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::Jump, span);
+            const auto end_patch = emit_u16_placeholder(span);
+
+            patch_u16(true_patch, static_cast<std::uint16_t>(ip()));
+            chunk_.emit_constant(Value::bool_v(true), span);
+            patch_u16(end_patch, static_cast<std::uint16_t>(ip()));
+            return;
+        }
+
         emit_expr(*expr.lhs);
         emit_expr(*expr.rhs);
         if (!diags_.empty())
         {
             return;
         }
-        chunk_.emit(OpCode::Add, span);
+
+        switch (expr.op)
+        {
+        case TokenKind::Plus:
+            chunk_.emit(OpCode::Add, span);
+            return;
+        case TokenKind::Minus:
+            chunk_.emit(OpCode::Sub, span);
+            return;
+        case TokenKind::Star:
+            chunk_.emit(OpCode::Mul, span);
+            return;
+        case TokenKind::Slash:
+            chunk_.emit(OpCode::Div, span);
+            return;
+        case TokenKind::EqualEqual:
+            chunk_.emit(OpCode::Equal, span);
+            return;
+        case TokenKind::BangEqual:
+            chunk_.emit(OpCode::NotEqual, span);
+            return;
+        case TokenKind::Less:
+            chunk_.emit(OpCode::Less, span);
+            return;
+        case TokenKind::LessEqual:
+            chunk_.emit(OpCode::LessEqual, span);
+            return;
+        case TokenKind::Greater:
+            chunk_.emit(OpCode::Greater, span);
+            return;
+        case TokenKind::GreaterEqual:
+            chunk_.emit(OpCode::GreaterEqual, span);
+            return;
+        default:
+            diags_.push_back(error_at(span, "unsupported binary operator in emitter"));
+            return;
+        }
     }
 
     void emit_call(std::string_view callee, Span span)
