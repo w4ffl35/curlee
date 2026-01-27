@@ -1,9 +1,7 @@
-#include <curlee/interop/python_ffi.h>
-
 #include <cstdlib>
+#include <curlee/interop/python_ffi.h>
 #include <iostream>
 #include <string>
-#include <vector>
 
 static void fail(const std::string& msg)
 {
@@ -16,7 +14,10 @@ int main()
     using namespace curlee::interop;
 
     {
-        const auto res = call_python({"io:stdout"}, "math", "sqrt", {"4"});
+        curlee::runtime::Capabilities caps;
+        caps.insert("io:stdout");
+
+        const auto res = call_python(caps, "math", "sqrt", {"4"});
         if (!std::holds_alternative<PythonFfiError>(res))
         {
             fail("expected missing capability error");
@@ -29,7 +30,10 @@ int main()
     }
 
     {
-        const auto res = call_python({"python:ffi"}, "math", "sqrt", {"4"});
+        curlee::runtime::Capabilities caps;
+        caps.insert("python:ffi");
+
+        const auto res = call_python(caps, "math", "sqrt", {"4"});
         if (!std::holds_alternative<PythonFfiError>(res))
         {
             fail("expected stub to return error until implemented");

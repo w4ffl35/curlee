@@ -1,0 +1,146 @@
+#include <curlee/bundle/bundle.h>
+#include <curlee/cli/cli.h>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+[[noreturn]] static void fail(const std::string& msg)
+{
+    std::cerr << "FAIL: " << msg << "\n";
+    std::exit(1);
+}
+
+static int run_cli(const std::vector<std::string>& argv_storage, std::string& out, std::string& err)
+{
+    std::ostringstream captured_out;
+    std::ostringstream captured_err;
+
+    auto* old_cout = std::cout.rdbuf(captured_out.rdbuf());
+    auto* old_cerr = std::cerr.rdbuf(captured_err.rdbuf());
+
+    std::vector<std::string> args = argv_storage;
+    std::vector<char*> argv;
+    argv.reserve(args.size());
+    for (auto& s : args)
+    {
+        argv.push_back(s.data());
+    }
+
+    const int rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
+
+    std::cout.rdbuf(old_cout);
+    std::cerr.rdbuf(old_cerr);
+
+    out = captured_out.str();
+    err = captured_err.str();
+    return rc;
+}
+
+static std::filesystem::path temp_path(const std::string& name)
+{
+    return std::filesystem::temp_directory_path() / name;
+}
+
+int main()
+{
+    namespace fs = std::filesystem;
+    using namespace curlee::bundle;
+
+    const fs::path ok_path = temp_path("curlee_cli_bundle_ok.bundle");
+    const fs::path bad_path = temp_path("curlee_cli_bundle_bad.bundle");
+
+    fs::remove(ok_path);
+    fs::remove(bad_path);
+
+    Bundle bundle;
+    bundle.manifest.capabilities = {"io:stdout", "net:none"};
+    bundle.manifest.imports = {ImportPin{.path = "stdlib.math", .hash = "deadbeef"}};
+    bundle.manifest.proof = "proof-v1";
+    bundle.bytecode = {0x01, 0x02, 0x03, 0x04};
+
+    const auto write_err = write_bundle(ok_path.string(), bundle);
+    if (!write_err.message.empty())
+    {
+        fail("expected bundle write to succeed");
+    }
+
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli({"curlee", "bundle", "verify", ok_path.string()}, out, err);
+        if (rc != 0)
+        {
+            fail("expected bundle verify to succeed");
+        }
+        if (!err.empty())
+        {
+            fail("expected bundle verify to have empty stderr");
+        }
+        if (out != "curlee bundle verify: ok\n")
+        {
+            fail("unexpected bundle verify stdout: " + out);
+        }
+    }
+
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli({"curlee", "bundle", "info", ok_path.string()}, out, err);
+        if (rc != 0)
+        {
+            fail("expected bundle info to succeed");
+        }
+        if (!err.empty())
+        {
+            fail("expected bundle info to have empty stderr");
+        }
+
+        const std::string expected_hash = hash_bytes(bundle.bytecode);
+        const std::string expected = "curlee bundle info:\n"
+                                     "version: 1\n"
+                                     "bytecode_hash: " +
+                                     expected_hash +
+                                     "\n"
+                                     "capabilities: io:stdout,net:none\n"
+                                     "imports: stdlib.math:deadbeef\n"
+                                     "proof: present\n";
+
+        if (out != expected)
+        {
+            fail("unexpected bundle info stdout: " + out);
+        }
+    }
+
+    {
+        std::ofstream out(bad_path);
+        out << "CURLEE_BUNDLE_V1\n";
+        out << "version=" << kBundleVersion << "\n";
+        out << "bytecode_hash=deadbeef\n";
+        out << "capabilities=io:stdout\n";
+        out << "imports=stdlib.math:bead\n";
+        out << "proof=\n";
+        out << "bytecode=AQIDBA==\n";
+        out.close();
+
+        std::string cli_out;
+        std::string cli_err;
+        const int rc = run_cli({"curlee", "bundle", "verify", bad_path.string()}, cli_out, cli_err);
+        if (rc == 0)
+        {
+            fail("expected bundle verify to fail for invalid hash");
+        }
+        if (cli_err.find("bytecode hash mismatch") == std::string::npos)
+        {
+            fail("expected stderr to mention bytecode hash mismatch");
+        }
+    }
+
+    fs::remove(ok_path);
+    fs::remove(bad_path);
+
+    std::cout << "OK\n";
+    return 0;
+}

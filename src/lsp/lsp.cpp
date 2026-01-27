@@ -679,6 +679,13 @@ const curlee::parser::Expr* find_expr_at(const curlee::parser::Expr& expr, std::
             best = find_expr_at(arg, offset, best);
         }
     }
+    else if (const auto* member = std::get_if<curlee::parser::MemberExpr>(&expr.node))
+    {
+        if (member->base)
+        {
+            best = find_expr_at(*member->base, offset, best);
+        }
+    }
     else if (const auto* group = std::get_if<curlee::parser::GroupExpr>(&expr.node))
     {
         if (group->inner)
@@ -742,6 +749,16 @@ void find_exprs_in_stmt(const curlee::parser::Stmt& stmt, std::size_t offset,
         if (block_stmt->block)
         {
             for (const auto& inner : block_stmt->block->stmts)
+            {
+                find_exprs_in_stmt(inner, offset, best);
+            }
+        }
+    }
+    else if (const auto* unsafe_stmt = std::get_if<curlee::parser::UnsafeStmt>(&stmt.node))
+    {
+        if (unsafe_stmt->body)
+        {
+            for (const auto& inner : unsafe_stmt->body->stmts)
             {
                 find_exprs_in_stmt(inner, offset, best);
             }

@@ -51,6 +51,10 @@
         {
             "name": "linux-debug",
             "configurePreset": "linux-debug"
+        },
+        {
+            "name": "linux-release",
+            "configurePreset": "linux-release"
         }
     ]
 }

@@ -28,9 +28,11 @@ using curlee::parser::ExprStmt;
 using curlee::parser::Function;
 using curlee::parser::IfStmt;
 using curlee::parser::LetStmt;
+using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
 using curlee::parser::Stmt;
+using curlee::parser::UnsafeStmt;
 using curlee::parser::WhileStmt;
 using curlee::source::Span;
 using curlee::types::TypeKind;
@@ -651,6 +653,28 @@ class Verifier
         }
     }
 
+    static bool is_python_ffi_call(const CallExpr& call)
+    {
+        if (call.callee == nullptr)
+        {
+            return false;
+        }
+
+        const auto* member = std::get_if<MemberExpr>(&call.callee->node);
+        if (member == nullptr || member->base == nullptr)
+        {
+            return false;
+        }
+
+        const auto* base_name = std::get_if<NameExpr>(&member->base->node);
+        if (base_name == nullptr)
+        {
+            return false;
+        }
+
+        return base_name->name == "python_ffi" && member->member == "call";
+    }
+
     void check_expr_for_calls(const Expr& e)
     {
         std::visit(
@@ -659,10 +683,20 @@ class Verifier
                 using Node = std::decay_t<decltype(node)>;
                 if constexpr (std::is_same_v<Node, CallExpr>)
                 {
-                    check_call(node);
+                    if (!is_python_ffi_call(node))
+                    {
+                        check_call(node);
+                    }
                     for (const auto& arg : node.args)
                     {
                         check_expr_for_calls(arg);
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, MemberExpr>)
+                {
+                    if (node.base)
+                    {
+                        check_expr_for_calls(*node.base);
                     }
                 }
                 else if constexpr (std::is_same_v<Node, curlee::parser::UnaryExpr>)
@@ -787,6 +821,16 @@ class Verifier
     {
         push_scope();
         for (const auto& stmt : s.block->stmts)
+        {
+            check_stmt(stmt, expected_return);
+        }
+        pop_scope();
+    }
+
+    void check_stmt_node(const UnsafeStmt& s, Span, TypeKind expected_return)
+    {
+        push_scope();
+        for (const auto& stmt : s.body->stmts)
         {
             check_stmt(stmt, expected_return);
         }

@@ -157,6 +157,33 @@ int main()
 
     {
         const std::string src = R"(fn main() -> Unit {
+  unsafe { let x: Int = 1; x; }
+  return;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on unsafe-block program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on unsafe-block program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("unsafe {") == std::string::npos)
+        {
+            fail("dump missing unsafe block");
+        }
+    }
+
+    {
+        const std::string src = R"(fn main() -> Unit {
   return;
 })";
 
@@ -289,6 +316,43 @@ fn main() -> Unit {
         if (dumped.find("import foo.bar;") == std::string::npos)
         {
             fail("dump missing import declaration");
+        }
+    }
+
+    {
+        const std::string src = R"(fn main() -> Unit {
+  return 0;
+}
+
+import foo.bar;
+)";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on import-after-fn program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+        {
+            fail("expected parse error for import after function");
+        }
+
+        const auto& ds = std::get<std::vector<diag::Diagnostic>>(parsed);
+        bool found = false;
+        for (const auto& d : ds)
+        {
+            if (d.message.find("imports must appear before") != std::string::npos)
+            {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+        {
+            fail("expected import-order diagnostic");
         }
     }
 
