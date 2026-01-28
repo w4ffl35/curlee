@@ -5,11 +5,13 @@ If you notice it is being ignored, fix `.gitignore` rather than working around i
 
 You are working on **Curlee**, a C++23 (CMake) compiler/runtime project. Curlee is designed as an **AI-native safety harness**: code should not run unless it satisfies *declared contracts*.
 
-## Documentation
+## Wiki & Docs (single source of truth)
 
-- The primary user documentation lives in the **GitHub wiki** for this repository.
-- The wiki repo is in the `wiki` directory (locally gitignored).
-- You are allowed to edit the wiki but you'll need to commit changes within the wiki repo itself in the wiki directory.
+- User-facing docs live in the **GitHub wiki**.
+- This workspace includes a local clone at `wiki/` which is a **separate git repo** and is **gitignored by the main repo**.
+   - To update wiki docs: commit/push inside `wiki/` (do not expect main-repo commits to affect wiki pages).
+- Do not create `docs/` or other new doc trees in the main repo unless an Issue explicitly asks.
+- Keep the wiki page **Verification-Scope** in sync with implementation (scope drift is not allowed).
 
 ## Formatting policy
 
@@ -70,14 +72,10 @@ Efficiency:
 
 ## Repo-specific expectations
 
-- Documentation location: user-facing documentation lives in the **separate GitHub wiki repo**.
-   - Do not create `docs/` or other new doc trees in this repository unless an Issue explicitly asks for it.
-   - The `wiki/` directory in this workspace is a local clone for convenience and is **gitignored**; do not edit it expecting changes to land.
-   - When an Issue requires documentation updates, leave an Issue comment naming the wiki page(s) to update and keep code/tests aligned.
+- When an Issue requires documentation updates, leave an Issue comment naming the wiki page(s) to update and keep code/tests aligned.
 
 - Keep GitHub Issues up-to-date when you make design decisions or complete milestones.
 - Never implement “extra” improvements that are not in the current Issue scope.
-- Keep the wiki "Verification Scope" page in sync with implementation (scope drift is not allowed).
 - Prefer golden tests for diagnostics and verification failures.
 - Keep syntax unambiguous (no indentation-significant parsing).
 - Any Python interoperability must be behind an explicit `unsafe` boundary and capability checks.
