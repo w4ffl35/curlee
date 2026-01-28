@@ -157,14 +157,242 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
                                 .error = "stack underflow",
                                 .error_span = span};
             }
+            if (lhs->kind == ValueKind::Int && rhs->kind == ValueKind::Int)
+            {
+                push(Value::int_v(lhs->int_value + rhs->int_value));
+                break;
+            }
+            if (lhs->kind == ValueKind::String && rhs->kind == ValueKind::String)
+            {
+                push(Value::string_v(lhs->string_value + rhs->string_value));
+                break;
+            }
+            return VmResult{.ok = false,
+                            .value = Value::unit_v(),
+                            .error = "add expects Int or String",
+                            .error_span = span};
+            break;
+        }
+        case OpCode::Sub:
+        {
+            auto rhs = pop();
+            auto lhs = pop();
+            if (!lhs.has_value() || !rhs.has_value())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "stack underflow",
+                                .error_span = span};
+            }
             if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
             {
                 return VmResult{.ok = false,
                                 .value = Value::unit_v(),
-                                .error = "add expects Int",
+                                .error = "sub expects Int",
                                 .error_span = span};
             }
-            push(Value::int_v(lhs->int_value + rhs->int_value));
+            push(Value::int_v(lhs->int_value - rhs->int_value));
+            break;
+        }
+        case OpCode::Mul:
+        {
+            auto rhs = pop();
+            auto lhs = pop();
+            if (!lhs.has_value() || !rhs.has_value())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "stack underflow",
+                                .error_span = span};
+            }
+            if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "mul expects Int",
+                                .error_span = span};
+            }
+            push(Value::int_v(lhs->int_value * rhs->int_value));
+            break;
+        }
+        case OpCode::Div:
+        {
+            auto rhs = pop();
+            auto lhs = pop();
+            if (!lhs.has_value() || !rhs.has_value())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "stack underflow",
+                                .error_span = span};
+            }
+            if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "div expects Int",
+                                .error_span = span};
+            }
+            if (rhs->int_value == 0)
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "divide by zero",
+                                .error_span = span};
+            }
+            push(Value::int_v(lhs->int_value / rhs->int_value));
+            break;
+        }
+        case OpCode::Neg:
+        {
+            auto value = pop();
+            if (!value.has_value())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "stack underflow",
+                                .error_span = span};
+            }
+            if (value->kind != ValueKind::Int)
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "neg expects Int",
+                                .error_span = span};
+            }
+            push(Value::int_v(-value->int_value));
+            break;
+        }
+        case OpCode::Not:
+        {
+            auto value = pop();
+            if (!value.has_value())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "stack underflow",
+                                .error_span = span};
+            }
+            if (value->kind != ValueKind::Bool)
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "not expects Bool",
+                                .error_span = span};
+            }
+            push(Value::bool_v(!value->bool_value));
+            break;
+        }
+        case OpCode::Equal:
+        {
+            auto rhs = pop();
+            auto lhs = pop();
+            if (!lhs.has_value() || !rhs.has_value())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "stack underflow",
+                                .error_span = span};
+            }
+            push(Value::bool_v(*lhs == *rhs));
+            break;
+        }
+        case OpCode::NotEqual:
+        {
+            auto rhs = pop();
+            auto lhs = pop();
+            if (!lhs.has_value() || !rhs.has_value())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "stack underflow",
+                                .error_span = span};
+            }
+            push(Value::bool_v(!(*lhs == *rhs)));
+            break;
+        }
+        case OpCode::Less:
+        {
+            auto rhs = pop();
+            auto lhs = pop();
+            if (!lhs.has_value() || !rhs.has_value())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "stack underflow",
+                                .error_span = span};
+            }
+            if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "lt expects Int",
+                                .error_span = span};
+            }
+            push(Value::bool_v(lhs->int_value < rhs->int_value));
+            break;
+        }
+        case OpCode::LessEqual:
+        {
+            auto rhs = pop();
+            auto lhs = pop();
+            if (!lhs.has_value() || !rhs.has_value())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "stack underflow",
+                                .error_span = span};
+            }
+            if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "le expects Int",
+                                .error_span = span};
+            }
+            push(Value::bool_v(lhs->int_value <= rhs->int_value));
+            break;
+        }
+        case OpCode::Greater:
+        {
+            auto rhs = pop();
+            auto lhs = pop();
+            if (!lhs.has_value() || !rhs.has_value())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "stack underflow",
+                                .error_span = span};
+            }
+            if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "gt expects Int",
+                                .error_span = span};
+            }
+            push(Value::bool_v(lhs->int_value > rhs->int_value));
+            break;
+        }
+        case OpCode::GreaterEqual:
+        {
+            auto rhs = pop();
+            auto lhs = pop();
+            if (!lhs.has_value() || !rhs.has_value())
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "stack underflow",
+                                .error_span = span};
+            }
+            if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
+            {
+                return VmResult{.ok = false,
+                                .value = Value::unit_v(),
+                                .error = "ge expects Int",
+                                .error_span = span};
+            }
+            push(Value::bool_v(lhs->int_value >= rhs->int_value));
             break;
         }
         case OpCode::Pop:

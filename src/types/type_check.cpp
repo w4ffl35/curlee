@@ -40,9 +40,26 @@ class Checker
   public:
     [[nodiscard]] TypeCheckResult run(const curlee::parser::Program& program)
     {
+        // Builtins (compiler/runtime-provided).
+        {
+            FunctionType print_sig;
+            // Minimal MVP: print supports the core scalar types.
+            // (We model this as a pseudo-overload in the checker; the emitter enforces arity.)
+            // Note: verification currently ignores builtins and does not attempt to lower them.
+            print_sig.result = Type{.kind = TypeKind::Unit};
+            // Placeholder; per-call validation happens in CallExpr checking.
+            print_sig.params.push_back(Type{.kind = TypeKind::Unit});
+            functions_.emplace("print", print_sig);
+        }
+
         // Collect function signatures first.
         for (const auto& f : program.functions)
         {
+            if (f.name == "print")
+            {
+                error_at(f.span, "cannot declare builtin function 'print'");
+                continue;
+            }
             auto sig = function_signature(f);
             if (!sig.has_value())
             {
@@ -396,6 +413,17 @@ class Checker
         switch (e.op)
         {
         case TokenKind::Plus:
+            if (lhs->kind == TypeKind::String && rhs->kind == TypeKind::String)
+            {
+                return Type{.kind = TypeKind::String};
+            }
+            if (lhs->kind != TypeKind::Int || rhs->kind != TypeKind::Int)
+            {
+                error_at(span, "'+' expects Int+Int or String+String");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Int};
+
         case TokenKind::Minus:
         case TokenKind::Star:
         case TokenKind::Slash:
@@ -472,6 +500,27 @@ class Checker
             return std::nullopt;
         }
 
+        if (callee_name->name == "print")
+        {
+            if (e.args.size() != 1)
+            {
+                error_at(span, "print expects exactly 1 argument");
+                return std::nullopt;
+            }
+            const auto arg_t = check_expr(e.args[0]);
+            if (!arg_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (arg_t->kind != TypeKind::Int && arg_t->kind != TypeKind::Bool &&
+                arg_t->kind != TypeKind::String)
+            {
+                error_at(span, "print only supports Int, Bool, or String");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Unit};
+        }
+
         const auto it = functions_.find(callee_name->name);
         if (it == functions_.end())
         {
@@ -480,6 +529,7 @@ class Checker
         }
 
         const auto& sig = it->second;
+        // Builtin placeholder signatures may not match; only user functions are checked here.
         if (e.args.size() != sig.params.size())
         {
             error_at(span, "wrong number of arguments for call to '" +

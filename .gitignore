@@ -3,7 +3,5 @@ build/
 # Local clone of the GitHub wiki (kept in-workspace for agents, not tracked).
 wiki/
 
-# Local prompt / training artifacts.
+# Generated dataset export (do not commit).
 training_data.txt
-.github/copilot-instructions.md
-.github/prompts/

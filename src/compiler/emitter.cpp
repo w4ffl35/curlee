@@ -1,6 +1,7 @@
 #include <curlee/compiler/emitter.h>
 #include <curlee/lexer/token.h>
 #include <limits>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -45,6 +46,15 @@ class Emitter
   public:
     EmitResult run(const curlee::parser::Program& program)
     {
+        for (const auto& f : program.functions)
+        {
+            if (f.name == "print")
+            {
+                diags_.push_back(error_at(f.span, "cannot declare builtin function 'print'"));
+                return diags_;
+            }
+        }
+
         const Function* entry = find_main(program);
         if (entry == nullptr)
         {
@@ -316,9 +326,69 @@ class Emitter
         chunk_.emit_constant(Value::bool_v(expr.value), span);
     }
 
-    void emit_expr_node(const curlee::parser::StringExpr&, Span span)
+    [[nodiscard]] static std::optional<std::string> decode_string_literal(std::string_view lexeme,
+                                                                          std::string& error)
     {
-        diags_.push_back(error_at(span, "string literals not supported in emitter yet"));
+        if (lexeme.size() < 2 || lexeme.front() != '"' || lexeme.back() != '"')
+        {
+            error = "malformed string literal";
+            return std::nullopt;
+        }
+
+        std::string out;
+        out.reserve(lexeme.size() - 2);
+        for (std::size_t i = 1; i + 1 < lexeme.size(); ++i)
+        {
+            const char c = lexeme[i];
+            if (c != '\\')
+            {
+                out.push_back(c);
+                continue;
+            }
+
+            if (i + 1 >= lexeme.size() - 1)
+            {
+                error = "unterminated escape in string literal";
+                return std::nullopt;
+            }
+
+            const char esc = lexeme[++i];
+            switch (esc)
+            {
+            case 'n':
+                out.push_back('\n');
+                break;
+            case 't':
+                out.push_back('\t');
+                break;
+            case 'r':
+                out.push_back('\r');
+                break;
+            case '\\':
+                out.push_back('\\');
+                break;
+            case '"':
+                out.push_back('"');
+                break;
+            default:
+                error = std::string("unsupported escape \\") + esc + "'";
+                return std::nullopt;
+            }
+        }
+
+        return out;
+    }
+
+    void emit_expr_node(const curlee::parser::StringExpr& expr, Span span)
+    {
+        std::string err;
+        auto decoded = decode_string_literal(expr.lexeme, err);
+        if (!decoded.has_value())
+        {
+            diags_.push_back(error_at(span, err));
+            return;
+        }
+        chunk_.emit_constant(Value::string_v(std::move(*decoded)), span);
     }
 
     void emit_expr_node(const NameExpr& expr, Span span)
@@ -337,26 +407,132 @@ class Emitter
         diags_.push_back(error_at(span, "member access not supported in emitter yet"));
     }
 
-    void emit_expr_node(const curlee::parser::UnaryExpr&, Span span)
+    void emit_expr_node(const curlee::parser::UnaryExpr& expr, Span span)
     {
-        diags_.push_back(error_at(span, "unary operators not supported in emitter yet"));
+        using curlee::lexer::TokenKind;
+
+        emit_expr(*expr.rhs);
+        if (!diags_.empty())
+        {
+            return;
+        }
+
+        switch (expr.op)
+        {
+        case TokenKind::Bang:
+            chunk_.emit(OpCode::Not, span);
+            return;
+        case TokenKind::Minus:
+            chunk_.emit(OpCode::Neg, span);
+            return;
+        default:
+            diags_.push_back(error_at(span, "unsupported unary operator in emitter"));
+            return;
+        }
     }
 
     void emit_expr_node(const BinaryExpr& expr, Span span)
     {
         using curlee::lexer::TokenKind;
-        if (expr.op != TokenKind::Plus)
+
+        if (expr.op == TokenKind::AndAnd)
         {
-            diags_.push_back(error_at(span, "only '+' is supported in emitter yet"));
+            // Short-circuit: if lhs is false, result is false without evaluating rhs.
+            emit_expr(*expr.lhs);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::JumpIfFalse, span);
+            const auto false_patch = emit_u16_placeholder(span);
+
+            emit_expr(*expr.rhs);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::Jump, span);
+            const auto end_patch = emit_u16_placeholder(span);
+
+            patch_u16(false_patch, static_cast<std::uint16_t>(ip()));
+            chunk_.emit_constant(Value::bool_v(false), span);
+            patch_u16(end_patch, static_cast<std::uint16_t>(ip()));
             return;
         }
+
+        if (expr.op == TokenKind::OrOr)
+        {
+            // Short-circuit: if lhs is true, result is true without evaluating rhs.
+            emit_expr(*expr.lhs);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::Not, span);
+            chunk_.emit(OpCode::JumpIfFalse, span);
+            const auto true_patch = emit_u16_placeholder(span);
+
+            emit_expr(*expr.rhs);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::Jump, span);
+            const auto end_patch = emit_u16_placeholder(span);
+
+            patch_u16(true_patch, static_cast<std::uint16_t>(ip()));
+            chunk_.emit_constant(Value::bool_v(true), span);
+            patch_u16(end_patch, static_cast<std::uint16_t>(ip()));
+            return;
+        }
+
         emit_expr(*expr.lhs);
         emit_expr(*expr.rhs);
         if (!diags_.empty())
         {
             return;
         }
-        chunk_.emit(OpCode::Add, span);
+
+        switch (expr.op)
+        {
+        case TokenKind::Plus:
+            chunk_.emit(OpCode::Add, span);
+            return;
+        case TokenKind::Minus:
+            chunk_.emit(OpCode::Sub, span);
+            return;
+        case TokenKind::Star:
+            chunk_.emit(OpCode::Mul, span);
+            return;
+        case TokenKind::Slash:
+            chunk_.emit(OpCode::Div, span);
+            return;
+        case TokenKind::EqualEqual:
+            chunk_.emit(OpCode::Equal, span);
+            return;
+        case TokenKind::BangEqual:
+            chunk_.emit(OpCode::NotEqual, span);
+            return;
+        case TokenKind::Less:
+            chunk_.emit(OpCode::Less, span);
+            return;
+        case TokenKind::LessEqual:
+            chunk_.emit(OpCode::LessEqual, span);
+            return;
+        case TokenKind::Greater:
+            chunk_.emit(OpCode::Greater, span);
+            return;
+        case TokenKind::GreaterEqual:
+            chunk_.emit(OpCode::GreaterEqual, span);
+            return;
+        default:
+            diags_.push_back(error_at(span, "unsupported binary operator in emitter"));
+            return;
+        }
     }
 
     void emit_call(std::string_view callee, Span span)
@@ -368,6 +544,24 @@ class Emitter
 
     void emit_expr_node(const CallExpr& expr, Span span)
     {
+        // Builtin: print(<expr>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "print")
+        {
+            if (expr.args.size() != 1)
+            {
+                diags_.push_back(error_at(span, "print expects exactly 1 argument"));
+                return;
+            }
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+            chunk_.emit(OpCode::Print, span);
+            return;
+        }
+
         if (!expr.args.empty())
         {
             diags_.push_back(error_at(span, "call arguments not supported in emitter yet"));

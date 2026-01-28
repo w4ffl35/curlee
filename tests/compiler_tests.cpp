@@ -4,6 +4,7 @@
 #include <curlee/parser/parser.h>
 #include <curlee/vm/vm.h>
 #include <iostream>
+#include <vector>
 
 static void fail(const std::string& msg)
 {
@@ -11,34 +12,105 @@ static void fail(const std::string& msg)
     std::exit(1);
 }
 
+static curlee::vm::Chunk compile_to_chunk(const std::string& source)
+{
+    const auto lexed = curlee::lexer::lex(source);
+    if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+    {
+        fail("expected lexing to succeed");
+    }
+
+    const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+    const auto parsed = curlee::parser::parse(tokens);
+    if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+    {
+        fail("expected parsing to succeed");
+    }
+
+    const auto& program = std::get<curlee::parser::Program>(parsed);
+    const auto emitted = curlee::compiler::emit_bytecode(program);
+    if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+    {
+        fail("expected bytecode emission to succeed");
+    }
+
+    return std::get<curlee::vm::Chunk>(emitted);
+}
+
+static curlee::vm::VmResult run_chunk(const curlee::vm::Chunk& chunk)
+{
+    curlee::vm::VM vm;
+    return vm.run(chunk);
+}
+
+static curlee::vm::VmResult run_chunk_with_caps(const curlee::vm::Chunk& chunk,
+                                                const curlee::vm::VM::Capabilities& caps)
+{
+    curlee::vm::VM vm;
+    return vm.run(chunk, caps);
+}
+
+static std::vector<curlee::vm::OpCode> decode_ops(const curlee::vm::Chunk& chunk)
+{
+    using curlee::vm::OpCode;
+    std::vector<OpCode> ops;
+    std::size_t ip = 0;
+    while (ip < chunk.code.size())
+    {
+        const auto op = static_cast<OpCode>(chunk.code[ip++]);
+        ops.push_back(op);
+        switch (op)
+        {
+        case OpCode::Constant:
+        case OpCode::LoadLocal:
+        case OpCode::StoreLocal:
+        case OpCode::Jump:
+        case OpCode::JumpIfFalse:
+        case OpCode::Call:
+            ip += 2;
+            break;
+        case OpCode::Add:
+        case OpCode::Sub:
+        case OpCode::Mul:
+        case OpCode::Div:
+        case OpCode::Neg:
+        case OpCode::Not:
+        case OpCode::Equal:
+        case OpCode::NotEqual:
+        case OpCode::Less:
+        case OpCode::LessEqual:
+        case OpCode::Greater:
+        case OpCode::GreaterEqual:
+        case OpCode::Pop:
+        case OpCode::Return:
+        case OpCode::Ret:
+        case OpCode::Print:
+        case OpCode::PythonCall:
+            break;
+        }
+    }
+    return ops;
+}
+
+static bool contains_op(const std::vector<curlee::vm::OpCode>& ops, curlee::vm::OpCode needle)
+{
+    for (const auto op : ops)
+    {
+        if (op == needle)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 int main()
 {
     {
         const std::string source = "fn main() -> Int { let x: Int = 1; return x + 2; }";
 
-        const auto lexed = curlee::lexer::lex(source);
-        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
-        {
-            fail("expected lexing to succeed in compiler test");
-        }
-
-        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
-        const auto parsed = curlee::parser::parse(tokens);
-        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
-        {
-            fail("expected parsing to succeed in compiler test");
-        }
-
-        const auto& program = std::get<curlee::parser::Program>(parsed);
-        const auto emitted = curlee::compiler::emit_bytecode(program);
-        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
-        {
-            fail("expected bytecode emission to succeed");
-        }
-
-        const auto& chunk = std::get<curlee::vm::Chunk>(emitted);
-        curlee::vm::VM vm;
-        const auto res = vm.run(chunk);
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
         if (!res.ok)
         {
             fail("expected VM to run compiled chunk");
@@ -52,29 +124,8 @@ int main()
     {
         const std::string source = "fn main() -> Bool { return true; }";
 
-        const auto lexed = curlee::lexer::lex(source);
-        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
-        {
-            fail("expected lexing to succeed in bool compiler test");
-        }
-
-        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
-        const auto parsed = curlee::parser::parse(tokens);
-        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
-        {
-            fail("expected parsing to succeed in bool compiler test");
-        }
-
-        const auto& program = std::get<curlee::parser::Program>(parsed);
-        const auto emitted = curlee::compiler::emit_bytecode(program);
-        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
-        {
-            fail("expected bytecode emission to succeed for bool literal");
-        }
-
-        const auto& chunk = std::get<curlee::vm::Chunk>(emitted);
-        curlee::vm::VM vm;
-        const auto res = vm.run(chunk);
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
         if (!res.ok)
         {
             fail("expected VM to run compiled bool chunk");
@@ -89,29 +140,8 @@ int main()
         const std::string source =
             "fn main() -> Int { if (true) { return 1; } else { return 2; } }";
 
-        const auto lexed = curlee::lexer::lex(source);
-        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
-        {
-            fail("expected lexing to succeed in if/else compiler test");
-        }
-
-        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
-        const auto parsed = curlee::parser::parse(tokens);
-        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
-        {
-            fail("expected parsing to succeed in if/else compiler test");
-        }
-
-        const auto& program = std::get<curlee::parser::Program>(parsed);
-        const auto emitted = curlee::compiler::emit_bytecode(program);
-        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
-        {
-            fail("expected bytecode emission to succeed for if/else");
-        }
-
-        const auto& chunk = std::get<curlee::vm::Chunk>(emitted);
-        curlee::vm::VM vm;
-        const auto res = vm.run(chunk);
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
         if (!res.ok || !(res.value == curlee::vm::Value::int_v(1)))
         {
             fail("expected if/else to return 1");
@@ -119,32 +149,10 @@ int main()
     }
 
     {
-        const std::string source =
-            "fn main() -> Int { while (true) { return 42; } return 0; }";
+        const std::string source = "fn main() -> Int { while (true) { return 42; } return 0; }";
 
-        const auto lexed = curlee::lexer::lex(source);
-        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
-        {
-            fail("expected lexing to succeed in while compiler test");
-        }
-
-        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
-        const auto parsed = curlee::parser::parse(tokens);
-        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
-        {
-            fail("expected parsing to succeed in while compiler test");
-        }
-
-        const auto& program = std::get<curlee::parser::Program>(parsed);
-        const auto emitted = curlee::compiler::emit_bytecode(program);
-        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
-        {
-            fail("expected bytecode emission to succeed for while");
-        }
-
-        const auto& chunk = std::get<curlee::vm::Chunk>(emitted);
-        curlee::vm::VM vm;
-        const auto res = vm.run(chunk);
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
         if (!res.ok || !(res.value == curlee::vm::Value::int_v(42)))
         {
             fail("expected while to return 42");
@@ -155,32 +163,125 @@ int main()
         const std::string source =
             "fn foo() -> Int { return 7; } fn main() -> Int { return foo() + 1; }";
 
-        const auto lexed = curlee::lexer::lex(source);
-        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
-        {
-            fail("expected lexing to succeed in call compiler test");
-        }
-
-        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
-        const auto parsed = curlee::parser::parse(tokens);
-        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
-        {
-            fail("expected parsing to succeed in call compiler test");
-        }
-
-        const auto& program = std::get<curlee::parser::Program>(parsed);
-        const auto emitted = curlee::compiler::emit_bytecode(program);
-        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
-        {
-            fail("expected bytecode emission to succeed for call");
-        }
-
-        const auto& chunk = std::get<curlee::vm::Chunk>(emitted);
-        curlee::vm::VM vm;
-        const auto res = vm.run(chunk);
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
         if (!res.ok || !(res.value == curlee::vm::Value::int_v(8)))
         {
             fail("expected foo() + 1 to equal 8");
+        }
+    }
+
+    {
+        const std::string source = "fn main() -> Int { return -1; }";
+        const auto chunk = compile_to_chunk(source);
+        const auto ops = decode_ops(chunk);
+        if (!contains_op(ops, curlee::vm::OpCode::Neg))
+        {
+            fail("expected unary '-' to emit Neg opcode");
+        }
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(-1)))
+        {
+            fail("expected unary '-' to evaluate to -1");
+        }
+    }
+
+    {
+        const std::string source = "fn main() -> Bool { return !false; }";
+        const auto chunk = compile_to_chunk(source);
+        const auto ops = decode_ops(chunk);
+        if (!contains_op(ops, curlee::vm::OpCode::Not))
+        {
+            fail("expected '!' to emit Not opcode");
+        }
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::bool_v(true)))
+        {
+            fail("expected '!false' to evaluate to true");
+        }
+    }
+
+    {
+        const std::string source = "fn main() -> Int { return 10 - 3 * 2; }";
+        const auto chunk = compile_to_chunk(source);
+        const auto ops = decode_ops(chunk);
+        if (!contains_op(ops, curlee::vm::OpCode::Sub) ||
+            !contains_op(ops, curlee::vm::OpCode::Mul))
+        {
+            fail("expected '-' and '*' to emit Sub and Mul opcodes");
+        }
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(4)))
+        {
+            fail("expected 10 - 3 * 2 to equal 4");
+        }
+    }
+
+    {
+        const std::string source = "fn main() -> Bool { return (1 < 2) && (3 >= 3); }";
+        const auto chunk = compile_to_chunk(source);
+        const auto ops = decode_ops(chunk);
+        if (!contains_op(ops, curlee::vm::OpCode::Less) ||
+            !contains_op(ops, curlee::vm::OpCode::GreaterEqual))
+        {
+            fail("expected '<' and '>=' to emit comparison opcodes");
+        }
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::bool_v(true)))
+        {
+            fail("expected comparison + && to evaluate to true");
+        }
+    }
+
+    {
+        // Short-circuit should avoid divide-by-zero on RHS.
+        const std::string source =
+            "fn main() -> Int { if (false && ((1 / 0) == 0)) { return 1; } return 2; }";
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(2)))
+        {
+            fail("expected && short-circuit to avoid RHS evaluation");
+        }
+    }
+
+    {
+        // Short-circuit should avoid divide-by-zero on RHS.
+        const std::string source =
+            "fn main() -> Int { if (true || ((1 / 0) == 0)) { return 1; } return 2; }";
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(1)))
+        {
+            fail("expected || short-circuit to avoid RHS evaluation");
+        }
+    }
+
+    {
+        const std::string source = "fn main() -> String { return \"a\" + \"b\"; }";
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::string_v("ab")))
+        {
+            fail("expected string concatenation to evaluate to 'ab'");
+        }
+    }
+
+    {
+        const std::string source = "fn main() -> Int { print(\"hi\"); return 0; }";
+        const auto chunk = compile_to_chunk(source);
+        const auto ops = decode_ops(chunk);
+        if (!contains_op(ops, curlee::vm::OpCode::Print))
+        {
+            fail("expected print(...) to emit Print opcode");
+        }
+
+        curlee::vm::VM::Capabilities caps;
+        caps.insert("io:stdout");
+        const auto res = run_chunk_with_caps(chunk, caps);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(0)))
+        {
+            fail("expected print(...) program to run with io:stdout capability");
         }
     }
 

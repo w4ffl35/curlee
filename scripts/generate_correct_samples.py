@@ -7,6 +7,11 @@ import random
 from pathlib import Path
 
 
+DATASET_VERSION = 1
+DATASET_BUMP_POLICY = "generator_or_language_scope_changes"
+DATASET_GENERATOR_ID = "scripts/generate_correct_samples.py"
+
+
 def gen_expr(rng: random.Random, depth: int) -> str:
     if depth <= 0 or rng.random() < 0.4:
         return str(rng.randint(0, 1000))
@@ -23,6 +28,7 @@ def main() -> int:
     parser.add_argument("--count", type=int, default=500)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--out", type=Path, default=Path("tests/correct_samples"))
+    # `training_data.txt` is a generated export; repository policy keeps it untracked (gitignored).
     parser.add_argument("--training", type=Path, default=Path("training_data.txt"))
     args = parser.parse_args()
 
@@ -45,7 +51,14 @@ def main() -> int:
         (out_dir / name).write_text(program, encoding="utf-8")
         samples.append(program.strip())
 
-    header = f"# Curlee correct_samples dataset\n# seed={args.seed}\n# count={args.count}\n"
+    header = (
+        "# Curlee correct_samples dataset\n"
+        f"# dataset_version={DATASET_VERSION}\n"
+        f"# bump_dataset_version_when={DATASET_BUMP_POLICY}\n"
+        f"# generator={DATASET_GENERATOR_ID}\n"
+        f"# seed={args.seed}\n"
+        f"# count={args.count}\n"
+    )
     args.training.write_text(header + "\n---\n".join(samples) + "\n", encoding="utf-8")
     return 0
 

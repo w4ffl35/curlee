@@ -138,6 +138,140 @@ int main()
         }
     }
 
+    // Bundle mode: imports must be pinned (no dynamic resolution).
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_pins");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path entry = dir / "main.curlee";
+        const fs::path dep = dir / "dep.curlee";
+        const fs::path bundle_path = dir / "pins.bundle";
+
+        {
+            std::ofstream out(entry);
+            out << "import dep;\n";
+            out << "fn main() -> Int { return foo(); }\n";
+        }
+        {
+            std::ofstream out(dep);
+            out << "fn foo() -> Int { return 7; }\n";
+        }
+
+        Bundle bundle;
+        bundle.manifest.capabilities = {"io:stdout"};
+        bundle.manifest.imports = {}; // dep is intentionally unpinned
+        bundle.bytecode = {0x01, 0x02, 0x03, 0x04};
+
+        const auto write_err = write_bundle(bundle_path.string(), bundle);
+        if (!write_err.message.empty())
+        {
+            fail("expected bundle write to succeed");
+        }
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli({"curlee",
+                                "run",
+                                "--bundle",
+                                bundle_path.string(),
+                                entry.string()},
+                               out,
+                               err);
+        if (rc == 0)
+        {
+            fail("expected run to fail for unpinned import in bundle mode");
+        }
+        if (err.find("import not pinned: 'dep'") == std::string::npos)
+        {
+            fail("expected stderr to mention unpinned import");
+        }
+        if (err.find("expected pin 'dep:") == std::string::npos)
+        {
+            fail("expected stderr to mention expected pin for dep");
+        }
+        if (!out.empty())
+        {
+            fail("expected stdout to be empty on failure");
+        }
+
+        fs::remove_all(dir);
+    }
+
+    // Bundle mode: manifest capabilities must be granted at runtime.
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_caps");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path entry = dir / "main.curlee";
+        const fs::path bundle_path = dir / "caps.bundle";
+
+        {
+            std::ofstream out(entry);
+            out << "fn main() -> Int { unsafe { python_ffi.call(); } return 0; }\n";
+        }
+
+        Bundle bundle;
+        bundle.manifest.capabilities = {"python:ffi"};
+        bundle.manifest.imports = {};
+        bundle.bytecode = {0x01, 0x02, 0x03, 0x04};
+
+        const auto write_err = write_bundle(bundle_path.string(), bundle);
+        if (!write_err.message.empty())
+        {
+            fail("expected bundle write to succeed");
+        }
+
+        // Denied when required capability is not granted.
+        {
+            std::string out;
+            std::string err;
+            const int rc =
+                run_cli({"curlee", "run", "--bundle", bundle_path.string(), entry.string()},
+                        out,
+                        err);
+            if (rc == 0)
+            {
+                fail("expected run to fail when bundle capability is not granted");
+            }
+            if (err.find("missing capability required by bundle: python:ffi") == std::string::npos)
+            {
+                fail("expected stderr to mention missing capability required by bundle");
+            }
+        }
+
+        // Allowed past the bundle check when capability is granted; VM then errors deterministically
+        // because python interop is not implemented.
+        {
+            std::string out;
+            std::string err;
+            const int rc = run_cli({"curlee",
+                                    "run",
+                                    "--cap",
+                                    "python:ffi",
+                                    "--bundle",
+                                    bundle_path.string(),
+                                    entry.string()},
+                                   out,
+                                   err);
+            if (rc == 0)
+            {
+                fail("expected run to fail (python interop not implemented), but not due to capability");
+            }
+            if (err.find("python capability required") != std::string::npos)
+            {
+                fail("expected capability to be granted for python:ffi");
+            }
+            if (err.find("python interop not implemented") == std::string::npos)
+            {
+                fail("expected stderr to mention python interop not implemented");
+            }
+        }
+
+        fs::remove_all(dir);
+    }
+
     fs::remove(ok_path);
     fs::remove(bad_path);
 

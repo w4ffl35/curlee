@@ -344,8 +344,39 @@ import foo.bar;
         bool found = false;
         for (const auto& d : ds)
         {
-            if (d.message.find("imports must appear before") != std::string::npos)
+            if (d.message.find(
+                    "import declarations must appear before any function declarations") !=
+                std::string::npos)
             {
+                if (!d.span.has_value())
+                {
+                    fail("expected span for import-order diagnostic");
+                }
+
+                const std::size_t import_pos = src.find("import");
+                if (import_pos == std::string::npos)
+                {
+                    fail("test bug: couldn't find 'import' in source");
+                }
+                if (d.span->start != import_pos)
+                {
+                    fail("expected diagnostic span to point at offending import");
+                }
+
+                bool has_hint = false;
+                for (const auto& note : d.notes)
+                {
+                    if (note.message.find("move this import above") != std::string::npos)
+                    {
+                        has_hint = true;
+                        break;
+                    }
+                }
+                if (!has_hint)
+                {
+                    fail("expected actionable hint note for import-order diagnostic");
+                }
+
                 found = true;
                 break;
             }

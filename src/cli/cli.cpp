@@ -47,7 +47,7 @@ void print_usage(std::ostream& out)
     out << "  curlee lex <file.curlee>\n";
     out << "  curlee parse <file.curlee>\n";
     out << "  curlee check <file.curlee>\n";
-    out << "  curlee run [--cap <capability>]... <file.curlee>\n";
+    out << "  curlee run [--bundle <file.bundle>] [--cap <capability>]... <file.curlee>\n";
     out << "  curlee fmt [--check] <file>\n";
     out << "  curlee bundle verify <file.bundle>\n";
     out << "  curlee bundle info <file.bundle>\n";
@@ -94,7 +94,8 @@ std::string join_import_pins(const std::vector<curlee::bundle::ImportPin>& pins)
 }
 
 int cmd_read_only(std::string_view cmd, const std::string& path,
-                  const curlee::runtime::Capabilities& granted_caps)
+                  const curlee::runtime::Capabilities& granted_caps,
+                  const curlee::bundle::Manifest* bundle_manifest)
 {
     auto loaded = source::load_source_file(path);
     if (auto* err = std::get_if<source::LoadError>(&loaded))
@@ -160,21 +161,51 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
 
         auto load_import =
             [&](const source::SourceFile& importing_file,
-                const parser::ImportDecl& imp) -> std::variant<ImportLoadResult, source::LoadError>
+                const parser::ImportDecl& imp) -> std::variant<ImportLoadResult, diag::Diagnostic>
         {
             if (importing_file.path.empty())
             {
-                return source::LoadError{.message = "imports require a source file path"};
+                diag::Diagnostic d;
+                d.severity = diag::Severity::Error;
+                d.message = "imports require a source file path";
+                d.span = imp.span;
+                return d;
+            }
+
+            std::string import_name;
+            for (std::size_t i = 0; i < imp.path.size(); ++i)
+            {
+                import_name += std::string(imp.path[i]);
+                if (i + 1 < imp.path.size())
+                {
+                    import_name += ".";
+                }
             }
 
             std::vector<fs::path> roots;
-            roots.push_back(fs::path(importing_file.path).parent_path());
-            if (entry_dir.has_value() && (*entry_dir != roots.front()))
+            if (bundle_manifest != nullptr)
             {
+                if (!entry_dir.has_value())
+                {
+                    diag::Diagnostic d;
+                    d.severity = diag::Severity::Error;
+                    d.message = "bundle mode imports require an entry file path";
+                    d.span = imp.span;
+                    return d;
+                }
+                // Bundle mode: no dynamic filesystem resolution. Resolve from a single, fixed root.
                 roots.push_back(*entry_dir);
             }
+            else
+            {
+                roots.push_back(fs::path(importing_file.path).parent_path());
+                if (entry_dir.has_value() && (*entry_dir != roots.front()))
+                {
+                    roots.push_back(*entry_dir);
+                }
+            }
 
-            std::optional<source::LoadError> last_err;
+            std::optional<std::string> last_err;
             for (const auto& root : roots)
             {
                 fs::path module_path = root;
@@ -196,11 +227,54 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                     {
                         std::cerr << "[import] failed: " << err->message << "\n";
                     }
-                    last_err = *err;
+                    last_err = err->message;
                     continue;
                 }
 
                 auto dep_file = std::get<source::SourceFile>(loaded);
+
+                if (bundle_manifest != nullptr)
+                {
+                    std::vector<std::uint8_t> bytes;
+                    bytes.reserve(dep_file.contents.size());
+                    for (const char c : dep_file.contents)
+                    {
+                        bytes.push_back(static_cast<std::uint8_t>(c));
+                    }
+                    const std::string actual_hash = curlee::bundle::hash_bytes(bytes);
+
+                    const auto it = std::find_if(bundle_manifest->imports.begin(),
+                                                 bundle_manifest->imports.end(),
+                                                 [&](const curlee::bundle::ImportPin& pin)
+                                                 { return pin.path == import_name; });
+
+                    if (it == bundle_manifest->imports.end())
+                    {
+                        diag::Diagnostic d;
+                        d.severity = diag::Severity::Error;
+                        d.message = "import not pinned: '" + import_name + "'";
+                        d.span = imp.span;
+                        d.notes.push_back(diag::Related{.message = "expected pin '" +
+                                                                   import_name + ":" +
+                                                                   actual_hash + "'",
+                                                        .span = std::nullopt});
+                        return d;
+                    }
+
+                    if (it->hash != actual_hash)
+                    {
+                        diag::Diagnostic d;
+                        d.severity = diag::Severity::Error;
+                        d.message = "import pin hash mismatch: '" + import_name + "'";
+                        d.span = imp.span;
+                        d.notes.push_back(diag::Related{.message = "expected hash " + it->hash,
+                                                        .span = std::nullopt});
+                        d.notes.push_back(diag::Related{.message = "actual hash " + actual_hash,
+                                                        .span = std::nullopt});
+                        return d;
+                    }
+                }
+
                 ImportLoadResult ok{
                     .file = std::move(dep_file),
                     .path = module_path,
@@ -213,11 +287,26 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                 return ok;
             }
 
-            if (last_err.has_value())
+            diag::Diagnostic d;
+            d.severity = diag::Severity::Error;
+            d.message = "import not found: '" + import_name + "'";
+            d.span = imp.span;
+
+            fs::path expected_path = roots.empty()
+                                        ? fs::path{}
+                                        : roots.front();
+            for (const auto& part : imp.path)
             {
-                return *last_err;
+                expected_path /= std::string(part);
             }
-            return source::LoadError{.message = "failed to open file"};
+            expected_path += ".curlee";
+
+            const std::string err_msg = last_err.has_value() ? *last_err : "failed to open file";
+            d.notes.push_back(diag::Related{.message = "expected module at " +
+                                                       expected_path.string() + " (" + err_msg +
+                                                       ")",
+                                            .span = std::nullopt});
+            return d;
         };
 
         auto check_module = [&](const source::SourceFile& mod_file, int depth,
@@ -320,35 +409,10 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                     return false;
                 }
 
-                std::string import_name;
-                for (std::size_t i = 0; i < imp.path.size(); ++i)
-                {
-                    import_name += std::string(imp.path[i]);
-                    if (i + 1 < imp.path.size())
-                    {
-                        import_name += ".";
-                    }
-                }
-
                 const auto dep_loaded = load_import(stable_file, imp);
-                if (auto* err = std::get_if<source::LoadError>(&dep_loaded))
+                if (auto* d = std::get_if<diag::Diagnostic>(&dep_loaded))
                 {
-                    diag::Diagnostic d;
-                    d.severity = diag::Severity::Error;
-                    d.message = "import not found: '" + import_name + "'";
-                    d.span = imp.span;
-                    // Preserve existing diagnostic shape (one note) in the common case.
-                    fs::path expected_path = fs::path(stable_file.path).parent_path();
-                    for (const auto& part : imp.path)
-                    {
-                        expected_path /= std::string(part);
-                    }
-                    expected_path += ".curlee";
-                    d.notes.push_back(diag::Related{.message = "expected module at " +
-                                                               expected_path.string() + " (" +
-                                                               err->message + ")",
-                                                    .span = std::nullopt});
-                    std::cerr << diag::render(d, stable_file);
+                    std::cerr << diag::render(*d, stable_file);
                     visiting.erase(key);
                     return false;
                 }
@@ -450,34 +514,10 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                 std::cerr << diag::render(d, file);
                 return false;
             }
-            std::string import_name;
-            for (std::size_t i = 0; i < imp.path.size(); ++i)
-            {
-                import_name += std::string(imp.path[i]);
-                if (i + 1 < imp.path.size())
-                {
-                    import_name += ".";
-                }
-            }
-
             const auto dep_loaded = load_import(file, imp);
-            if (auto* err = std::get_if<source::LoadError>(&dep_loaded))
+            if (auto* d = std::get_if<diag::Diagnostic>(&dep_loaded))
             {
-                diag::Diagnostic d;
-                d.severity = diag::Severity::Error;
-                d.message = "import not found: '" + import_name + "'";
-                d.span = imp.span;
-                fs::path expected_path = fs::path(file.path).parent_path();
-                for (const auto& part : imp.path)
-                {
-                    expected_path /= std::string(part);
-                }
-                expected_path += ".curlee";
-                d.notes.push_back(diag::Related{.message = "expected module at " +
-                                                           expected_path.string() + " (" +
-                                                           err->message + ")",
-                                                .span = std::nullopt});
-                std::cerr << diag::render(d, file);
+                std::cerr << diag::render(*d, file);
                 return false;
             }
 
@@ -658,7 +698,35 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
 
         const auto& chunk = std::get<vm::Chunk>(emitted);
         vm::VM machine;
-        const auto result = machine.run(chunk, 10000, granted_caps);
+
+        curlee::runtime::Capabilities effective_caps = granted_caps;
+        if (bundle_manifest != nullptr)
+        {
+            effective_caps.clear();
+            for (const auto& cap : bundle_manifest->capabilities)
+            {
+                if (!granted_caps.contains(cap))
+                {
+                    diag::Diagnostic d;
+                    d.severity = diag::Severity::Error;
+                    d.message = "missing capability required by bundle: " + cap;
+                    d.span = curlee::source::Span{.start = 0, .end = 0};
+                    d.notes.push_back(diag::Related{
+                        .message = "bundle manifest requires capability '" + cap + "'",
+                        .span = std::nullopt,
+                    });
+                    d.notes.push_back(diag::Related{
+                        .message = "grant it with: curlee run --cap " + cap + " --bundle <file.bundle> <file.curlee>",
+                        .span = std::nullopt,
+                    });
+                    std::cerr << diag::render(d, file);
+                    return kExitError;
+                }
+                effective_caps.insert(cap);
+            }
+        }
+
+        const auto result = machine.run(chunk, 10000, effective_caps);
         if (!result.ok)
         {
             diag::Diagnostic d;
@@ -728,7 +796,7 @@ int run(int argc, char** argv)
     // path/to/file.curlee`.
     if (argc == 2 && !first.starts_with('-') && ends_with(first, ".curlee"))
     {
-        return cmd_read_only("run", std::string(first), empty_caps());
+        return cmd_read_only("run", std::string(first), empty_caps(), nullptr);
     }
 
     const std::string_view cmd = argv[1];
@@ -803,6 +871,8 @@ int run(int argc, char** argv)
     if (cmd == "run")
     {
         curlee::runtime::Capabilities caps;
+        std::optional<std::string> bundle_path;
+        std::optional<curlee::bundle::Bundle> bundle;
         std::optional<std::string> path;
 
         for (std::size_t i = 0; i < args.size();)
@@ -835,6 +905,45 @@ int run(int argc, char** argv)
                 continue;
             }
 
+            if (a == "--bundle")
+            {
+                if (i + 1 >= args.size())
+                {
+                    std::cerr << "error: expected bundle path after --bundle\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                if (bundle_path.has_value())
+                {
+                    std::cerr << "error: expected a single --bundle <file.bundle>\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                bundle_path = std::string(args[i + 1]);
+                i += 2;
+                continue;
+            }
+
+            if (a.starts_with("--bundle="))
+            {
+                const auto p = a.substr(std::string_view("--bundle=").size());
+                if (p.empty())
+                {
+                    std::cerr << "error: expected bundle path after --bundle=\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                if (bundle_path.has_value())
+                {
+                    std::cerr << "error: expected a single --bundle <file.bundle>\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                bundle_path = std::string(p);
+                ++i;
+                continue;
+            }
+
             if (a.starts_with('-'))
             {
                 std::cerr << "error: unknown option: " << a << "\n\n";
@@ -860,7 +969,20 @@ int run(int argc, char** argv)
             return kExitUsage;
         }
 
-        return cmd_read_only(cmd, *path, caps);
+        if (bundle_path.has_value())
+        {
+            const auto loaded = curlee::bundle::read_bundle(*bundle_path);
+            if (auto* err = std::get_if<curlee::bundle::BundleError>(&loaded))
+            {
+                std::cerr << "error: failed to load bundle: " << err->message << "\n";
+                return kExitError;
+            }
+            bundle = std::get<curlee::bundle::Bundle>(loaded);
+        }
+
+        const curlee::bundle::Manifest* manifest =
+            bundle.has_value() ? &bundle->manifest : nullptr;
+        return cmd_read_only(cmd, *path, caps, manifest);
     }
 
     if (argc != 3)
@@ -871,7 +993,7 @@ int run(int argc, char** argv)
     }
 
     const std::string path = argv[2];
-    return cmd_read_only(cmd, path, empty_caps());
+    return cmd_read_only(cmd, path, empty_caps(), nullptr);
 }
 
 } // namespace curlee::cli

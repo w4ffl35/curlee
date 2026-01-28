@@ -125,14 +125,27 @@ class Parser
     {
         Program program;
         bool seen_function = false;
+        std::optional<curlee::source::Span> first_function_span;
         while (!is_at_end())
         {
             if (check(TokenKind::KwImport))
             {
                 if (seen_function)
                 {
-                    diagnostics_.push_back(
-                        error_at(peek(), "imports must appear before any functions"));
+                    auto d = error_at(
+                        peek(), "import declarations must appear before any function declarations");
+                    d.notes.push_back(curlee::diag::Related{
+                        .message = "move this import above the first function declaration",
+                        .span = std::nullopt,
+                    });
+                    if (first_function_span.has_value())
+                    {
+                        d.notes.push_back(curlee::diag::Related{
+                            .message = "first function declaration is here",
+                            .span = *first_function_span,
+                        });
+                    }
+                    diagnostics_.push_back(std::move(d));
                     // Make progress: consume `import` and then skip to the next top-level item.
                     advance();
                     synchronize_top_level();
@@ -151,6 +164,10 @@ class Parser
 
             if (check(TokenKind::KwFn))
             {
+                if (!seen_function)
+                {
+                    first_function_span = peek().span;
+                }
                 seen_function = true;
                 auto fun = parse_function();
                 if (std::holds_alternative<curlee::diag::Diagnostic>(fun))
