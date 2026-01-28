@@ -51,9 +51,11 @@ int main()
 
     const fs::path ok_path = temp_path("curlee_cli_bundle_ok.bundle");
     const fs::path bad_path = temp_path("curlee_cli_bundle_bad.bundle");
+    const fs::path bad_entry_path = temp_path("curlee_cli_bundle_bad_entry.curlee");
 
     fs::remove(ok_path);
     fs::remove(bad_path);
+    fs::remove(bad_entry_path);
 
     Bundle bundle;
     bundle.manifest.capabilities = {"io:stdout", "net:none"};
@@ -125,6 +127,11 @@ int main()
         out << "bytecode=AQIDBA==\n";
         out.close();
 
+        {
+            std::ofstream entry(bad_entry_path);
+            entry << "fn main() -> Int { return 0; }\n";
+        }
+
         std::string cli_out;
         std::string cli_err;
         const int rc = run_cli({"curlee", "bundle", "verify", bad_path.string()}, cli_out, cli_err);
@@ -135,6 +142,28 @@ int main()
         if (cli_err.find("bytecode hash mismatch") == std::string::npos)
         {
             fail("expected stderr to mention bytecode hash mismatch");
+        }
+
+        // The same verification should gate `curlee run --bundle`.
+        {
+            std::string out;
+            std::string err;
+            const int run_rc =
+                run_cli({"curlee", "run", "--bundle", bad_path.string(), bad_entry_path.string()},
+                        out, err);
+            if (run_rc == 0)
+            {
+                fail("expected run to fail when bundle cannot be loaded");
+            }
+            if (err.find("failed to load bundle") == std::string::npos ||
+                err.find("bytecode hash mismatch") == std::string::npos)
+            {
+                fail("expected run stderr to mention bundle load failure and hash mismatch");
+            }
+            if (!out.empty())
+            {
+                fail("expected run stdout to be empty on failure");
+            }
         }
     }
 
@@ -261,6 +290,7 @@ int main()
 
     fs::remove(ok_path);
     fs::remove(bad_path);
+    fs::remove(bad_entry_path);
 
     std::cout << "OK\n";
     return 0;
