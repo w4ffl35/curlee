@@ -81,7 +81,15 @@ Policy-only changes (like improving this file) do **not** require filing an Issu
 Guardrail (Issue lifecycle):
 - NEVER close an Issue just because it is labeled “icebox”, “post-MVP”, “backlog”, or “not scheduled”.
 - NEVER close an Issue to “clean up” the issue list.
-- NEVER run `gh issue close` unless the user/owner explicitly instructs you to close a specific Issue number, or the Issue’s acceptance criteria are demonstrably complete.
+
+Default (Issue lifecycle):
+- When you worked an Issue and its acceptance criteria are demonstrably complete **and** relevant tests/builds pass, go ahead and:
+   - commit the changes,
+   - comment with verification commands,
+   - and close the Issue via `gh issue close <number>`.
+
+Guardrail:
+- If acceptance criteria are ambiguous, tests are failing, or the fix is partial, do **not** close the Issue.
 
 Guardrail (GitHub CLI editing):
 - When using `gh issue edit` for bodies/comments containing backticks, code blocks, or shell-sensitive characters, ALWAYS use `--body-file` / `--body-file -`.
