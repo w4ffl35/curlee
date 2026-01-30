@@ -179,17 +179,34 @@ if(CURLEE_ENABLE_FUZZING)
   )
   target_include_directories(curlee_lexer_fuzz PRIVATE include)
 
+  add_executable(curlee_parser_fuzz
+    tests/parser_fuzz.cpp
+    src/lexer/lexer.cpp
+    src/parser/parser.cpp
+  )
+  target_include_directories(curlee_parser_fuzz PRIVATE include)
+
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(curlee_lexer_fuzz PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
     target_link_options(curlee_lexer_fuzz PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
+
+    target_compile_options(curlee_parser_fuzz PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
+    target_link_options(curlee_parser_fuzz PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
 
     add_test(
       NAME curlee_lexer_fuzz_smoke
       COMMAND curlee_lexer_fuzz -seed=1 -runs=200 -max_len=4096
     )
     set_tests_properties(curlee_lexer_fuzz_smoke PROPERTIES TIMEOUT 20)
+
+    add_test(
+      NAME curlee_parser_fuzz_smoke
+      COMMAND curlee_parser_fuzz -seed=1 -runs=200 -max_len=4096
+    )
+    set_tests_properties(curlee_parser_fuzz_smoke PROPERTIES TIMEOUT 20)
   else()
     target_compile_definitions(curlee_lexer_fuzz PRIVATE CURLEE_FUZZER_STANDALONE)
+    target_compile_definitions(curlee_parser_fuzz PRIVATE CURLEE_FUZZER_STANDALONE)
   endif()
 endif()
 
