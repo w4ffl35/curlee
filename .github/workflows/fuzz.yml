@@ -1,0 +1,45 @@
+name: Fuzz (bounded)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, opt-in/scheduled to avoid PR flakiness.
+    - cron: "0 3 * * 0"
+
+jobs:
+  fuzz-linux:
+    name: Bounded fuzz (linux-debug)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang libz3-dev pkg-config
+
+      - name: Configure (Clang + fuzz targets)
+        env:
+          CC: clang
+          CXX: clang++
+        run: cmake --preset linux-debug -DCURLEE_ENABLE_FUZZING=ON
+
+      - name: Build fuzz targets
+        run: cmake --build --preset linux-debug --target curlee_lexer_fuzz curlee_parser_fuzz
+
+      - name: Run bounded fuzzing
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/curlee-fuzz-artifacts/
+        run: |
+          mkdir -p "$ARTIFACT_DIR/lexer" "$ARTIFACT_DIR/parser"
+
+          # Fixed seeds + fixed time budget => reduces nondeterministic flakes.
+          timeout 120s ./build/linux-debug/curlee_lexer_fuzz \
+            -seed=1 -max_total_time=30 -max_len=4096 \
+            -artifact_prefix="$ARTIFACT_DIR/lexer/"
+
+          timeout 120s ./build/linux-debug/curlee_parser_fuzz \
+            -seed=1 -max_total_time=30 -max_len=4096 \
+            -artifact_prefix="$ARTIFACT_DIR/parser/"
