@@ -63,6 +63,7 @@ Branching model:
 Guardrail (Issue lifecycle):
 - NEVER close an Issue just because it is labeled “icebox”, “post-MVP”, “backlog”, or “not scheduled”.
 - NEVER close an Issue to “clean up” the issue list.
+- NEVER run `gh issue close` (or otherwise close Issues) unless the user/owner explicitly instructs you to close a specific Issue number, or the Issue’s acceptance criteria are demonstrably complete.
 - Only close an Issue when one of these is true:
   - The acceptance criteria are satisfied (work actually complete), OR
   - The user/owner explicitly instructs you to close it (e.g., “close as wontfix/duplicate/icebox”), OR
