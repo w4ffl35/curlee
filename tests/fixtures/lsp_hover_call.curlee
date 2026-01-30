@@ -1,0 +1,10 @@
+fn take_nonzero(x: Int where x > 0) -> Int [
+  requires x != 0;
+] {
+  return x;
+}
+
+fn main() -> Int {
+  let y: Int = 5;
+  return take_nonzero(y);
+}

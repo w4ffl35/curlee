@@ -219,6 +219,16 @@ target_include_directories(curlee_parser_tests PRIVATE include)
 
 add_test(NAME curlee_parser_tests COMMAND curlee_parser_tests)
 
+add_executable(curlee_lsp_hover_golden_tests
+  tests/lsp_hover_golden_tests.cpp
+)
+
+add_test(
+  NAME curlee_lsp_hover_golden_tests
+  COMMAND curlee_lsp_hover_golden_tests ${CMAKE_SOURCE_DIR}/tests/lsp_hover $<TARGET_FILE:curlee_lsp>
+)
+set_tests_properties(curlee_lsp_hover_golden_tests PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(curlee_fuzz_regression_tests
   tests/fuzz_regression_tests.cpp
   src/lexer/lexer.cpp

@@ -1,0 +1,4 @@
+fn take_nonzero(x: Int where (x > 0)) -> Int
+requires (x != 0)
+refines x: (x > 0)
+obligations: (x != 0), (x > 0)
