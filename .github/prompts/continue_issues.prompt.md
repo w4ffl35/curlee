@@ -24,6 +24,7 @@ Task (optional): <$TASK>
 - NEVER close GitHub issues unless the user/owner explicitly instructs you to close a specific issue number.
 - Keep changes small and verification-first: do not write > ~50 LOC without running tests/build.
 - Prefer golden tests for diagnostics/verification failures.
+- When posting issue comments that contain backticks/code blocks, ALWAYS use `gh issue comment ... --body-file -` (stdin) (e.g. via a single-quoted heredoc). Do not use `--body "..."` for multi-line content.
 
 ## Execution loop
 
