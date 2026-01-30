@@ -14,6 +14,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 option(CURLEE_USE_SYSTEM_Z3 "Use system-installed Z3 if available; otherwise fetch" ON)
+option(CURLEE_ENABLE_FUZZING "Build fuzz targets (libFuzzer when using Clang)" OFF)
 
 if(CURLEE_USE_SYSTEM_Z3)
   find_package(Z3 QUIET)
@@ -170,6 +171,27 @@ add_executable(curlee_lexer_tests
 target_include_directories(curlee_lexer_tests PRIVATE include)
 
 add_test(NAME curlee_lexer_tests COMMAND curlee_lexer_tests)
+
+if(CURLEE_ENABLE_FUZZING)
+  add_executable(curlee_lexer_fuzz
+    tests/lexer_fuzz.cpp
+    src/lexer/lexer.cpp
+  )
+  target_include_directories(curlee_lexer_fuzz PRIVATE include)
+
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(curlee_lexer_fuzz PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
+    target_link_options(curlee_lexer_fuzz PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
+
+    add_test(
+      NAME curlee_lexer_fuzz_smoke
+      COMMAND curlee_lexer_fuzz -seed=1 -runs=200 -max_len=4096
+    )
+    set_tests_properties(curlee_lexer_fuzz_smoke PROPERTIES TIMEOUT 20)
+  else()
+    target_compile_definitions(curlee_lexer_fuzz PRIVATE CURLEE_FUZZER_STANDALONE)
+  endif()
+endif()
 
 add_executable(curlee_parser_tests
   tests/parser_tests.cpp
