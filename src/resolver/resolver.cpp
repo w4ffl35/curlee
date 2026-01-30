@@ -1,6 +1,6 @@
-#include <curlee/resolver/resolver.h>
 #include <curlee/lexer/lexer.h>
 #include <curlee/parser/parser.h>
+#include <curlee/resolver/resolver.h>
 #include <curlee/source/source_file.h>
 #include <filesystem>
 #include <optional>
