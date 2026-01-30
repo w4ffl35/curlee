@@ -1,4 +1,5 @@
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
@@ -285,6 +286,93 @@ static std::optional<std::string> extract_json_string_value(const std::string& p
     return std::nullopt;
 }
 
+struct HoverRange
+{
+    std::size_t start_line = 0;
+    std::size_t start_character = 0;
+    std::size_t end_line = 0;
+    std::size_t end_character = 0;
+};
+
+static bool read_number_after(const std::string& payload, std::size_t from,
+                              const std::string& marker, double& out, std::size_t& next)
+{
+    const std::size_t pos = payload.find(marker, from);
+    if (pos == std::string::npos)
+    {
+        return false;
+    }
+    const std::size_t start = pos + marker.size();
+    const char* begin = payload.c_str() + start;
+    char* end = nullptr;
+    out = std::strtod(begin, &end);
+    if (end == begin)
+    {
+        return false;
+    }
+    next = static_cast<std::size_t>(end - payload.c_str());
+    return true;
+}
+
+static std::optional<HoverRange> extract_hover_range(const std::string& payload)
+{
+    const std::size_t range_pos = payload.find("\"range\"");
+    if (range_pos == std::string::npos)
+    {
+        return std::nullopt;
+    }
+
+    auto extract_line_character =
+        [&](std::size_t key_pos) -> std::optional<std::pair<double, double>>
+    {
+        const std::size_t brace_open = payload.find('{', key_pos);
+        if (brace_open == std::string::npos)
+        {
+            return std::nullopt;
+        }
+        const std::size_t brace_close = payload.find('}', brace_open);
+        if (brace_close == std::string::npos)
+        {
+            return std::nullopt;
+        }
+
+        const std::string obj = payload.substr(brace_open, (brace_close - brace_open) + 1);
+        double line = 0;
+        double character = 0;
+        std::size_t tmp = 0;
+        if (!read_number_after(obj, 0, "\"line\":", line, tmp))
+        {
+            return std::nullopt;
+        }
+        if (!read_number_after(obj, 0, "\"character\":", character, tmp))
+        {
+            return std::nullopt;
+        }
+        return std::pair<double, double>{line, character};
+    };
+
+    const std::size_t start_pos = payload.find("\"start\"", range_pos);
+    const std::size_t end_pos = payload.find("\"end\"", range_pos);
+    if (start_pos == std::string::npos || end_pos == std::string::npos)
+    {
+        return std::nullopt;
+    }
+
+    const auto start = extract_line_character(start_pos);
+    const auto end = extract_line_character(end_pos);
+    if (!start.has_value() || !end.has_value())
+    {
+        return std::nullopt;
+    }
+
+    HoverRange r;
+    r.start_line = static_cast<std::size_t>(start->first);
+    r.start_character = static_cast<std::size_t>(start->second);
+    r.end_line = static_cast<std::size_t>(end->first);
+    r.end_character = static_cast<std::size_t>(end->second);
+    return r;
+}
+
 static std::vector<std::string> split_lsp_frames(const std::string& out)
 {
     std::vector<std::string> payloads;
@@ -365,6 +453,15 @@ static bool run_hover_call_case(const fs::path& data_dir, const std::string& lsp
         fail("failed to find call site in fixture");
     }
 
+    const std::size_t callee_start = call_pos;
+    const std::size_t callee_end = call_pos + std::string("take_nonzero").size();
+    std::size_t expected_start_line = 0;
+    std::size_t expected_start_col = 0;
+    std::size_t expected_end_line = 0;
+    std::size_t expected_end_col = 0;
+    compute_line_col(text, callee_start, expected_start_line, expected_start_col);
+    compute_line_col(text, callee_end, expected_end_line, expected_end_col);
+
     std::size_t line = 0;
     std::size_t col = 0;
     compute_line_col(text, call_pos + 2, line, col); // hover inside identifier
@@ -405,6 +502,7 @@ static bool run_hover_call_case(const fs::path& data_dir, const std::string& lsp
 
     const auto payloads = split_lsp_frames(result.out);
     std::optional<std::string> got;
+    std::optional<HoverRange> got_range;
     for (const auto& p : payloads)
     {
         if (p.find("\"id\":2") == std::string::npos)
@@ -412,6 +510,7 @@ static bool run_hover_call_case(const fs::path& data_dir, const std::string& lsp
             continue;
         }
         got = extract_json_string_value(p, "value");
+        got_range = extract_hover_range(p);
         break;
     }
 
@@ -419,6 +518,24 @@ static bool run_hover_call_case(const fs::path& data_dir, const std::string& lsp
     {
         std::cerr << "LSP stdout:\n" << result.out << "\n";
         fail("did not find hover response (id=2) with a contents.value");
+    }
+
+    if (!got_range.has_value())
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("did not find hover response (id=2) with a range");
+    }
+
+    if (got_range->start_line != expected_start_line ||
+        got_range->start_character != expected_start_col ||
+        got_range->end_line != expected_end_line || got_range->end_character != expected_end_col)
+    {
+        std::cerr << "RANGE MISMATCH for hover call\n";
+        std::cerr << "expected start(" << expected_start_line << "," << expected_start_col
+                  << ") end(" << expected_end_line << "," << expected_end_col << ")\n";
+        std::cerr << "got start(" << got_range->start_line << "," << got_range->start_character
+                  << ") end(" << got_range->end_line << "," << got_range->end_character << ")\n";
+        return false;
     }
 
     if (*got != expected)

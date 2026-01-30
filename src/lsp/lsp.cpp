@@ -471,6 +471,65 @@ std::string pred_to_string(const curlee::parser::Pred& pred)
         pred.node);
 }
 
+std::string slice_span_text(std::string_view text, const curlee::source::Span span)
+{
+    if (span.end <= span.start || span.start >= text.size())
+    {
+        return std::string();
+    }
+    const std::size_t end = std::min<std::size_t>(span.end, text.size());
+    const std::size_t start = std::min<std::size_t>(span.start, end);
+    return std::string(text.substr(start, end - start));
+}
+
+std::string
+pred_to_string_with_subst(const curlee::parser::Pred& pred,
+                          const std::unordered_map<std::string, std::string>& substitutions)
+{
+    return std::visit(
+        [&](const auto& node) -> std::string
+        {
+            using T = std::decay_t<decltype(node)>;
+            if constexpr (std::is_same_v<T, curlee::parser::PredInt>)
+            {
+                return std::string(node.lexeme);
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::PredBool>)
+            {
+                return node.value ? "true" : "false";
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::PredName>)
+            {
+                const auto it = substitutions.find(std::string(node.name));
+                if (it != substitutions.end())
+                {
+                    return it->second;
+                }
+                return std::string(node.name);
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::PredUnary>)
+            {
+                return token_op_to_string(node.op) +
+                       pred_to_string_with_subst(*node.rhs, substitutions);
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::PredBinary>)
+            {
+                return "(" + pred_to_string_with_subst(*node.lhs, substitutions) + " " +
+                       token_op_to_string(node.op) + " " +
+                       pred_to_string_with_subst(*node.rhs, substitutions) + ")";
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::PredGroup>)
+            {
+                return "(" + pred_to_string_with_subst(*node.inner, substitutions) + ")";
+            }
+            else
+            {
+                static_assert(!sizeof(T), "unhandled Pred node");
+            }
+        },
+        pred.node);
+}
+
 std::string function_signature_to_string(const curlee::parser::Function& f)
 {
     std::ostringstream oss;
@@ -1317,13 +1376,23 @@ int main()
                         const auto* f = find_function_by_name(analysis->program, callee_name->name);
                         if (f != nullptr)
                         {
+                            std::unordered_map<std::string, std::string> substitutions;
+                            const std::size_t n = std::min(f->params.size(), call->args.size());
+                            substitutions.reserve(n);
+                            for (std::size_t i = 0; i < n; ++i)
+                            {
+                                substitutions.emplace(
+                                    std::string(f->params[i].name),
+                                    slice_span_text(doc.text, call->args[i].span));
+                            }
+
                             std::vector<std::string> obligations;
                             obligations.reserve(f->requires_clauses.size() + f->params.size());
                             std::unordered_set<std::string> seen;
 
                             for (const auto& req : f->requires_clauses)
                             {
-                                const auto s = pred_to_string(req);
+                                const auto s = pred_to_string_with_subst(req, substitutions);
                                 if (seen.insert(s).second)
                                 {
                                     obligations.push_back(s);
@@ -1335,7 +1404,8 @@ int main()
                                 {
                                     continue;
                                 }
-                                const auto s = pred_to_string(*p.refinement);
+                                const auto s =
+                                    pred_to_string_with_subst(*p.refinement, substitutions);
                                 if (seen.insert(s).second)
                                 {
                                     obligations.push_back(s);
@@ -1346,14 +1416,15 @@ int main()
                             body << function_signature_to_string(*f);
                             for (const auto& req : f->requires_clauses)
                             {
-                                body << "\nrequires " << pred_to_string(req);
+                                body << "\nrequires "
+                                     << pred_to_string_with_subst(req, substitutions);
                             }
                             for (const auto& p : f->params)
                             {
                                 if (p.refinement.has_value())
                                 {
                                     body << "\nrefines " << p.name << ": "
-                                         << pred_to_string(*p.refinement);
+                                         << pred_to_string_with_subst(*p.refinement, substitutions);
                                 }
                             }
                             if (!obligations.empty())
@@ -1373,7 +1444,8 @@ int main()
                             contents["kind"] = Json{std::string("plaintext")};
                             contents["value"] = Json{body.str()};
 
-                            const auto range = to_lsp_range(best_call->span, map);
+                            const auto range = to_lsp_range(
+                                call->callee ? call->callee->span : best_call->span, map);
                             Json::Object hover;
                             hover["contents"] = Json{contents};
                             hover["range"] = lsp_range_json(range);
