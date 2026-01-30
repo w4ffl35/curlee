@@ -33,6 +33,9 @@ enum class TokenKind
     KwCap,
     KwImport,
 
+    KwStruct,
+    KwEnum,
+
     // Punctuation / operators
     LParen,
     RParen,
@@ -44,6 +47,7 @@ enum class TokenKind
     Semicolon,
     Comma,
     Colon,
+    ColonColon,
     Dot,
 
     Arrow,      // ->
@@ -118,6 +122,11 @@ struct Token
     case TokenKind::KwImport:
         return "kw_import";
 
+    case TokenKind::KwStruct:
+        return "kw_struct";
+    case TokenKind::KwEnum:
+        return "kw_enum";
+
     case TokenKind::LParen:
         return "l_paren";
     case TokenKind::RParen:
@@ -137,6 +146,8 @@ struct Token
         return "comma";
     case TokenKind::Colon:
         return "colon";
+    case TokenKind::ColonColon:
+        return "colon_colon";
     case TokenKind::Dot:
         return "dot";
 

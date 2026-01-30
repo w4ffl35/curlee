@@ -5,6 +5,7 @@
 #include <optional>
 #include <sstream>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace curlee::parser
@@ -99,9 +100,23 @@ void assign_expr_ids(curlee::parser::Expr& expr, std::size_t& next_id)
                     assign_expr_ids(arg, next_id);
                 }
             }
+            else if constexpr (std::is_same_v<Node, curlee::parser::MemberExpr>)
+            {
+                assign_expr_ids(*node.base, next_id);
+            }
             else if constexpr (std::is_same_v<Node, curlee::parser::GroupExpr>)
             {
                 assign_expr_ids(*node.inner, next_id);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::StructLiteralExpr>)
+            {
+                for (auto& f : node.fields)
+                {
+                    if (f.value != nullptr)
+                    {
+                        assign_expr_ids(*f.value, next_id);
+                    }
+                }
             }
         },
         expr.node);
@@ -124,25 +139,26 @@ class Parser
     [[nodiscard]] ParseResult parse_program()
     {
         Program program;
-        bool seen_function = false;
-        std::optional<curlee::source::Span> first_function_span;
+        bool seen_non_import = false;
+        std::optional<curlee::source::Span> first_non_import_span;
         while (!is_at_end())
         {
             if (check(TokenKind::KwImport))
             {
-                if (seen_function)
+                if (seen_non_import)
                 {
                     auto d = error_at(
-                        peek(), "import declarations must appear before any function declarations");
+                        peek(),
+                        "import declarations must appear before any other top-level declarations");
                     d.notes.push_back(curlee::diag::Related{
-                        .message = "move this import above the first function declaration",
+                        .message = "move this import above the first declaration",
                         .span = std::nullopt,
                     });
-                    if (first_function_span.has_value())
+                    if (first_non_import_span.has_value())
                     {
                         d.notes.push_back(curlee::diag::Related{
-                            .message = "first function declaration is here",
-                            .span = *first_function_span,
+                            .message = "first declaration is here",
+                            .span = *first_non_import_span,
                         });
                     }
                     diagnostics_.push_back(std::move(d));
@@ -162,13 +178,51 @@ class Parser
                 continue;
             }
 
+            if (check(TokenKind::KwStruct))
+            {
+                if (!seen_non_import)
+                {
+                    first_non_import_span = peek().span;
+                }
+                seen_non_import = true;
+
+                auto s = parse_struct_decl();
+                if (std::holds_alternative<curlee::diag::Diagnostic>(s))
+                {
+                    diagnostics_.push_back(std::get<curlee::diag::Diagnostic>(std::move(s)));
+                    synchronize_top_level();
+                    continue;
+                }
+                program.structs.push_back(std::get<StructDecl>(std::move(s)));
+                continue;
+            }
+
+            if (check(TokenKind::KwEnum))
+            {
+                if (!seen_non_import)
+                {
+                    first_non_import_span = peek().span;
+                }
+                seen_non_import = true;
+
+                auto e = parse_enum_decl();
+                if (std::holds_alternative<curlee::diag::Diagnostic>(e))
+                {
+                    diagnostics_.push_back(std::get<curlee::diag::Diagnostic>(std::move(e)));
+                    synchronize_top_level();
+                    continue;
+                }
+                program.enums.push_back(std::get<EnumDecl>(std::move(e)));
+                continue;
+            }
+
             if (check(TokenKind::KwFn))
             {
-                if (!seen_function)
+                if (!seen_non_import)
                 {
-                    first_function_span = peek().span;
+                    first_non_import_span = peek().span;
                 }
-                seen_function = true;
+                seen_non_import = true;
                 auto fun = parse_function();
                 if (std::holds_alternative<curlee::diag::Diagnostic>(fun))
                 {
@@ -180,7 +234,8 @@ class Parser
                 continue;
             }
 
-            diagnostics_.push_back(error_at(peek(), "expected 'import' or 'fn'"));
+            diagnostics_.push_back(
+                error_at(peek(), "expected 'import', 'struct', 'enum', or 'fn'"));
             advance();
         }
 
@@ -256,7 +311,8 @@ class Parser
     void synchronize_top_level()
     {
         // Skip tokens until we reach the start of the next top-level item or EOF.
-        while (!is_at_end() && !check(TokenKind::KwFn) && !check(TokenKind::KwImport))
+        while (!is_at_end() && !check(TokenKind::KwFn) && !check(TokenKind::KwImport) &&
+               !check(TokenKind::KwStruct) && !check(TokenKind::KwEnum))
         {
             advance();
         }
@@ -328,6 +384,172 @@ class Parser
         const Token semi = previous();
 
         return ImportDecl{.span = span_cover(kw.span, semi.span), .path = std::move(path)};
+    }
+
+    [[nodiscard]] std::variant<StructDecl, curlee::diag::Diagnostic> parse_struct_decl()
+    {
+        if (auto err = consume(TokenKind::KwStruct, "expected 'struct'"); err.has_value())
+        {
+            return *err;
+        }
+        const Token kw = previous();
+
+        if (!check(TokenKind::Identifier))
+        {
+            return error_at(peek(), "expected struct name after 'struct'");
+        }
+        const Token name = advance();
+
+        if (auto err = consume(TokenKind::LBrace, "expected '{' after struct name");
+            err.has_value())
+        {
+            return *err;
+        }
+
+        std::vector<StructDeclField> fields;
+        std::unordered_map<std::string_view, curlee::source::Span> seen;
+
+        while (!check(TokenKind::RBrace) && !is_at_end())
+        {
+            if (!check(TokenKind::Identifier))
+            {
+                return error_at(peek(), "expected field name in struct declaration");
+            }
+            const Token field_name = advance();
+
+            if (auto it = seen.find(field_name.lexeme); it != seen.end())
+            {
+                auto d = error_at(field_name, "duplicate field name in struct declaration");
+                d.notes.push_back(curlee::diag::Related{
+                    .message = "previous field declaration is here",
+                    .span = it->second,
+                });
+                return d;
+            }
+            seen.emplace(field_name.lexeme, field_name.span);
+
+            if (auto err = consume(TokenKind::Colon, "expected ':' after field name");
+                err.has_value())
+            {
+                return *err;
+            }
+
+            auto type_res = parse_type();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(type_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(type_res));
+            }
+            TypeName type = std::get<TypeName>(std::move(type_res));
+
+            if (auto err = consume(TokenKind::Semicolon, "expected ';' after struct field");
+                err.has_value())
+            {
+                return *err;
+            }
+            const Token semi = previous();
+
+            fields.push_back(StructDeclField{
+                .span = span_cover(field_name.span, semi.span),
+                .name = field_name.lexeme,
+                .type = std::move(type),
+            });
+        }
+
+        if (auto err = consume(TokenKind::RBrace, "expected '}' after struct declaration");
+            err.has_value())
+        {
+            return *err;
+        }
+        const Token rbrace = previous();
+
+        return StructDecl{.span = span_cover(kw.span, rbrace.span),
+                          .name = name.lexeme,
+                          .fields = std::move(fields)};
+    }
+
+    [[nodiscard]] std::variant<EnumDecl, curlee::diag::Diagnostic> parse_enum_decl()
+    {
+        if (auto err = consume(TokenKind::KwEnum, "expected 'enum'"); err.has_value())
+        {
+            return *err;
+        }
+        const Token kw = previous();
+
+        if (!check(TokenKind::Identifier))
+        {
+            return error_at(peek(), "expected enum name after 'enum'");
+        }
+        const Token name = advance();
+
+        if (auto err = consume(TokenKind::LBrace, "expected '{' after enum name"); err.has_value())
+        {
+            return *err;
+        }
+
+        std::vector<EnumDeclVariant> variants;
+        std::unordered_map<std::string_view, curlee::source::Span> seen;
+
+        while (!check(TokenKind::RBrace) && !is_at_end())
+        {
+            if (!check(TokenKind::Identifier))
+            {
+                return error_at(peek(), "expected variant name in enum declaration");
+            }
+            const Token variant_name = advance();
+
+            if (auto it = seen.find(variant_name.lexeme); it != seen.end())
+            {
+                auto d = error_at(variant_name, "duplicate variant name in enum declaration");
+                d.notes.push_back(curlee::diag::Related{
+                    .message = "previous variant declaration is here",
+                    .span = it->second,
+                });
+                return d;
+            }
+            seen.emplace(variant_name.lexeme, variant_name.span);
+
+            std::optional<TypeName> payload;
+            if (match(TokenKind::LParen))
+            {
+                auto type_res = parse_type();
+                if (std::holds_alternative<curlee::diag::Diagnostic>(type_res))
+                {
+                    return std::get<curlee::diag::Diagnostic>(std::move(type_res));
+                }
+                payload = std::get<TypeName>(std::move(type_res));
+
+                if (auto err =
+                        consume(TokenKind::RParen, "expected ')' after enum variant payload");
+                    err.has_value())
+                {
+                    return *err;
+                }
+            }
+
+            if (auto err = consume(TokenKind::Semicolon, "expected ';' after enum variant");
+                err.has_value())
+            {
+                return *err;
+            }
+            const Token semi = previous();
+
+            variants.push_back(EnumDeclVariant{
+                .span = span_cover(variant_name.span, semi.span),
+                .name = variant_name.lexeme,
+                .payload = std::move(payload),
+            });
+        }
+
+        if (auto err = consume(TokenKind::RBrace, "expected '}' after enum declaration");
+            err.has_value())
+        {
+            return *err;
+        }
+        const Token rbrace = previous();
+
+        return EnumDecl{.span = span_cover(kw.span, rbrace.span),
+                        .name = name.lexeme,
+                        .variants = std::move(variants)};
     }
 
     [[nodiscard]] std::variant<Function::Param, curlee::diag::Diagnostic> parse_param()
@@ -1317,6 +1539,88 @@ class Parser
         return expr;
     }
 
+    [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic>
+    parse_struct_literal_after_name(const Token& type_name)
+    {
+        if (auto err = consume(TokenKind::LBrace, "expected '{' to start struct literal");
+            err.has_value())
+        {
+            return *err;
+        }
+
+        std::vector<StructLiteralExprField> fields;
+        std::unordered_map<std::string_view, curlee::source::Span> seen;
+
+        while (!check(TokenKind::RBrace) && !is_at_end())
+        {
+            if (!check(TokenKind::Identifier))
+            {
+                return error_at(peek(), "expected field name in struct literal");
+            }
+            const Token field_name = advance();
+
+            if (auto it = seen.find(field_name.lexeme); it != seen.end())
+            {
+                auto d = error_at(field_name, "duplicate field in struct literal");
+                d.notes.push_back(curlee::diag::Related{
+                    .message = "previous field initializer is here",
+                    .span = it->second,
+                });
+                return d;
+            }
+            seen.emplace(field_name.lexeme, field_name.span);
+
+            if (auto err = consume(TokenKind::Colon, "expected ':' after field name");
+                err.has_value())
+            {
+                return *err;
+            }
+
+            auto value_res = parse_expr();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(value_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(value_res));
+            }
+            Expr value = std::get<Expr>(std::move(value_res));
+
+            const curlee::source::Span field_span = span_cover(field_name.span, value.span);
+            fields.push_back(StructLiteralExprField{
+                .span = field_span,
+                .name = field_name.lexeme,
+                .value = std::make_unique<Expr>(std::move(value)),
+            });
+
+            if (match(TokenKind::Comma))
+            {
+                // Allow trailing comma.
+                if (check(TokenKind::RBrace))
+                {
+                    break;
+                }
+                continue;
+            }
+
+            if (check(TokenKind::RBrace))
+            {
+                break;
+            }
+
+            return error_at(peek(), "expected ',' or '}' after field initializer");
+        }
+
+        if (auto err = consume(TokenKind::RBrace, "expected '}' after struct literal");
+            err.has_value())
+        {
+            return *err;
+        }
+        const Token rbrace = previous();
+
+        Expr expr;
+        expr.span = span_cover(type_name.span, rbrace.span);
+        expr.node = StructLiteralExpr{.type_name = type_name.lexeme, .fields = std::move(fields)};
+        return expr;
+    }
+
     [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_primary()
     {
         if (match(TokenKind::IntLiteral))
@@ -1349,6 +1653,25 @@ class Parser
         if (match(TokenKind::Identifier))
         {
             const Token name = previous();
+
+            if (match(TokenKind::ColonColon))
+            {
+                if (!check(TokenKind::Identifier))
+                {
+                    return error_at(peek(), "expected identifier after '::'");
+                }
+                const Token rhs = advance();
+                Expr expr;
+                expr.span = span_cover(name.span, rhs.span);
+                expr.node = ScopedNameExpr{.lhs = name.lexeme, .rhs = rhs.lexeme};
+                return expr;
+            }
+
+            if (check(TokenKind::LBrace))
+            {
+                return parse_struct_literal_after_name(name);
+            }
+
             Expr expr;
             expr.span = name.span;
             expr.node = NameExpr{.name = name.lexeme};
@@ -1403,7 +1726,36 @@ class Dumper
             out_ << ";\n";
         }
 
-        if (!p.imports.empty() && !p.functions.empty())
+        const bool has_types = !p.structs.empty() || !p.enums.empty();
+        if (!p.imports.empty() && (has_types || !p.functions.empty()))
+        {
+            out_ << "\n";
+        }
+
+        for (std::size_t i = 0; i < p.structs.size(); ++i)
+        {
+            dump_struct_decl(p.structs[i]);
+            if (i + 1 < p.structs.size())
+            {
+                out_ << "\n";
+            }
+        }
+
+        if (!p.structs.empty() && !p.enums.empty())
+        {
+            out_ << "\n";
+        }
+
+        for (std::size_t i = 0; i < p.enums.size(); ++i)
+        {
+            dump_enum_decl(p.enums[i]);
+            if (i + 1 < p.enums.size())
+            {
+                out_ << "\n";
+            }
+        }
+
+        if (has_types && !p.functions.empty())
         {
             out_ << "\n";
         }
@@ -1420,6 +1772,31 @@ class Dumper
 
   private:
     std::ostringstream& out_;
+
+    void dump_struct_decl(const StructDecl& s)
+    {
+        out_ << "struct " << s.name << " {";
+        for (const auto& f : s.fields)
+        {
+            out_ << " " << f.name << ": " << f.type.name << ";";
+        }
+        out_ << " }\n";
+    }
+
+    void dump_enum_decl(const EnumDecl& e)
+    {
+        out_ << "enum " << e.name << " {";
+        for (const auto& v : e.variants)
+        {
+            out_ << " " << v.name;
+            if (v.payload.has_value())
+            {
+                out_ << "(" << v.payload->name << ")";
+            }
+            out_ << ";";
+        }
+        out_ << " }\n";
+    }
 
     void dump_function(const Function& f)
     {
@@ -1552,6 +1929,8 @@ class Dumper
     void dump_expr_node(const StringExpr& e) { out_ << e.lexeme; }
     void dump_expr_node(const NameExpr& e) { out_ << e.name; }
 
+    void dump_expr_node(const ScopedNameExpr& e) { out_ << e.lhs << "::" << e.rhs; }
+
     void dump_expr_node(const MemberExpr& e)
     {
         dump_expr(*e.base);
@@ -1593,6 +1972,26 @@ class Dumper
             }
         }
         out_ << ")";
+    }
+
+    void dump_expr_node(const StructLiteralExpr& e)
+    {
+        out_ << e.type_name << "{";
+        for (std::size_t i = 0; i < e.fields.size(); ++i)
+        {
+            const auto& f = e.fields[i];
+            out_ << " " << f.name << ": ";
+            dump_expr(*f.value);
+            if (i + 1 < e.fields.size())
+            {
+                out_ << ",";
+            }
+        }
+        if (!e.fields.empty())
+        {
+            out_ << " ";
+        }
+        out_ << "}";
     }
 
     void dump_pred(const Pred& p)

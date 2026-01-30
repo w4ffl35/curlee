@@ -24,7 +24,9 @@ using curlee::parser::LetStmt;
 using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
+using curlee::parser::ScopedNameExpr;
 using curlee::parser::Stmt;
+using curlee::parser::StructLiteralExpr;
 using curlee::parser::UnsafeStmt;
 using curlee::parser::WhileStmt;
 using curlee::source::Span;
@@ -405,6 +407,16 @@ class Emitter
     void emit_expr_node(const MemberExpr&, Span span)
     {
         diags_.push_back(error_at(span, "member access not supported in emitter yet"));
+    }
+
+    void emit_expr_node(const ScopedNameExpr&, Span span)
+    {
+        diags_.push_back(error_at(span, "scoped names (::) not supported in emitter yet"));
+    }
+
+    void emit_expr_node(const StructLiteralExpr&, Span span)
+    {
+        diags_.push_back(error_at(span, "struct literals not supported in emitter yet"));
     }
 
     void emit_expr_node(const curlee::parser::UnaryExpr& expr, Span span)

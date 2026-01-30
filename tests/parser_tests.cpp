@@ -345,7 +345,7 @@ import foo.bar;
         for (const auto& d : ds)
         {
             if (d.message.find(
-                    "import declarations must appear before any function declarations") !=
+                    "import declarations must appear before any other top-level declarations") !=
                 std::string::npos)
             {
                 if (!d.span.has_value())
@@ -438,6 +438,190 @@ import foo.bar;
         if (ds.size() < 2)
         {
             fail("expected multiple diagnostics from one file");
+        }
+    }
+
+    // Structured data (struct/enum) parsing
+    {
+        const std::string src = R"(struct Point {
+  x: Int;
+  y: Int;
+}
+
+enum OptionInt {
+  None;
+  Some(Int);
+}
+
+fn main() -> Int {
+  let p: Point = Point{ x: 1, y: 2 };
+  let o: OptionInt = OptionInt::Some(123);
+  return p.x;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on structured-data program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on structured-data program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        if (prog.structs.empty() || prog.enums.empty())
+        {
+            fail("expected struct and enum declarations in program");
+        }
+        if (prog.structs[0].span.start >= prog.structs[0].span.end)
+        {
+            fail("expected struct decl to have a non-empty span");
+        }
+        if (prog.enums[0].span.start >= prog.enums[0].span.end)
+        {
+            fail("expected enum decl to have a non-empty span");
+        }
+
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("struct Point") == std::string::npos)
+        {
+            fail("dump missing struct declaration");
+        }
+        if (dumped.find("enum OptionInt") == std::string::npos)
+        {
+            fail("dump missing enum declaration");
+        }
+        if (dumped.find("Point{ x: 1, y: 2 }") == std::string::npos)
+        {
+            fail("dump missing struct literal");
+        }
+        if (dumped.find("OptionInt::Some") == std::string::npos)
+        {
+            fail("dump missing enum constructor");
+        }
+        if (dumped.find("return p.x") == std::string::npos)
+        {
+            fail("dump missing field access");
+        }
+        (void)prog.functions[0];
+    }
+
+    {
+        const std::string src = R"(struct Point {
+  x: Int;
+  y: Int;
+}
+
+fn main() -> Unit {
+  let p: Point = Point{ x: 1, x: 2, y: 3 };
+  p;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on duplicate-field program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+        {
+            fail("expected parse to fail on duplicate field");
+        }
+
+        const auto& diags = std::get<std::vector<diag::Diagnostic>>(parsed);
+        bool found = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("duplicate field") != std::string::npos)
+            {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+        {
+            fail("expected duplicate-field diagnostic");
+        }
+    }
+
+    {
+        const std::string src = R"(struct Point {
+  x: Int;
+  y: Int;
+}
+
+fn main() -> Unit {
+  let p: Point = Point{ x: 1 y: 2 };
+  p;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on missing-separator program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+        {
+            fail("expected parse to fail on missing field separator");
+        }
+
+        const auto& diags = std::get<std::vector<diag::Diagnostic>>(parsed);
+        bool found = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("expected ','") != std::string::npos)
+            {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+        {
+            fail("expected missing-separator diagnostic mentioning ','");
+        }
+    }
+
+    {
+        const std::string src = R"(fn main() -> Unit {
+  let p: Int = 1;
+  p.;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on invalid-field-access program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+        {
+            fail("expected parse to fail on invalid field access syntax");
+        }
+
+        const auto& diags = std::get<std::vector<diag::Diagnostic>>(parsed);
+        bool found = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("expected identifier after '.'") != std::string::npos)
+            {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+        {
+            fail("expected invalid field access diagnostic");
         }
     }
 
