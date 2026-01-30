@@ -316,6 +316,10 @@ class Lexer
         {
             return TokenKind::KwImport;
         }
+        if (lexeme == "as")
+        {
+            return TokenKind::KwAs;
+        }
         if (lexeme == "struct")
         {
             return TokenKind::KwStruct;

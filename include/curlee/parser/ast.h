@@ -222,6 +222,7 @@ struct ImportDecl
 {
     curlee::source::Span span;
     std::vector<std::string_view> path;
+    std::optional<std::string_view> alias;
 };
 
 struct StructDeclField

@@ -376,6 +376,17 @@ class Parser
             path.push_back(seg.lexeme);
         }
 
+        std::optional<std::string_view> alias;
+        if (match(TokenKind::KwAs))
+        {
+            if (!check(TokenKind::Identifier))
+            {
+                return error_at(peek(), "expected identifier after 'as' in import declaration");
+            }
+            const Token name = advance();
+            alias = name.lexeme;
+        }
+
         if (auto err = consume(TokenKind::Semicolon, "expected ';' after import declaration");
             err.has_value())
         {
@@ -383,7 +394,11 @@ class Parser
         }
         const Token semi = previous();
 
-        return ImportDecl{.span = span_cover(kw.span, semi.span), .path = std::move(path)};
+        return ImportDecl{
+            .span = span_cover(kw.span, semi.span),
+            .path = std::move(path),
+            .alias = alias,
+        };
     }
 
     [[nodiscard]] std::variant<StructDecl, curlee::diag::Diagnostic> parse_struct_decl()
@@ -1722,6 +1737,10 @@ class Dumper
                 {
                     out_ << ".";
                 }
+            }
+            if (imp.alias.has_value())
+            {
+                out_ << " as " << *imp.alias;
             }
             out_ << ";\n";
         }

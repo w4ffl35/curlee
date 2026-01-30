@@ -1,4 +1,6 @@
 #include <curlee/resolver/resolver.h>
+#include <curlee/lexer/lexer.h>
+#include <curlee/parser/parser.h>
 #include <curlee/source/source_file.h>
 #include <filesystem>
 #include <optional>
@@ -32,6 +34,45 @@ using curlee::parser::UnsafeStmt;
 using curlee::parser::WhileStmt;
 using curlee::source::Span;
 
+static std::string join_path(const std::vector<std::string_view>& parts)
+{
+    std::string out;
+    for (std::size_t i = 0; i < parts.size(); ++i)
+    {
+        out += std::string(parts[i]);
+        if (i + 1 < parts.size())
+        {
+            out += '.';
+        }
+    }
+    return out;
+}
+
+static bool collect_member_chain(const Expr& expr, std::vector<std::string_view>& out)
+{
+    if (const auto* name = std::get_if<NameExpr>(&expr.node))
+    {
+        out.push_back(name->name);
+        return true;
+    }
+
+    if (const auto* mem = std::get_if<MemberExpr>(&expr.node))
+    {
+        if (mem->base == nullptr)
+        {
+            return false;
+        }
+        if (!collect_member_chain(*mem->base, out))
+        {
+            return false;
+        }
+        out.push_back(mem->member);
+        return true;
+    }
+
+    return false;
+}
+
 struct Def
 {
     SymbolId id;
@@ -54,10 +95,11 @@ class Resolver
 
     [[nodiscard]] ResolveResult run(const curlee::parser::Program& program)
     {
+        // Root scope: imports, functions, and all top-level declarations live here.
+        push_scope();
         resolve_imports(program);
 
         // First pass: declare top-level functions.
-        push_scope();
         for (const auto& f : program.functions)
         {
             declare(f.name, f.span, "duplicate function");
@@ -83,6 +125,19 @@ class Resolver
     std::optional<std::filesystem::path> base_path_;
     std::optional<std::filesystem::path> entry_dir_;
     int unsafe_depth_ = 0;
+
+    struct ModuleInfo
+    {
+        // Exported symbol names defined in the imported module.
+        std::unordered_map<std::string_view, Def> exports;
+    };
+
+    // Own imported module contents so parsed AST string_views remain valid.
+    std::vector<curlee::source::SourceFile> imported_files_;
+    // module path (e.g. "foo.bar") -> module info
+    std::unordered_map<std::string, ModuleInfo> modules_by_path_;
+    // alias name (e.g. "baz") -> module path key in modules_by_path_
+    std::unordered_map<std::string_view, std::string> module_aliases_;
 
     static bool is_python_ffi_call(const Expr& callee)
     {
@@ -115,15 +170,7 @@ class Resolver
                 continue;
             }
 
-            std::string import_name;
-            for (std::size_t i = 0; i < imp.path.size(); ++i)
-            {
-                import_name += std::string(imp.path[i]);
-                if (i + 1 < imp.path.size())
-                {
-                    import_name += ".";
-                }
-            }
+            const std::string import_name = join_path(imp.path);
 
             std::vector<std::filesystem::path> roots;
             roots.push_back(*base_path_);
@@ -140,6 +187,8 @@ class Resolver
             }
             first_expected += ".curlee";
 
+            curlee::source::SourceFile loaded_file;
+
             for (const auto& root : roots)
             {
                 std::filesystem::path module_path = root;
@@ -153,6 +202,7 @@ class Resolver
                 if (std::holds_alternative<source::SourceFile>(loaded))
                 {
                     found = true;
+                    loaded_file = std::get<source::SourceFile>(loaded);
                     break;
                 }
             }
@@ -168,6 +218,65 @@ class Resolver
                             .span = std::nullopt});
                 diagnostics_.push_back(std::move(d));
                 continue;
+            }
+
+            // Record the module and parse its exports.
+            imported_files_.push_back(std::move(loaded_file));
+            const auto& src = imported_files_.back().contents;
+
+            const auto lexed = curlee::lexer::lex(src);
+            if (!std::holds_alternative<std::vector<curlee::lexer::Token>>(lexed))
+            {
+                Diagnostic d;
+                d.severity = Severity::Error;
+                d.message = "failed to lex imported module: '" + import_name + "'";
+                d.span = imp.span;
+                diagnostics_.push_back(std::move(d));
+                continue;
+            }
+
+            const auto& toks = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            auto parsed = curlee::parser::parse(toks);
+            if (!std::holds_alternative<curlee::parser::Program>(parsed))
+            {
+                Diagnostic d;
+                d.severity = Severity::Error;
+                d.message = "failed to parse imported module: '" + import_name + "'";
+                d.span = imp.span;
+                diagnostics_.push_back(std::move(d));
+                continue;
+            }
+
+            auto mod_prog = std::get<curlee::parser::Program>(std::move(parsed));
+
+            ModuleInfo info;
+            auto export_symbol = [&](std::string_view name, Span span)
+            {
+                const SymbolId id{.value = static_cast<std::uint32_t>(resolution_.symbols.size())};
+                resolution_.symbols.push_back(Symbol{.id = id, .name = name, .span = span});
+                info.exports.emplace(name, Def{.id = id, .span = span});
+            };
+
+            for (const auto& f : mod_prog.functions)
+            {
+                export_symbol(f.name, f.span);
+            }
+            for (const auto& s : mod_prog.structs)
+            {
+                export_symbol(s.name, s.span);
+            }
+            for (const auto& e : mod_prog.enums)
+            {
+                export_symbol(e.name, e.span);
+            }
+
+            modules_by_path_.emplace(import_name, std::move(info));
+
+            // Optional alias introduces a top-level module name.
+            if (imp.alias.has_value())
+            {
+                declare(*imp.alias, imp.span, "duplicate import alias");
+                module_aliases_.emplace(*imp.alias, import_name);
             }
         }
     }
@@ -366,7 +475,7 @@ class Resolver
         }
     }
 
-    void resolve_expr_node(const MemberExpr& e, Span)
+    void resolve_expr_node(const MemberExpr& e, Span span)
     {
         if (e.base == nullptr)
         {
@@ -378,6 +487,59 @@ class Resolver
         {
             // Builtin module name used for interop. Do not require declaration.
             return;
+        }
+
+        // Module-qualified reference: either `alias.member` or `foo.bar.member`.
+        std::vector<std::string_view> parts;
+        if (collect_member_chain(*e.base, parts))
+        {
+            parts.push_back(e.member);
+            if (parts.size() >= 2)
+            {
+                const std::string_view member = parts.back();
+                const std::vector<std::string_view> qualifier(parts.begin(), parts.end() - 1);
+
+                std::optional<std::string> module_key;
+                if (qualifier.size() == 1)
+                {
+                    if (const auto it = module_aliases_.find(qualifier[0]);
+                        it != module_aliases_.end())
+                    {
+                        module_key = it->second;
+                    }
+                }
+                if (!module_key.has_value())
+                {
+                    const std::string key = join_path(qualifier);
+                    if (modules_by_path_.find(key) != modules_by_path_.end())
+                    {
+                        module_key = key;
+                    }
+                }
+
+                if (module_key.has_value())
+                {
+                    const auto it_mod = modules_by_path_.find(*module_key);
+                    if (it_mod != modules_by_path_.end())
+                    {
+                        const auto it_export = it_mod->second.exports.find(member);
+                        if (it_export == it_mod->second.exports.end())
+                        {
+                            Diagnostic d;
+                            d.severity = Severity::Error;
+                            d.message = "unknown qualified name '" + *module_key + "." +
+                                        std::string(member) + "'";
+                            d.span = e.base->span;
+                            diagnostics_.push_back(std::move(d));
+                            return;
+                        }
+
+                        resolution_.uses.push_back(
+                            NameUse{.target = it_export->second.id, .span = span});
+                        return;
+                    }
+                }
+            }
         }
 
         resolve_expr(*e.base);

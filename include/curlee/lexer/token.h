@@ -32,6 +32,7 @@ enum class TokenKind
     KwUnsafe,
     KwCap,
     KwImport,
+    KwAs,
 
     KwStruct,
     KwEnum,
@@ -121,6 +122,8 @@ struct Token
         return "kw_cap";
     case TokenKind::KwImport:
         return "kw_import";
+    case TokenKind::KwAs:
+        return "kw_as";
 
     case TokenKind::KwStruct:
         return "kw_struct";
