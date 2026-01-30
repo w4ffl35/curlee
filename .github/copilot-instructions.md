@@ -12,6 +12,8 @@ You are working on **Curlee**, a C++23 (CMake) compiler/runtime project. Curlee 
    - To update wiki docs: commit/push inside `wiki/` (do not expect main-repo commits to affect wiki pages).
 - Do not create `docs/` or other new doc trees in the main repo unless an Issue explicitly asks.
 - Keep the wiki page **Verification-Scope** in sync with implementation (scope drift is not allowed).
+- When starting an Issue, identify the relevant wiki page(s) and treat them as the spec.
+- If code changes alter behavior, syntax, CLI flags, verification scope, or bundle format, update the relevant wiki page(s) in the `wiki/` repo in the same work item.
 
 ## Formatting policy
 
@@ -69,6 +71,9 @@ Guardrail (Issue lifecycle):
   - The user/owner explicitly instructs you to close it (e.g., “close as wontfix/duplicate/icebox”), OR
   - The team explicitly does not intend to pursue it and the user/owner instructs you to mark it that way.
 - If an Issue is out-of-scope or unscheduled and you were about to close it: STOP and ask for confirmation, or leave it open and add a brief comment summarizing the state.
+
+Guardrail (GitHub CLI editing):
+- When using `gh issue edit` to set or replace issue bodies/comments that contain backticks, code blocks, or shell-sensitive characters, ALWAYS use `--body-file` / `--body-file -` (stdin). Do not inline complex bodies in a shell string.
 1. Plan: state the smallest viable approach and what will be verified.
 2. Tests first: add/adjust unit or golden tests.
 3. Implement: keep changes small and focused.
