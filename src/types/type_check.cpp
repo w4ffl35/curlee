@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace curlee::types
@@ -25,7 +26,9 @@ using curlee::parser::LetStmt;
 using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
+using curlee::parser::ScopedNameExpr;
 using curlee::parser::Stmt;
+using curlee::parser::StructLiteralExpr;
 using curlee::parser::UnsafeStmt;
 using curlee::parser::WhileStmt;
 using curlee::source::Span;
@@ -40,6 +43,8 @@ class Checker
   public:
     [[nodiscard]] TypeCheckResult run(const curlee::parser::Program& program)
     {
+        collect_structs_and_enums(program);
+
         // Builtins (compiler/runtime-provided).
         {
             FunctionType print_sig;
@@ -86,6 +91,94 @@ class Checker
     std::vector<Diagnostic> diags_;
     TypeInfo info_;
     int unsafe_depth_ = 0;
+
+    struct StructInfo
+    {
+        std::unordered_map<std::string_view, Type> fields;
+    };
+
+    struct EnumInfo
+    {
+        struct VariantInfo
+        {
+            std::optional<Type> payload;
+        };
+        std::unordered_map<std::string_view, VariantInfo> variants;
+    };
+
+    std::unordered_map<std::string_view, StructInfo> structs_;
+    std::unordered_map<std::string_view, EnumInfo> enums_;
+
+    void collect_structs_and_enums(const curlee::parser::Program& program)
+    {
+        // First pass: collect names to allow forward references.
+        for (const auto& s : program.structs)
+        {
+            if (structs_.contains(s.name) || enums_.contains(s.name))
+            {
+                error_at(s.span, "duplicate type name '" + std::string(s.name) + "'");
+                continue;
+            }
+            structs_.emplace(s.name, StructInfo{});
+        }
+
+        for (const auto& e : program.enums)
+        {
+            if (structs_.contains(e.name) || enums_.contains(e.name))
+            {
+                error_at(e.span, "duplicate type name '" + std::string(e.name) + "'");
+                continue;
+            }
+            enums_.emplace(e.name, EnumInfo{});
+        }
+
+        // Second pass: resolve field/variant types.
+        for (const auto& s : program.structs)
+        {
+            auto it = structs_.find(s.name);
+            if (it == structs_.end())
+            {
+                continue;
+            }
+
+            StructInfo info;
+            for (const auto& field : s.fields)
+            {
+                auto ft = type_from_ast(field.type);
+                if (!ft.has_value())
+                {
+                    continue;
+                }
+                info.fields.emplace(field.name, *ft);
+            }
+            it->second = std::move(info);
+        }
+
+        for (const auto& e : program.enums)
+        {
+            auto it = enums_.find(e.name);
+            if (it == enums_.end())
+            {
+                continue;
+            }
+
+            EnumInfo info;
+            for (const auto& v : e.variants)
+            {
+                EnumInfo::VariantInfo vi;
+                if (v.payload.has_value())
+                {
+                    auto pt = type_from_ast(*v.payload);
+                    if (pt.has_value())
+                    {
+                        vi.payload = *pt;
+                    }
+                }
+                info.variants.emplace(v.name, std::move(vi));
+            }
+            it->second = std::move(info);
+        }
+    }
 
     static bool is_python_ffi_call(const Expr& callee)
     {
@@ -140,6 +233,15 @@ class Checker
         const auto t = core_type_from_name(name.name);
         if (!t.has_value())
         {
+            if (structs_.contains(name.name))
+            {
+                return Type{.kind = TypeKind::Struct, .name = name.name};
+            }
+            if (enums_.contains(name.name))
+            {
+                return Type{.kind = TypeKind::Enum, .name = name.name};
+            }
+
             error_at(name.span, "unknown type '" + std::string(name.name) + "'");
             return std::nullopt;
         }
@@ -466,12 +568,41 @@ class Checker
 
     [[nodiscard]] std::optional<Type> check_expr_node(const MemberExpr& e, Span span)
     {
-        if (e.base != nullptr)
+        if (e.base == nullptr)
         {
-            (void)check_expr(*e.base);
+            error_at(span, "invalid member access");
+            return std::nullopt;
         }
-        error_at(span, "member access is only supported as a call target");
-        return std::nullopt;
+
+        const auto base_t = check_expr(*e.base);
+        if (!base_t.has_value())
+        {
+            return std::nullopt;
+        }
+
+        if (base_t->kind != TypeKind::Struct)
+        {
+            error_at(span, "cannot access field '" + std::string(e.member) +
+                               "' on non-struct type " + std::string(to_string(*base_t)));
+            return std::nullopt;
+        }
+
+        const auto it = structs_.find(base_t->name);
+        if (it == structs_.end())
+        {
+            error_at(span, "unknown struct type '" + std::string(base_t->name) + "'");
+            return std::nullopt;
+        }
+
+        const auto fit = it->second.fields.find(e.member);
+        if (fit == it->second.fields.end())
+        {
+            error_at(span, "unknown field '" + std::string(e.member) + "' on struct '" +
+                               std::string(base_t->name) + "'");
+            return std::nullopt;
+        }
+
+        return fit->second;
     }
 
     [[nodiscard]] std::optional<Type> check_expr_node(const CallExpr& e, Span span)
@@ -491,6 +622,56 @@ class Checker
             }
 
             return Type{.kind = TypeKind::Unit};
+        }
+
+        if (const auto* callee_scoped = std::get_if<ScopedNameExpr>(&e.callee->node);
+            callee_scoped != nullptr)
+        {
+            const auto enum_it = enums_.find(callee_scoped->lhs);
+            if (enum_it == enums_.end())
+            {
+                error_at(span, "unknown enum type '" + std::string(callee_scoped->lhs) + "'");
+                return std::nullopt;
+            }
+
+            const auto var_it = enum_it->second.variants.find(callee_scoped->rhs);
+            if (var_it == enum_it->second.variants.end())
+            {
+                error_at(span, "unknown variant '" + std::string(callee_scoped->rhs) +
+                                   "' for enum '" + std::string(callee_scoped->lhs) + "'");
+                return std::nullopt;
+            }
+
+            if (!var_it->second.payload.has_value())
+            {
+                if (!e.args.empty())
+                {
+                    error_at(span, "enum variant '" + std::string(callee_scoped->lhs) +
+                                       "::" + std::string(callee_scoped->rhs) +
+                                       "' does not take a payload");
+                }
+                return Type{.kind = TypeKind::Enum, .name = callee_scoped->lhs};
+            }
+
+            if (e.args.size() != 1)
+            {
+                error_at(span, "enum variant '" + std::string(callee_scoped->lhs) +
+                                   "::" + std::string(callee_scoped->rhs) +
+                                   "' expects exactly 1 payload argument");
+                return Type{.kind = TypeKind::Enum, .name = callee_scoped->lhs};
+            }
+
+            const auto arg_t = check_expr(e.args[0]);
+            if (arg_t.has_value() && *arg_t != *var_it->second.payload)
+            {
+                error_at(span, "enum payload type mismatch for '" +
+                                   std::string(callee_scoped->lhs) +
+                                   "::" + std::string(callee_scoped->rhs) + "': expected " +
+                                   std::string(to_string(*var_it->second.payload)) + ", got " +
+                                   std::string(to_string(*arg_t)));
+            }
+
+            return Type{.kind = TypeKind::Enum, .name = callee_scoped->lhs};
         }
 
         const auto* callee_name = std::get_if<NameExpr>(&e.callee->node);
@@ -557,6 +738,108 @@ class Checker
     [[nodiscard]] std::optional<Type> check_expr_node(const GroupExpr& e, Span)
     {
         return check_expr(*e.inner);
+    }
+
+    [[nodiscard]] std::optional<Type> check_expr_node(const StructLiteralExpr& e, Span span)
+    {
+        const auto it = structs_.find(e.type_name);
+        if (it == structs_.end())
+        {
+            error_at(span, "unknown struct type '" + std::string(e.type_name) + "'");
+            return std::nullopt;
+        }
+
+        std::unordered_set<std::string_view> seen;
+        for (const auto& field : e.fields)
+        {
+            seen.insert(field.name);
+
+            const auto f_it = it->second.fields.find(field.name);
+            if (f_it == it->second.fields.end())
+            {
+                error_at(field.span, "unknown field '" + std::string(field.name) +
+                                         "' for struct '" + std::string(e.type_name) + "'");
+                (void)check_expr(*field.value);
+                continue;
+            }
+
+            const auto init_t = check_expr(*field.value);
+            if (!init_t.has_value())
+            {
+                continue;
+            }
+
+            if (*init_t != f_it->second)
+            {
+                error_at(field.span, "field '" + std::string(field.name) +
+                                         "' type mismatch: expected " +
+                                         std::string(to_string(f_it->second)) + ", got " +
+                                         std::string(to_string(*init_t)));
+            }
+        }
+
+        std::vector<std::string_view> missing;
+        missing.reserve(it->second.fields.size());
+        for (const auto& [field_name, _] : it->second.fields)
+        {
+            if (!seen.contains(field_name))
+            {
+                missing.push_back(field_name);
+            }
+        }
+
+        if (!missing.empty())
+        {
+            std::string msg =
+                "struct literal for '" + std::string(e.type_name) + "' is missing required field";
+            msg += (missing.size() == 1) ? " '" : "s: ";
+            for (std::size_t i = 0; i < missing.size(); ++i)
+            {
+                if (missing.size() == 1)
+                {
+                    msg += std::string(missing[i]) + "'";
+                }
+                else
+                {
+                    if (i != 0)
+                    {
+                        msg += ", ";
+                    }
+                    msg += "'" + std::string(missing[i]) + "'";
+                }
+            }
+            error_at(span, std::move(msg));
+        }
+
+        return Type{.kind = TypeKind::Struct, .name = e.type_name};
+    }
+
+    [[nodiscard]] std::optional<Type> check_expr_node(const ScopedNameExpr& e, Span span)
+    {
+        const auto enum_it = enums_.find(e.lhs);
+        if (enum_it == enums_.end())
+        {
+            error_at(span, "unknown enum type '" + std::string(e.lhs) + "'");
+            return std::nullopt;
+        }
+
+        const auto var_it = enum_it->second.variants.find(e.rhs);
+        if (var_it == enum_it->second.variants.end())
+        {
+            error_at(span, "unknown variant '" + std::string(e.rhs) + "' for enum '" +
+                               std::string(e.lhs) + "'");
+            return std::nullopt;
+        }
+
+        if (var_it->second.payload.has_value())
+        {
+            error_at(span, "enum variant '" + std::string(e.lhs) + "::" + std::string(e.rhs) +
+                               "' requires a payload; use " + std::string(e.lhs) +
+                               "::" + std::string(e.rhs) + "(expr)");
+            return std::nullopt;
+        }
+
+        return Type{.kind = TypeKind::Enum, .name = e.lhs};
     }
 };
 

@@ -82,6 +82,13 @@ Guardrail (GitHub CLI editing):
 
 Guardrail: **Do not write more than ~50 lines of code without running tests or building** (unless explicitly asked).
 
+## Verification (mandatory)
+
+- Always verify changes locally before reporting progress as “done”.
+   - Run the smallest relevant build and/or test target(s) for the code you touched.
+   - If you can’t run verification (missing toolchain, CI-only target, etc.), say so explicitly and explain what to run instead.
+- When you comment on an Issue or produce a final summary, include the exact command(s) you ran to verify.
+
 Efficiency:
 - Prefer batching related terminal commands with `&&` (e.g., build + run tests + stage) to reduce tool overhead, **without** skipping verification steps.
 

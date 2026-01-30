@@ -14,14 +14,30 @@ enum class TypeKind
     Bool,
     String,
     Unit,
+    Struct,
+    Enum,
 };
 
 struct Type
 {
     TypeKind kind;
+    // For nominal types (Struct/Enum), this is the declared type name.
+    // Empty for core scalar types.
+    std::string_view name = {};
 };
 
-[[nodiscard]] constexpr bool operator==(Type a, Type b) { return a.kind == b.kind; }
+[[nodiscard]] constexpr bool operator==(Type a, Type b)
+{
+    if (a.kind != b.kind)
+    {
+        return false;
+    }
+    if (a.kind == TypeKind::Struct || a.kind == TypeKind::Enum)
+    {
+        return a.name == b.name;
+    }
+    return true;
+}
 
 struct FunctionType
 {
@@ -57,11 +73,22 @@ struct CapabilityType
         return "String";
     case TypeKind::Unit:
         return "Unit";
+    case TypeKind::Struct:
+        return "Struct";
+    case TypeKind::Enum:
+        return "Enum";
     }
     return "<unknown>";
 }
 
-[[nodiscard]] constexpr std::string_view to_string(Type t) { return to_string(t.kind); }
+[[nodiscard]] constexpr std::string_view to_string(Type t)
+{
+    if (t.kind == TypeKind::Struct || t.kind == TypeKind::Enum)
+    {
+        return t.name;
+    }
+    return to_string(t.kind);
+}
 
 [[nodiscard]] inline std::optional<Type> core_type_from_name(std::string_view name)
 {

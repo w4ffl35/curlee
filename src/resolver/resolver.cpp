@@ -25,7 +25,9 @@ using curlee::parser::LetStmt;
 using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
+using curlee::parser::ScopedNameExpr;
 using curlee::parser::Stmt;
+using curlee::parser::StructLiteralExpr;
 using curlee::parser::UnsafeStmt;
 using curlee::parser::WhileStmt;
 using curlee::source::Span;
@@ -382,6 +384,20 @@ class Resolver
     }
 
     void resolve_expr_node(const GroupExpr& e, Span) { resolve_expr(*e.inner); }
+
+    void resolve_expr_node(const ScopedNameExpr&, Span)
+    {
+        // `Enum::Variant` is not a variable reference; do not call use_name().
+    }
+
+    void resolve_expr_node(const StructLiteralExpr& e, Span)
+    {
+        // `Struct{ field: expr, ... }`: type/field names are not variable references.
+        for (const auto& f : e.fields)
+        {
+            resolve_expr(*f.value);
+        }
+    }
 
     void resolve_pred(const curlee::parser::Pred& p)
     {
