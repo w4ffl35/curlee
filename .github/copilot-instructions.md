@@ -59,6 +59,15 @@ Branching model:
    - If a new task arises, file a GitHub Issue first (with clear acceptance criteria), then work it.
    - Treat Issues as the source of truth for execution order and scope.
    - Close the GitHub Issue when the work is complete; if no code changes, close it manually with a brief completion note.
+
+Guardrail (Issue lifecycle):
+- NEVER close an Issue just because it is labeled “icebox”, “post-MVP”, “backlog”, or “not scheduled”.
+- NEVER close an Issue to “clean up” the issue list.
+- Only close an Issue when one of these is true:
+  - The acceptance criteria are satisfied (work actually complete), OR
+  - The user/owner explicitly instructs you to close it (e.g., “close as wontfix/duplicate/icebox”), OR
+  - The team explicitly does not intend to pursue it and the user/owner instructs you to mark it that way.
+- If an Issue is out-of-scope or unscheduled and you were about to close it: STOP and ask for confirmation, or leave it open and add a brief comment summarizing the state.
 1. Plan: state the smallest viable approach and what will be verified.
 2. Tests first: add/adjust unit or golden tests.
 3. Implement: keep changes small and focused.
