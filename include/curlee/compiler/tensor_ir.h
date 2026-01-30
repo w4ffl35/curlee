@@ -28,9 +28,6 @@ class Program
     ValueId zeros(Shape shape, DType dtype);
     ValueId add(ValueId lhs, ValueId rhs);
 
-    std::string dump() const;
-
-  private:
     struct Op
     {
         std::string name;
@@ -39,6 +36,11 @@ class Program
         std::vector<ValueId> inputs;
     };
 
+    const std::vector<Op>& ops() const { return ops_; }
+
+    std::string dump() const;
+
+  private:
     std::vector<Op> ops_;
 };
 

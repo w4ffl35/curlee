@@ -394,6 +394,15 @@ target_include_directories(curlee_tensor_ir_tests PRIVATE include)
 
 add_test(NAME curlee_tensor_ir_tests COMMAND curlee_tensor_ir_tests)
 
+add_executable(curlee_tensor_backend_tests
+  tests/tensor_backend_tests.cpp
+  src/compiler/tensor_backend.cpp
+  src/compiler/tensor_ir.cpp
+)
+target_include_directories(curlee_tensor_backend_tests PRIVATE include)
+
+add_test(NAME curlee_tensor_backend_tests COMMAND curlee_tensor_backend_tests)
+
 add_executable(curlee_verification_tests
   tests/verification_solver_tests.cpp
   src/verification/solver.cpp
