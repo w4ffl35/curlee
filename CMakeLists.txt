@@ -219,6 +219,18 @@ target_include_directories(curlee_parser_tests PRIVATE include)
 
 add_test(NAME curlee_parser_tests COMMAND curlee_parser_tests)
 
+add_executable(curlee_fuzz_regression_tests
+  tests/fuzz_regression_tests.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+)
+target_include_directories(curlee_fuzz_regression_tests PRIVATE include)
+
+add_test(
+  NAME curlee_fuzz_regression_tests
+  COMMAND curlee_fuzz_regression_tests ${CMAKE_SOURCE_DIR}/tests/fuzz_regressions
+)
+
 add_executable(curlee_resolver_tests
   tests/resolver_tests.cpp
   src/lexer/lexer.cpp
