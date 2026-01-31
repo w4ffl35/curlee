@@ -48,6 +48,18 @@ class Emitter
   public:
     EmitResult run(const curlee::parser::Program& program)
     {
+        functions_.clear();
+        for (const auto& f : program.functions)
+        {
+            if (functions_.contains(f.name))
+            {
+                diags_.push_back(
+                    error_at(f.span, "duplicate function declaration '" + std::string(f.name) + "'"));
+                return diags_;
+            }
+            functions_.emplace(f.name, &f);
+        }
+
         for (const auto& f : program.functions)
         {
             if (f.name == "print")
@@ -116,6 +128,8 @@ class Emitter
     std::uint16_t next_local_base_ = 0;
     bool current_is_main_ = false;
 
+        std::unordered_map<std::string_view, const Function*> functions_;
+
     std::unordered_map<std::string_view, std::size_t> function_addrs_;
     std::unordered_map<std::string_view, std::vector<std::size_t>> pending_calls_;
 
@@ -158,10 +172,40 @@ class Emitter
         locals_.clear();
         local_base_ = next_local_base_;
 
-        if (!fn.params.empty())
+        if (is_main && !fn.params.empty())
         {
-            diags_.push_back(error_at(fn.span, "function parameters not supported in emitter yet"));
+            diags_.push_back(error_at(fn.span, "main cannot take parameters in runnable code"));
             return;
+        }
+
+        // Parameters live in the first slots of this function's locals range.
+        for (std::size_t i = 0; i < fn.params.size(); ++i)
+        {
+            const auto& p = fn.params[i];
+            if (p.type.name != "Int" && p.type.name != "Bool")
+            {
+                diags_.push_back(error_at(p.type.span,
+                                         "parameter type not supported in runnable code: '" +
+                                             std::string(p.type.name) + "'"));
+                return;
+            }
+
+            const auto slot = static_cast<std::uint16_t>(local_base_ + i);
+            locals_.emplace(p.name, slot);
+        }
+
+        // Callee prologue: pop call arguments into parameter locals.
+        // Call sites evaluate args left-to-right, so we pop into params right-to-left.
+        for (std::size_t i = fn.params.size(); i > 0; --i)
+        {
+            const auto& p = fn.params[i - 1];
+            const auto it = locals_.find(p.name);
+            if (it == locals_.end())
+            {
+                diags_.push_back(error_at(p.span, "internal error: missing parameter local slot"));
+                return;
+            }
+            chunk_.emit_local(OpCode::StoreLocal, it->second, p.span);
         }
 
         for (const auto& stmt : fn.body.stmts)
@@ -586,12 +630,6 @@ class Emitter
             return;
         }
 
-        if (!expr.args.empty())
-        {
-            diags_.push_back(error_at(span, "call arguments not supported in emitter yet"));
-            return;
-        }
-
         if (const auto* callee_member = std::get_if<MemberExpr>(&expr.callee->node);
             callee_member != nullptr && callee_member->base != nullptr)
         {
@@ -613,6 +651,31 @@ class Emitter
         {
             diags_.push_back(error_at(span, "only name calls are supported in emitter yet"));
             return;
+        }
+
+        auto fn_it = functions_.find(callee_name->name);
+        if (fn_it == functions_.end() || fn_it->second == nullptr)
+        {
+            diags_.push_back(error_at(span, "unknown function '" + std::string(callee_name->name) + "'"));
+            return;
+        }
+
+        const auto* callee_decl = fn_it->second;
+        if (expr.args.size() != callee_decl->params.size())
+        {
+            diags_.push_back(error_at(
+                span, "call to '" + std::string(callee_name->name) + "' expects " +
+                          std::to_string(callee_decl->params.size()) + " argument(s)"));
+            return;
+        }
+
+        for (const auto& arg : expr.args)
+        {
+            emit_expr(arg);
+            if (!diags_.empty())
+            {
+                return;
+            }
         }
 
         emit_call(callee_name->name, span);
