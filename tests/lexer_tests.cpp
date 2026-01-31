@@ -34,6 +34,41 @@ int main()
 {
     using namespace curlee::lexer;
 
+    // Cover TokenKind stringification (used in diagnostics and tests).
+    {
+        constexpr TokenKind all_kinds[] = {
+            TokenKind::Eof,           TokenKind::Identifier,   TokenKind::IntLiteral,
+            TokenKind::StringLiteral, TokenKind::KwFn,         TokenKind::KwLet,
+            TokenKind::KwIf,          TokenKind::KwElse,       TokenKind::KwWhile,
+            TokenKind::KwReturn,      TokenKind::KwTrue,       TokenKind::KwFalse,
+            TokenKind::KwRequires,    TokenKind::KwEnsures,    TokenKind::KwWhere,
+            TokenKind::KwUnsafe,      TokenKind::KwCap,        TokenKind::KwImport,
+            TokenKind::KwAs,          TokenKind::KwStruct,     TokenKind::KwEnum,
+            TokenKind::LParen,        TokenKind::RParen,       TokenKind::LBrace,
+            TokenKind::RBrace,        TokenKind::LBracket,     TokenKind::RBracket,
+            TokenKind::Semicolon,     TokenKind::Comma,        TokenKind::Colon,
+            TokenKind::ColonColon,    TokenKind::Dot,          TokenKind::Arrow,
+            TokenKind::Equal,         TokenKind::EqualEqual,   TokenKind::Bang,
+            TokenKind::BangEqual,     TokenKind::Less,         TokenKind::LessEqual,
+            TokenKind::Greater,       TokenKind::GreaterEqual, TokenKind::Plus,
+            TokenKind::Minus,         TokenKind::Star,         TokenKind::Slash,
+            TokenKind::AndAnd,        TokenKind::OrOr,
+        };
+
+        for (const auto kind : all_kinds)
+        {
+            if (to_string(kind) == "unknown")
+            {
+                fail("expected TokenKind to stringify to a stable name");
+            }
+        }
+
+        if (to_string(static_cast<TokenKind>(-1)) != "unknown")
+        {
+            fail("expected invalid TokenKind to stringify to 'unknown'");
+        }
+    }
+
     {
         const std::string src = "fn f() { return x; }";
         const auto res = lex(src);
