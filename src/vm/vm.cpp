@@ -29,6 +29,10 @@ struct ProcResult
 constexpr int kPythonRunnerTimeoutMs = 500;
 constexpr std::size_t kPythonRunnerMaxOutputBytes = 1 * 1024 * 1024;
 
+ProcResult run_process_argv(const std::vector<const char*>& argv, const std::string& exe_path,
+                            const std::string& stdin_data, int timeout_ms,
+                            std::size_t max_output_bytes);
+
 void set_nonblocking(int fd)
 {
     const int flags = fcntl(fd, F_GETFL, 0);
@@ -86,6 +90,24 @@ void read_into(int fd, std::string& out, bool& eof, std::size_t& total_bytes,
 ProcResult run_process(const std::string& exe_path, const std::string& stdin_data, int timeout_ms,
                        std::size_t max_output_bytes)
 {
+    std::vector<std::string> argv_storage;
+    argv_storage.push_back(exe_path);
+
+    std::vector<const char*> argv;
+    argv.reserve(argv_storage.size() + 1);
+    for (const auto& s : argv_storage)
+    {
+        argv.push_back(s.c_str());
+    }
+    argv.push_back(nullptr);
+
+    return run_process_argv(argv, exe_path, stdin_data, timeout_ms, max_output_bytes);
+}
+
+ProcResult run_process_argv(const std::vector<const char*>& argv, const std::string& exe_path,
+                            const std::string& stdin_data, int timeout_ms,
+                            std::size_t max_output_bytes)
+{
     int in_pipe[2] = {-1, -1};
     int out_pipe[2] = {-1, -1};
     int err_pipe[2] = {-1, -1};
@@ -117,9 +139,12 @@ ProcResult run_process(const std::string& exe_path, const std::string& stdin_dat
         close(err_pipe[0]);
         close(err_pipe[1]);
 
-        std::vector<char*> argv;
-        argv.push_back(const_cast<char*>(exe_path.c_str()));
-        argv.push_back(nullptr);
+        std::vector<char*> argv_mut;
+        argv_mut.reserve(argv.size());
+        for (const auto* a : argv)
+        {
+            argv_mut.push_back(const_cast<char*>(a));
+        }
 
         const auto* parent_path = std::getenv("PATH");
         const auto* parent_ld_library_path = std::getenv("LD_LIBRARY_PATH");
@@ -161,7 +186,7 @@ ProcResult run_process(const std::string& exe_path, const std::string& stdin_dat
         }
         envp.push_back(nullptr);
 
-        execve(exe_path.c_str(), argv.data(), envp.data());
+        execve(exe_path.c_str(), argv_mut.data(), envp.data());
         std::cerr << "execve failed: " << std::strerror(errno) << "\n";
         std::exit(127);
     }
@@ -254,6 +279,15 @@ ProcResult run_process(const std::string& exe_path, const std::string& stdin_dat
         result.exit_code = 128;
     }
     return result;
+}
+
+std::string find_bwrap_path()
+{
+    if (const char* env = std::getenv("CURLEE_BWRAP"); env != nullptr && *env != '\0')
+    {
+        return std::string(env);
+    }
+    return "bwrap";
 }
 
 std::string find_python_runner_path()
@@ -881,8 +915,45 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             const std::string runner = find_python_runner_path();
             const std::string request =
                 "{\"protocol_version\":1,\"id\":\"vm\",\"op\":\"handshake\"}\n";
-            const auto proc =
-                run_process(runner, request, kPythonRunnerTimeoutMs, kPythonRunnerMaxOutputBytes);
+
+            const bool use_sandbox = capabilities.contains("python:sandbox");
+            ProcResult proc;
+            if (use_sandbox)
+            {
+                const std::string bwrap = find_bwrap_path();
+
+                std::vector<std::string> argv_storage;
+                argv_storage.push_back(bwrap);
+                argv_storage.push_back("--die-with-parent");
+                argv_storage.push_back("--unshare-net");
+                argv_storage.push_back("--ro-bind");
+                argv_storage.push_back("/");
+                argv_storage.push_back("/");
+                argv_storage.push_back("--proc");
+                argv_storage.push_back("/proc");
+                argv_storage.push_back("--dev");
+                argv_storage.push_back("/dev");
+                argv_storage.push_back("--tmpfs");
+                argv_storage.push_back("/tmp");
+                argv_storage.push_back("--");
+                argv_storage.push_back(runner);
+
+                std::vector<const char*> argv;
+                argv.reserve(argv_storage.size() + 1);
+                for (const auto& s : argv_storage)
+                {
+                    argv.push_back(s.c_str());
+                }
+                argv.push_back(nullptr);
+
+                proc = run_process_argv(argv, bwrap, request, kPythonRunnerTimeoutMs,
+                                        kPythonRunnerMaxOutputBytes);
+            }
+            else
+            {
+                proc = run_process(runner, request, kPythonRunnerTimeoutMs,
+                                   kPythonRunnerMaxOutputBytes);
+            }
 
             if (proc.timed_out)
             {
@@ -908,7 +979,11 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
                 }
                 else if (proc.exit_code == 127)
                 {
-                    msg = "python runner exec failed";
+                    msg = use_sandbox ? "python sandbox exec failed" : "python runner exec failed";
+                }
+                else if (use_sandbox)
+                {
+                    msg = "python sandbox failed";
                 }
                 return VmResult{
                     .ok = false, .value = Value::unit_v(), .error = msg, .error_span = span};

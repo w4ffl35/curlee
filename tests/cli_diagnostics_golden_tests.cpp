@@ -620,12 +620,13 @@ static bool run_run_python_ffi_case(std::vector<std::string> argv_storage,
 
 int main(int argc, char** argv)
 {
-    if (argc != 6)
+    if (argc != 8)
     {
         std::cerr
             << "usage: curlee_cli_diagnostics_golden_tests <tests/cli_diagnostics-dir> "
                "<fake-python-runner-error> <fake-python-runner-hang> <fake-python-runner-spam> "
-               "<fake-python-runner-env-check>\n";
+               "<fake-python-runner-env-check> <fake-python-runner-sandbox-required> "
+               "<fake-bwrap>\n";
         return 2;
     }
 
@@ -634,6 +635,8 @@ int main(int argc, char** argv)
     const std::string fake_runner_hang = argv[3];
     const std::string fake_runner_spam = argv[4];
     const std::string fake_runner_env_check = argv[5];
+    const std::string fake_runner_sandbox_required = argv[6];
+    const std::string fake_bwrap = argv[7];
     const fs::path golden = dir / "missing_file.golden";
     const fs::path check_requires_divide_golden = dir / "check_requires_divide.golden";
     const fs::path check_refinement_implies_golden = dir / "check_refinement_implies.golden";
@@ -672,6 +675,16 @@ int main(int argc, char** argv)
         dir / "run_python_ffi_runner_env_sanitized.stdout.golden";
     const fs::path run_python_ffi_runner_env_sanitized_err_golden =
         dir / "run_python_ffi_runner_env_sanitized.stderr.golden";
+
+    const fs::path run_python_ffi_sandbox_required_out_golden =
+        dir / "run_python_ffi_sandbox_required.stdout.golden";
+    const fs::path run_python_ffi_sandbox_required_err_golden =
+        dir / "run_python_ffi_sandbox_required.stderr.golden";
+
+    const fs::path run_python_ffi_sandboxed_out_golden =
+        dir / "run_python_ffi_sandboxed.stdout.golden";
+    const fs::path run_python_ffi_sandboxed_err_golden =
+        dir / "run_python_ffi_sandboxed.stderr.golden";
 
     try
     {
@@ -828,6 +841,43 @@ int main(int argc, char** argv)
 
             (void)unsetenv("CURLEE_PYTHON_RUNNER");
             (void)unsetenv("FOO");
+        }
+
+        // Sandbox requested via capability: VM should run python runner under bwrap.
+        // We use a fake runner that refuses to run unless it sees CURLEE_PYTHON_SANDBOX=1.
+        // The fake bwrap sets that env var before exec'ing the runner.
+        {
+            (void)setenv("CURLEE_PYTHON_RUNNER", fake_runner_sandbox_required.c_str(), 1);
+            (void)setenv("CURLEE_BWRAP", fake_bwrap.c_str(), 1);
+
+            const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
+
+            // Without the sandbox capability, this should fail.
+            {
+                const std::vector<std::string> argv_storage = {"curlee", "run", "--cap",
+                                                               "python:ffi", rel_path};
+                if (!run_run_python_ffi_case(argv_storage, run_python_ffi_sandbox_required_out_golden,
+                                             run_python_ffi_sandbox_required_err_golden,
+                                             "run-python-ffi-sandbox-required", 1))
+                {
+                    return 1;
+                }
+            }
+
+            // With the sandbox capability, the fake bwrap wrapper makes the runner succeed.
+            {
+                const std::vector<std::string> argv_storage = {
+                    "curlee", "run", "--cap", "python:ffi", "--cap", "python:sandbox", rel_path};
+                if (!run_run_python_ffi_case(argv_storage, run_python_ffi_sandboxed_out_golden,
+                                             run_python_ffi_sandboxed_err_golden,
+                                             "run-python-ffi-sandboxed", 0))
+                {
+                    return 1;
+                }
+            }
+
+            (void)unsetenv("CURLEE_PYTHON_RUNNER");
+            (void)unsetenv("CURLEE_BWRAP");
         }
     }
     catch (const std::exception& e)
