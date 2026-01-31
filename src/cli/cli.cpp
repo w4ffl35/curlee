@@ -902,7 +902,7 @@ int run(int argc, char** argv)
         if (sub == "info")
         {
             std::cout << "curlee bundle info:\n";
-            std::cout << "version: " << b.manifest.version << "\n";
+            std::cout << "format_version: " << b.manifest.format_version << "\n";
             std::cout << "bytecode_hash: " << b.manifest.bytecode_hash << "\n";
             std::cout << "capabilities: " << join_csv(b.manifest.capabilities) << "\n";
             std::cout << "imports: " << join_import_pins(b.manifest.imports) << "\n";

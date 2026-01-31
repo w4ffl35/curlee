@@ -32,7 +32,7 @@ int main()
         std::filesystem::remove(path);
 
         Bundle bundle;
-        bundle.manifest.version = kBundleVersion;
+        bundle.manifest.format_version = kBundleFormatVersion;
         bundle.manifest.capabilities = {"io:stdout", "net:none"};
         bundle.manifest.imports = {ImportPin{.path = "stdlib.math", .hash = "deadbeef"}};
         bundle.manifest.proof = "proof-v1";
@@ -51,7 +51,7 @@ int main()
         }
 
         const auto& roundtrip = std::get<Bundle>(read_res);
-        if (roundtrip.manifest.version != kBundleVersion)
+        if (roundtrip.manifest.format_version != kBundleFormatVersion)
         {
             fail("expected roundtrip version to match");
         }
@@ -84,7 +84,7 @@ int main()
 
         std::ofstream out(path);
         out << "CURLEE_BUNDLE_V1\n";
-        out << "version=" << kBundleVersion << "\n";
+        out << "version=" << kBundleFormatVersion << "\n";
         out << "bytecode_hash=deadbeef\n";
         out << "capabilities=io:stdout\n";
         out << "imports=stdlib.math:bead\n";

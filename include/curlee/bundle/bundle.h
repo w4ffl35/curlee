@@ -9,7 +9,7 @@
 namespace curlee::bundle
 {
 
-inline constexpr int kBundleVersion = 1;
+inline constexpr int kBundleFormatVersion = 1;
 
 struct ImportPin
 {
@@ -19,7 +19,7 @@ struct ImportPin
 
 struct Manifest
 {
-    int version = 1;
+    int format_version = kBundleFormatVersion;
     std::string bytecode_hash;
     std::vector<std::string> capabilities;
     std::vector<ImportPin> imports;

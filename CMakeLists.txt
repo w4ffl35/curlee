@@ -375,6 +375,27 @@ target_include_directories(curlee_cli_bundle_tests PRIVATE include)
 target_link_libraries(curlee_cli_bundle_tests PRIVATE Z3::Z3)
 curlee_add_build_info(curlee_cli_bundle_tests)
 
+add_executable(curlee_cli_bundle_golden_tests
+  tests/cli_bundle_golden_tests.cpp
+  src/bundle/bundle.cpp
+  src/cli/cli.cpp
+  src/compiler/emitter.cpp
+  src/diag/render.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+  src/resolver/resolver.cpp
+  src/source/line_map.cpp
+  src/source/source_file.cpp
+  src/types/type_check.cpp
+  src/verification/checker.cpp
+  src/verification/predicate_lowering.cpp
+  src/verification/solver.cpp
+  src/vm/vm.cpp
+)
+target_include_directories(curlee_cli_bundle_golden_tests PRIVATE include)
+target_link_libraries(curlee_cli_bundle_golden_tests PRIVATE Z3::Z3)
+curlee_add_build_info(curlee_cli_bundle_golden_tests)
+
 add_executable(curlee_cli_version_tests
   tests/cli_version_tests.cpp
   src/bundle/bundle.cpp
@@ -399,6 +420,12 @@ curlee_add_build_info(curlee_cli_version_tests)
 add_test(NAME curlee_cli_version_tests COMMAND curlee_cli_version_tests)
 
 add_test(NAME curlee_cli_bundle_tests COMMAND curlee_cli_bundle_tests)
+
+add_test(
+  NAME curlee_cli_bundle_golden_tests
+  COMMAND curlee_cli_bundle_golden_tests ${CMAKE_SOURCE_DIR}/tests/cli_bundle
+)
+set_tests_properties(curlee_cli_bundle_golden_tests PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(curlee_cli_fuel_tests
   tests/cli_fuel_tests.cpp
