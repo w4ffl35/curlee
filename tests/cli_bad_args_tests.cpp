@@ -164,6 +164,55 @@ int main()
         expect_contains(err, "error: expected non-negative integer for --fuel=", "stderr");
     }
 
+    // run: missing value after --bundle
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--bundle"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for missing --bundle arg");
+        }
+        expect_contains(err, "error: expected bundle path after --bundle", "stderr");
+    }
+
+    // run: empty --bundle=
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--bundle=", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for empty --bundle=");
+        }
+        expect_contains(err, "error: expected bundle path after --bundle=", "stderr");
+    }
+
+    // run: duplicate --bundle
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "run", "--bundle", "a.bundle", "--bundle", "b.bundle"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for duplicate --bundle");
+        }
+        expect_contains(err, "error: expected a single --bundle <file.bundle>", "stderr");
+    }
+
+    // run: multiple positional <file.curlee>
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "a.curlee", "b.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for multiple <file.curlee>");
+        }
+        expect_contains(err, "error: expected a single <file.curlee>", "stderr");
+    }
+
     // fmt: wrong args
     {
         std::string out;
