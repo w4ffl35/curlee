@@ -27,5 +27,17 @@ int main()
         fail("unexpected dump output\n--- got ---\n" + got + "--- expected ---\n" + expected);
     }
 
+    // Edge cases: unknown dtype formatting + empty shape.
+    {
+        Program p2;
+        (void)p2.zeros(Shape{{}}, static_cast<DType>(123));
+
+        const auto got2 = p2.dump();
+        if (got2 != "%0 = zeros <unknown>[]\n")
+        {
+            fail("unexpected dump output (edge cases)\n--- got ---\n" + got2 + "--- expected ---\n%0 = zeros <unknown>[]\n");
+        }
+    }
+
     return 0;
 }
