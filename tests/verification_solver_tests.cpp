@@ -12,6 +12,18 @@ int main()
 {
     using namespace curlee::verification;
 
+    // model_for() before any check() should return nullopt.
+    {
+        Solver solver;
+        auto& ctx = solver.context();
+        auto x = ctx.int_const("x");
+
+        if (solver.model_for({x}).has_value())
+        {
+            fail("expected no model before check()");
+        }
+    }
+
     {
         Solver solver;
         auto& ctx = solver.context();
@@ -78,6 +90,36 @@ int main()
         if (rendered != "x = 7\ny = 3")
         {
             fail("expected deterministic model formatting order");
+        }
+    }
+
+    // push()/pop() should clear cached results and models.
+    {
+        Solver solver;
+        auto& ctx = solver.context();
+        auto x = ctx.int_const("x");
+        solver.add(x == 1);
+
+        if (solver.check() != CheckResult::Sat)
+        {
+            fail("expected satisfiable constraints for push/pop test");
+        }
+
+        if (!solver.model_for({x}).has_value())
+        {
+            fail("expected model before push()");
+        }
+
+        solver.push();
+        if (solver.model_for({x}).has_value())
+        {
+            fail("expected no model after push() (cache cleared)");
+        }
+
+        solver.pop();
+        if (solver.model_for({x}).has_value())
+        {
+            fail("expected no model after pop() (cache cleared)");
         }
     }
 

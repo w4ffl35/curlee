@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cassert>
 #include <curlee/verification/solver.h>
 
 namespace curlee::verification
@@ -56,10 +57,8 @@ std::optional<Model> Solver::model_for(const std::vector<z3::expr>& vars) const
     {
         return std::nullopt;
     }
-    if (!last_model_.has_value())
-    {
-        return std::nullopt;
-    }
+
+    assert(last_model_.has_value());
 
     Model model;
     model.entries.reserve(vars.size());
