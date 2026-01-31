@@ -105,8 +105,8 @@ class Emitter
         {
             if (functions_.contains(f.name))
             {
-                diags_.push_back(
-                    error_at(f.span, "duplicate function declaration '" + std::string(f.name) + "'"));
+                diags_.push_back(error_at(f.span, "duplicate function declaration '" +
+                                                      std::string(f.name) + "'"));
                 return diags_;
             }
             functions_.emplace(f.name, &f);
@@ -180,7 +180,7 @@ class Emitter
     std::uint16_t next_local_base_ = 0;
     bool current_is_main_ = false;
 
-        std::unordered_map<std::string_view, const Function*> functions_;
+    std::unordered_map<std::string_view, const Function*> functions_;
 
     std::unordered_set<std::string> imported_module_keys_;
     std::unordered_map<std::string_view, std::string> imported_module_aliases_;
@@ -239,9 +239,9 @@ class Emitter
             const auto& p = fn.params[i];
             if (p.type.name != "Int" && p.type.name != "Bool")
             {
-                diags_.push_back(error_at(p.type.span,
-                                         "parameter type not supported in runnable code: '" +
-                                             std::string(p.type.name) + "'"));
+                diags_.push_back(
+                    error_at(p.type.span, "parameter type not supported in runnable code: '" +
+                                              std::string(p.type.name) + "'"));
                 return;
             }
 
@@ -702,9 +702,8 @@ class Emitter
             std::vector<std::string_view> parts;
             if (!collect_member_chain(*expr.callee, parts) || parts.size() < 2)
             {
-                diags_.push_back(error_at(span,
-                                          "only name calls and module-qualified calls are "
-                                          "supported in runnable code"));
+                diags_.push_back(error_at(span, "only name calls and module-qualified calls are "
+                                                "supported in runnable code"));
                 return;
             }
 
@@ -730,9 +729,8 @@ class Emitter
 
             if (!qualifier_ok)
             {
-                diags_.push_back(
-                    error_at(span, "unknown module qualifier in runnable call: '" +
-                                      join_path(qualifier) + "'"));
+                diags_.push_back(error_at(span, "unknown module qualifier in runnable call: '" +
+                                                    join_path(qualifier) + "'"));
                 return;
             }
 
@@ -743,9 +741,8 @@ class Emitter
             const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
             if (callee_name == nullptr)
             {
-                diags_.push_back(error_at(span,
-                                          "only name calls and module-qualified calls are "
-                                          "supported in runnable code"));
+                diags_.push_back(error_at(span, "only name calls and module-qualified calls are "
+                                                "supported in runnable code"));
                 return;
             }
             callee_fn_name = callee_name->name;
@@ -762,9 +759,9 @@ class Emitter
         const auto* callee_decl = fn_it->second;
         if (expr.args.size() != callee_decl->params.size())
         {
-            diags_.push_back(error_at(
-                span, "call to '" + std::string(callee_fn_name) + "' expects " +
-                          std::to_string(callee_decl->params.size()) + " argument(s)"));
+            diags_.push_back(
+                error_at(span, "call to '" + std::string(callee_fn_name) + "' expects " +
+                                   std::to_string(callee_decl->params.size()) + " argument(s)"));
             return;
         }
 

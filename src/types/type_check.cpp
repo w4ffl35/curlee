@@ -138,8 +138,8 @@ class Checker
 
   private:
     std::unordered_map<std::string_view, FunctionType> functions_;
-        std::unordered_set<std::string> imported_module_keys_;
-        std::unordered_map<std::string_view, std::string> imported_module_aliases_;
+    std::unordered_set<std::string> imported_module_keys_;
+    std::unordered_map<std::string_view, std::string> imported_module_aliases_;
     std::vector<Scope> scopes_;
     std::vector<Diagnostic> diags_;
     TypeInfo info_;
@@ -766,8 +766,7 @@ class Checker
 
             if (!qualifier_ok)
             {
-                error_at(span, "unknown module qualifier in call: '" + join_path(qualifier) +
-                                   "'");
+                error_at(span, "unknown module qualifier in call: '" + join_path(qualifier) + "'");
                 return std::nullopt;
             }
 
@@ -811,8 +810,8 @@ class Checker
         // Builtin placeholder signatures may not match; only user functions are checked here.
         if (e.args.size() != sig.params.size())
         {
-            error_at(span, "wrong number of arguments for call to '" +
-                               std::string(callee_name) + "'");
+            error_at(span,
+                     "wrong number of arguments for call to '" + std::string(callee_name) + "'");
             return std::nullopt;
         }
 
@@ -825,8 +824,8 @@ class Checker
             }
             if (*arg_t != sig.params[i])
             {
-                error_at(span, "argument type mismatch for call to '" +
-                                   std::string(callee_name) + "'");
+                error_at(span,
+                         "argument type mismatch for call to '" + std::string(callee_name) + "'");
             }
         }
 

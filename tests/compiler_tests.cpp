@@ -184,8 +184,8 @@ int main()
     }
 
     {
-        const std::string source =
-            "fn add(x: Int, y: Int) -> Int { return x + y; } fn main() -> Int { return add(1, 2); }";
+        const std::string source = "fn add(x: Int, y: Int) -> Int { return x + y; } fn main() -> "
+                                   "Int { return add(1, 2); }";
 
         const auto chunk = compile_to_chunk(source);
         const auto res = run_chunk(chunk);
@@ -232,8 +232,9 @@ int main()
         }
 
         const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
-        if (diags.empty() || diags[0].message.find("parameter type not supported in runnable code") ==
-                                 std::string::npos)
+        if (diags.empty() ||
+            diags[0].message.find("parameter type not supported in runnable code") ==
+                std::string::npos)
         {
             fail("expected diagnostic for unsupported parameter type in runnable code");
         }

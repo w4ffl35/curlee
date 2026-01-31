@@ -108,7 +108,8 @@ int main()
 
     // Shorthand: `curlee <file.curlee>` behaves like `curlee run <file.curlee>`.
     {
-        const fs::path fixture = find_repo_relative(fs::path("tests") / "fixtures" / "run_success.curlee");
+        const fs::path fixture =
+            find_repo_relative(fs::path("tests") / "fixtures" / "run_success.curlee");
 
         std::ostringstream captured;
         auto* old_buf = std::cout.rdbuf(captured.rdbuf());

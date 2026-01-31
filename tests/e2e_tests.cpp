@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cstdlib>
 #include <curlee/compiler/emitter.h>
 #include <curlee/lexer/lexer.h>
 #include <curlee/parser/parser.h>
@@ -6,11 +8,8 @@
 #include <curlee/types/type_check.h>
 #include <curlee/verification/checker.h>
 #include <curlee/vm/vm.h>
-
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <algorithm>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -103,7 +102,8 @@ static void check_program(const fs::path& path, bool run_vm)
             }
 
             const auto start = static_cast<std::size_t>(result.error_span->start);
-            const auto len = static_cast<std::size_t>(result.error_span->end - result.error_span->start);
+            const auto len =
+                static_cast<std::size_t>(result.error_span->end - result.error_span->start);
             const std::string_view slice(contents.data() + start, len);
             if (slice.find('/') == std::string_view::npos)
             {
