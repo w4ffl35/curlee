@@ -171,6 +171,20 @@ cmake --build --preset linux-debug
 ./build/linux-debug/curlee run examples/mvp_run_control_flow.curlee
 ```
 
+### Smoke test
+
+For a quick end-to-end confidence loop (build + basic CLI + proof fixtures + a small targeted test run):
+
+```bash
+bash scripts/smoke.sh
+```
+
+You can also run both debug + release presets:
+
+```bash
+bash scripts/smoke.sh --both
+```
+
 ---
 
 ## Quick start examples
