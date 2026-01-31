@@ -78,8 +78,8 @@ Example (intended syntax):
 
 ```curlee
 fn divide(numerator: Int, denominator: Int) -> Int
-  requires denominator != 0
-  ensures result * denominator == numerator
+  [ requires denominator != 0;
+    ensures result * denominator == numerator; ]
 {
   return numerator / denominator;
 }
@@ -127,6 +127,7 @@ Out of scope (for now): strings, general unary/binary ops, function parameters, 
 User-facing documentation lives in the GitHub wiki:
 
 - https://github.com/w4ffl35/curlee/wiki
+- Supported fragment + stability: https://github.com/w4ffl35/curlee/wiki/Stability-and-Supported-Fragment
 
 ## Datasets
 
