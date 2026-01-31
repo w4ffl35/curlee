@@ -27,11 +27,6 @@ LineCol LineMap::offset_to_line_col(std::size_t offset) const
 
     // Find the last line start <= offset.
     auto it = std::upper_bound(line_starts_.begin(), line_starts_.end(), offset);
-    if (it == line_starts_.begin())
-    {
-        return LineCol{.line = 1, .col = 1 + offset};
-    }
-
     const std::size_t index = static_cast<std::size_t>(std::distance(line_starts_.begin(), it) - 1);
     const std::size_t start = line_starts_[index];
 
