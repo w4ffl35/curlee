@@ -136,6 +136,40 @@ int main()
         }
     }
 
+    // Runnable imports: module-qualified function calls should work.
+    {
+        const fs::path fixture =
+            find_repo_relative(fs::path("tests") / "fixtures" / "qualified_call" / "main.curlee");
+
+        std::ostringstream captured_out;
+        std::ostringstream captured_err;
+        auto* old_cout = std::cout.rdbuf(captured_out.rdbuf());
+        auto* old_cerr = std::cerr.rdbuf(captured_err.rdbuf());
+
+        std::vector<std::string> argv_storage = {"curlee", "run", fixture.string()};
+        std::vector<char*> argv;
+        argv.reserve(argv_storage.size());
+        for (auto& s : argv_storage)
+        {
+            argv.push_back(s.data());
+        }
+
+        const int rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
+        std::cout.rdbuf(old_cout);
+        std::cerr.rdbuf(old_cerr);
+
+        if (rc != 0)
+        {
+            fail("expected imported-module run to succeed; stderr: " + captured_err.str());
+        }
+
+        const std::string out = captured_out.str();
+        if (out.find("curlee run: result 42") == std::string::npos)
+        {
+            fail("expected imported-module run output to include result 42");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

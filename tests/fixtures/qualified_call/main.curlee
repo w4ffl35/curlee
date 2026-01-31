@@ -1,0 +1,6 @@
+import mymod.math as m;
+
+fn main() -> Int {
+  // Both alias-qualified and path-qualified calls should work.
+  return m.add1(41) + mymod.math.add1(-1);
+}
