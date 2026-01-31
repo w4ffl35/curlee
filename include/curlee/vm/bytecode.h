@@ -6,9 +6,15 @@
 #include <curlee/vm/value.h>
 #include <vector>
 
+/**
+ * @file bytecode.h
+ * @brief VM instruction encodings and chunk container.
+ */
+
 namespace curlee::vm
 {
 
+/** @brief Bytecode opcodes executed by the VM. */
 enum class OpCode : std::uint8_t
 {
     Constant,
@@ -36,6 +42,7 @@ enum class OpCode : std::uint8_t
     PythonCall,
 };
 
+/** @brief A compiled chunk of bytecode, constants and span map. */
 struct Chunk
 {
     std::vector<std::uint8_t> code;

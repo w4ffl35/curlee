@@ -3,9 +3,15 @@
 #include <cstdint>
 #include <string>
 
+/**
+ * @file value.h
+ * @brief Runtime value representation used by the VM for evaluation and tests.
+ */
+
 namespace curlee::vm
 {
 
+/** @brief Kind of a runtime value. */
 enum class ValueKind
 {
     Int,
@@ -14,6 +20,11 @@ enum class ValueKind
     Unit,
 };
 
+/**
+ * @brief A simple value container used by the VM.
+ *
+ * Uses explicit fields for each variant for simplicity and testing convenience.
+ */
 struct Value
 {
     ValueKind kind = ValueKind::Unit;
@@ -45,6 +56,7 @@ struct Value
     static Value unit_v() { return Value{}; }
 };
 
+/** @brief Equality comparison for values. */
 inline bool operator==(const Value& a, const Value& b)
 {
     if (a.kind != b.kind)
@@ -65,6 +77,7 @@ inline bool operator==(const Value& a, const Value& b)
     return false;
 }
 
+/** @brief Convert a runtime Value to a human-readable string. */
 inline std::string to_string(const Value& v)
 {
     switch (v.kind)

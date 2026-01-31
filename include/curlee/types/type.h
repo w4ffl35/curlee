@@ -5,9 +5,15 @@
 #include <string_view>
 #include <vector>
 
+/**
+ * @file type.h
+ * @brief Basic type representations used by the resolver and verifier.
+ */
+
 namespace curlee::types
 {
 
+/** @brief Kind of a type (primitive or nominal). */
 enum class TypeKind
 {
     Int,
@@ -18,6 +24,11 @@ enum class TypeKind
     Enum,
 };
 
+/**
+ * @brief A lightweight type descriptor.
+ *
+ * For nominal types (Struct/Enum) the `name` field stores the declared type name.
+ */
 struct Type
 {
     TypeKind kind;
@@ -39,6 +50,7 @@ struct Type
     return true;
 }
 
+/** @brief Function type with parameter types and a result type. */
 struct FunctionType
 {
     std::vector<Type> params;
@@ -50,6 +62,7 @@ struct FunctionType
     return a.params == b.params && a.result == b.result;
 }
 
+/** @brief Opaque capability type (identified by name). */
 struct CapabilityType
 {
     // Opaque capability-bearing values: equality is name-based.
@@ -61,6 +74,7 @@ struct CapabilityType
     return a.name == b.name;
 }
 
+/** @brief Stringify a TypeKind for diagnostics and tests. */
 [[nodiscard]] constexpr std::string_view to_string(TypeKind kind)
 {
     switch (kind)
@@ -90,6 +104,7 @@ struct CapabilityType
     return to_string(t.kind);
 }
 
+/** @brief Resolve a core type name ("Int", "Bool", "String", "Unit") to a Type. */
 [[nodiscard]] inline std::optional<Type> core_type_from_name(std::string_view name)
 {
     if (name == "Int")

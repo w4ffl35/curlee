@@ -5,9 +5,15 @@
 #include <vector>
 #include <z3++.h>
 
+/**
+ * @file solver.h
+ * @brief Thin wrapper around Z3 used by the verification subsystem.
+ */
+
 namespace curlee::verification
 {
 
+/** @brief Check result from the solver. */
 enum class CheckResult
 {
     Sat,
@@ -15,17 +21,20 @@ enum class CheckResult
     Unknown,
 };
 
+/** @brief Single entry of a model (variable name and value as string). */
 struct ModelEntry
 {
     std::string name;
     std::string value;
 };
 
+/** @brief Model returned by the solver, as a collection of entries. */
 struct Model
 {
     std::vector<ModelEntry> entries;
 };
 
+/** @brief Solver wrapper exposing a minimal API used by the verifier. */
 class Solver
 {
   public:

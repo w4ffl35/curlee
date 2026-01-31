@@ -2,9 +2,15 @@
 
 #include <cstdint>
 
+/**
+ * @file symbol.h
+ * @brief Symbol identifier used by the resolver.
+ */
+
 namespace curlee::resolver
 {
 
+/** @brief Opaque numeric id for a resolved symbol. */
 struct SymbolId
 {
     std::uint32_t value = 0;
