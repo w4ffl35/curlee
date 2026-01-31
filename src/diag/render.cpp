@@ -32,11 +32,6 @@ struct LineSlice
 
 LineSlice slice_for_line(std::string_view text, std::size_t line_start)
 {
-    if (line_start > text.size())
-    {
-        line_start = text.size();
-    }
-
     const std::size_t nl = text.find('\n', line_start);
     const std::size_t line_end = (nl == std::string_view::npos) ? text.size() : nl;
     return LineSlice{.start = line_start, .end = line_end};
@@ -83,7 +78,7 @@ std::string render(const Diagnostic& diagnostic, const curlee::source::SourceFil
     const std::size_t line_len = line_text.size();
 
     // caret_start is 0-based within the line.
-    const std::size_t caret_start = (lc.col == 0) ? 0 : (lc.col - 1);
+    const std::size_t caret_start = lc.col - 1;
 
     std::size_t span_len = 0;
     if (span.end > span.start)
@@ -92,8 +87,7 @@ std::string render(const Diagnostic& diagnostic, const curlee::source::SourceFil
     }
 
     // If the span crosses lines, highlight only the first line.
-    const std::size_t first_line_remaining =
-        (caret_start <= line_len) ? (line_len - caret_start) : 0;
+    const std::size_t first_line_remaining = line_len - caret_start;
     const bool crosses_line = (span.start + span_len > line_slice.end);
 
     std::size_t caret_len = 1;

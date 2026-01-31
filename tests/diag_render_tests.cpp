@@ -52,6 +52,19 @@ int main()
         expect_contains(out, "note: helpful", "span note");
     }
 
+    // Zero-length span: should still render a single caret.
+    {
+        curlee::diag::Diagnostic diag;
+        diag.severity = curlee::diag::Severity::Error;
+        diag.message = "point";
+        diag.span = curlee::source::Span{.start = 3, .end = 3}; // newline at end of line 1
+
+        const std::string out = curlee::diag::render(diag, file);
+        expect_contains(out, "test.curlee:1:4: error: point", "zero-length header");
+        expect_contains(out, "| abc", "zero-length line");
+        expect_contains(out, "^", "zero-length caret");
+    }
+
     // Multi-line span: only highlight first line.
     {
         curlee::diag::Diagnostic diag;
