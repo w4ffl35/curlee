@@ -798,10 +798,10 @@ class Verifier
         {
             if (s.refinement.has_value())
             {
-                diags_.push_back(error_at(
-                    s.refinement->span,
-                    "verification does not support refinements on non-scalar type '" +
-                        std::string(s.type.name) + "'"));
+                diags_.push_back(
+                    error_at(s.refinement->span,
+                             "verification does not support refinements on non-scalar type '" +
+                                 std::string(s.type.name) + "'"));
             }
             check_expr_for_calls(s.value);
             return;
@@ -809,10 +809,9 @@ class Verifier
 
         if (core_t->kind != TypeKind::Int && core_t->kind != TypeKind::Bool)
         {
-            diags_.push_back(error_at(
-                s.type.span,
-                "verification does not support type '" +
-                    std::string(curlee::types::to_string(*core_t)) + "'"));
+            diags_.push_back(
+                error_at(s.type.span, "verification does not support type '" +
+                                          std::string(curlee::types::to_string(*core_t)) + "'"));
             check_expr_for_calls(s.value);
             return;
         }
@@ -905,7 +904,24 @@ class Verifier
     {
         check_expr_for_calls(s.cond);
 
+        std::optional<z3::expr> cond_fact;
+        {
+            auto lowered = lower_expr(s.cond);
+            if (std::holds_alternative<ExprValue>(lowered))
+            {
+                auto value = std::get<ExprValue>(std::move(lowered));
+                if (value.kind == TypeKind::Bool)
+                {
+                    cond_fact = std::move(value.expr);
+                }
+            }
+        }
+
         push_scope();
+        if (cond_fact.has_value())
+        {
+            facts_.push_back(*cond_fact);
+        }
         for (const auto& stmt : s.body->stmts)
         {
             check_stmt(stmt, expected_return);

@@ -1,0 +1,16 @@
+fn take_pos(x: Int) -> Int [
+  requires x > 0;
+] {
+  return x;
+}
+
+fn main() -> Int {
+  let x: Int = 1;
+
+  while (x > 0) {
+    // Verifier should assume the loop condition inside the body.
+    return take_pos(x);
+  }
+
+  return 0;
+}
