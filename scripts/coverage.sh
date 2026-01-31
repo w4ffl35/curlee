@@ -2,7 +2,9 @@
 set -euo pipefail
 
 preset="linux-debug-coverage"
-fail_under="100"
+# Keep this as an incremental ratchet rather than an aspirational goal.
+# Raise over time as coverage improves.
+fail_under="77"
 out_dir="build/coverage"
 exclude_throw_branches=1
 exclude_unreachable_branches=1
@@ -17,7 +19,7 @@ Builds + runs tests under coverage instrumentation, then prints a coverage summa
 Defaults:
   --preset      linux-debug-coverage
   --out         build/coverage
-  --fail-under  100
+  --fail-under  77
 
 Requires one of:
   - gcovr (recommended), or

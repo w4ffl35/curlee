@@ -176,6 +176,22 @@ int main(int argc, char** argv)
     }
     const std::string runner = argv[1];
 
+    // empty input
+    {
+        const auto res = run_runner(runner, "");
+        if (res.exit_code != 2)
+        {
+            fail("expected empty input to exit 2");
+        }
+        const std::string expected =
+            "{\"error\":{\"kind\":\"invalid_request\",\"message\":\"empty "
+            "input\",\"retryable\":false},\"id\":\"\",\"ok\":false,\"protocol_version\":1}\n";
+        if (res.out != expected)
+        {
+            fail("empty input stdout mismatch");
+        }
+    }
+
     {
         const auto res =
             run_runner(runner, "{\"protocol_version\":1,\"id\":\"t1\",\"op\":\"handshake\"}\n");
@@ -244,6 +260,203 @@ int main(int argc, char** argv)
         if (res.out != expected)
         {
             fail("malformed json stdout mismatch");
+        }
+    }
+
+    // JSON parses but is not an object.
+    {
+        const auto res = run_runner(runner, "[]\n");
+        if (res.exit_code != 2)
+        {
+            fail("expected non-object json to exit 2");
+        }
+        const std::string expected =
+            "{\"error\":{\"kind\":\"invalid_request\",\"message\":\"malformed "
+            "json\",\"retryable\":false},\"id\":\"\",\"ok\":false,\"protocol_version\":1}\n";
+        if (res.out != expected)
+        {
+            fail("non-object json stdout mismatch");
+        }
+    }
+
+    // Trailing garbage should fail parse_json() (not just parse_value()).
+    {
+        const auto res = run_runner(
+            runner, "{\"protocol_version\":1,\"id\":\"t_tail\",\"op\":\"handshake\"} trailing\n");
+        if (res.exit_code != 2)
+        {
+            fail("expected trailing garbage to exit 2");
+        }
+        const std::string expected =
+            "{\"error\":{\"kind\":\"invalid_request\",\"message\":\"malformed "
+            "json\",\"retryable\":false},\"id\":\"\",\"ok\":false,\"protocol_version\":1}\n";
+        if (res.out != expected)
+        {
+            fail("trailing garbage stdout mismatch");
+        }
+    }
+
+    // Invalid string escape should be rejected as malformed json.
+    {
+        const auto res = run_runner(
+            runner,
+            "{\"protocol_version\":1,\"id\":\"t_esc\",\"op\":\"handshake\",\"x\":\"bad\\q\"}\n");
+        if (res.exit_code != 2)
+        {
+            fail("expected invalid escape to exit 2");
+        }
+        const std::string expected =
+            "{\"error\":{\"kind\":\"invalid_request\",\"message\":\"malformed "
+            "json\",\"retryable\":false},\"id\":\"\",\"ok\":false,\"protocol_version\":1}\n";
+        if (res.out != expected)
+        {
+            fail("invalid escape stdout mismatch");
+        }
+    }
+
+    // Missing protocol_version should be reported using the parsed request id.
+    {
+        const auto res = run_runner(runner, "{\"id\":\"t_nover\",\"op\":\"handshake\"}\n");
+        if (res.exit_code != 2)
+        {
+            fail("expected missing protocol to exit 2");
+        }
+        const std::string expected = "{\"error\":{\"kind\":\"protocol_version_unsupported\","
+                                     "\"message\":\"unsupported protocol "
+                                     "version\",\"retryable\":false},\"id\":\"t_nover\",\"ok\":"
+                                     "false,\"protocol_version\":1}\n";
+        if (res.out != expected)
+        {
+            fail("missing protocol stdout mismatch");
+        }
+    }
+
+    // Non-integral protocol_version should be rejected.
+    {
+        const auto res = run_runner(
+            runner, "{\"protocol_version\":1.1,\"id\":\"t_nonint\",\"op\":\"handshake\"}\n");
+        if (res.exit_code != 2)
+        {
+            fail("expected non-integral protocol to exit 2");
+        }
+        const std::string expected = "{\"error\":{\"kind\":\"protocol_version_unsupported\","
+                                     "\"message\":\"unsupported protocol "
+                                     "version\",\"retryable\":false},\"id\":\"t_nonint\",\"ok\":"
+                                     "false,\"protocol_version\":1}\n";
+        if (res.out != expected)
+        {
+            fail("non-integral protocol stdout mismatch");
+        }
+    }
+
+    // Missing op should be rejected.
+    {
+        const auto res = run_runner(runner, "{\"protocol_version\":1,\"id\":\"t_noop\"}\n");
+        if (res.exit_code != 2)
+        {
+            fail("expected missing op to exit 2");
+        }
+        const std::string expected =
+            "{\"error\":{\"kind\":\"invalid_request\",\"message\":\"missing "
+            "op\",\"retryable\":false},\"id\":\"t_noop\",\"ok\":false,\"protocol_version\":1}\n";
+        if (res.out != expected)
+        {
+            fail("missing op stdout mismatch");
+        }
+    }
+
+    // Unknown op should be rejected.
+    {
+        const auto res =
+            run_runner(runner, "{\"protocol_version\":1,\"id\":\"t_unknown\",\"op\":\"nope\"}\n");
+        if (res.exit_code != 2)
+        {
+            fail("expected unknown op to exit 2");
+        }
+        const std::string expected =
+            "{\"error\":{\"kind\":\"invalid_request\",\"message\":\"unknown "
+            "op\",\"retryable\":false},\"id\":\"t_unknown\",\"ok\":false,\"protocol_version\":1}\n";
+        if (res.out != expected)
+        {
+            fail("unknown op stdout mismatch");
+        }
+    }
+
+    // Echo: missing echo payload.
+    {
+        const auto res =
+            run_runner(runner, "{\"protocol_version\":1,\"id\":\"t_echo0\",\"op\":\"echo\"}\n");
+        if (res.exit_code != 2)
+        {
+            fail("expected missing echo payload to exit 2");
+        }
+        const std::string expected =
+            "{\"error\":{\"kind\":\"invalid_request\",\"message\":\"missing echo "
+            "payload\",\"retryable\":false},\"id\":\"t_echo0\",\"ok\":false,\"protocol_version\":1}"
+            "\n";
+        if (res.out != expected)
+        {
+            fail("missing echo payload stdout mismatch");
+        }
+    }
+
+    // Echo: wrong type for echo payload.
+    {
+        const auto res = run_runner(
+            runner,
+            "{\"protocol_version\":1,\"id\":\"t_echo1\",\"op\":\"echo\",\"echo\":\"hi\"}\n");
+        if (res.exit_code != 2)
+        {
+            fail("expected wrong echo payload type to exit 2");
+        }
+        const std::string expected =
+            "{\"error\":{\"kind\":\"invalid_request\",\"message\":\"missing echo "
+            "payload\",\"retryable\":false},\"id\":\"t_echo1\",\"ok\":false,\"protocol_version\":1}"
+            "\n";
+        if (res.out != expected)
+        {
+            fail("wrong echo payload type stdout mismatch");
+        }
+    }
+
+    // Echo: echo.value must be a string.
+    {
+        const auto res = run_runner(
+            runner,
+            "{\"protocol_version\":1,\"id\":\"t_echo2\",\"op\":\"echo\",\"echo\":{\"value\":1}}\n");
+        if (res.exit_code != 2)
+        {
+            fail("expected non-string echo.value to exit 2");
+        }
+        const std::string expected =
+            "{\"error\":{\"kind\":\"invalid_request\",\"message\":\"echo.value must be "
+            "string\",\"retryable\":false},\"id\":\"t_echo2\",\"ok\":false,\"protocol_version\":1}"
+            "\n";
+        if (res.out != expected)
+        {
+            fail("non-string echo.value stdout mismatch");
+        }
+    }
+
+    // Echo: string escaping/roundtrip.
+    {
+        const auto res =
+            run_runner(runner, "{\"protocol_version\":1,\"id\":\"t_echo3\",\"op\":\"echo\","
+                               "\"echo\":{\"value\":\"hi\\n\\\"there\\\"\\\\end\"}}\n");
+        if (res.exit_code != 0)
+        {
+            fail("expected escape-heavy echo to exit 0");
+        }
+        const std::string expected =
+            "{\"id\":\"t_echo3\",\"ok\":true,\"protocol_version\":1,\"result\":{\"type\":"
+            "\"string\",\"value\":\"hi\\n\\\"there\\\"\\\\end\"}}\n";
+        if (res.out != expected)
+        {
+            fail("escape-heavy echo stdout mismatch");
+        }
+        if (!res.err.empty())
+        {
+            fail("escape-heavy echo expected empty stderr");
         }
     }
 
