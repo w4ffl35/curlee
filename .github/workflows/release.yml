@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux-release-artifacts:
+    name: Build linux-release artifacts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ libz3-dev pkg-config clang-format ripgrep
+
+      - name: Configure (linux-release)
+        run: cmake --preset linux-release
+
+      - name: Build (linux-release)
+        run: cmake --build --preset linux-release
+
+      - name: Smoke (linux-release)
+        run: bash scripts/smoke.sh --preset linux-release --skip-build
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          arch="$(uname -m)"
+
+          mkdir -p dist
+          cp -v "build/linux-release/curlee" "dist/curlee"
+          chmod +x "dist/curlee"
+
+          tarball="curlee-${tag}-linux-${arch}.tar.gz"
+          tar -C dist -czf "dist/${tarball}" curlee
+
+          (cd dist && sha256sum "${tarball}" curlee > SHA256SUMS.txt)
+
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          tag = os.environ.get("GITHUB_REF_NAME", "(unknown)")
+          sums = Path("dist/SHA256SUMS.txt").read_text(encoding="utf-8")
+
+          notes = f"""# Curlee {tag}
+
+          ## How to verify
+
+          ```bash
+          cmake --preset linux-debug
+          cmake --build --preset linux-debug
+          ctest --preset linux-debug --output-on-failure
+
+          bash scripts/smoke.sh --both
+          ```
+
+          ## Artifacts
+
+          Built from the CMake preset `linux-release` on GitHub Actions (ubuntu-latest).
+
+          ### Checksums (SHA-256)
+
+          ```
+          {sums}
+          ```
+          """
+
+          Path("dist/RELEASE_NOTES.md").write_text(notes, encoding="utf-8")
+          PY
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: dist/RELEASE_NOTES.md
+          files: |
+            dist/curlee
+            dist/*.tar.gz
+            dist/SHA256SUMS.txt
+          fail_on_unmatched_files: true
