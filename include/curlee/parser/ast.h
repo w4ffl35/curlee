@@ -83,6 +83,12 @@ struct NameExpr
     std::string_view name;
 };
 
+struct ScopedNameExpr
+{
+    std::string_view lhs;
+    std::string_view rhs;
+};
+
 struct MemberExpr
 {
     std::unique_ptr<Expr> base;
@@ -108,6 +114,19 @@ struct CallExpr
     std::vector<Expr> args;
 };
 
+struct StructLiteralExprField
+{
+    curlee::source::Span span;
+    std::string_view name;
+    std::unique_ptr<Expr> value;
+};
+
+struct StructLiteralExpr
+{
+    std::string_view type_name;
+    std::vector<StructLiteralExprField> fields;
+};
+
 struct GroupExpr
 {
     std::unique_ptr<Expr> inner;
@@ -118,7 +137,7 @@ struct Expr
     std::size_t id = 0;
     curlee::source::Span span;
     std::variant<IntExpr, BoolExpr, StringExpr, NameExpr, UnaryExpr, BinaryExpr, CallExpr,
-                 MemberExpr, GroupExpr>
+                 MemberExpr, GroupExpr, ScopedNameExpr, StructLiteralExpr>
         node;
 };
 
@@ -203,11 +222,42 @@ struct ImportDecl
 {
     curlee::source::Span span;
     std::vector<std::string_view> path;
+    std::optional<std::string_view> alias;
+};
+
+struct StructDeclField
+{
+    curlee::source::Span span;
+    std::string_view name;
+    TypeName type;
+};
+
+struct StructDecl
+{
+    curlee::source::Span span;
+    std::string_view name;
+    std::vector<StructDeclField> fields;
+};
+
+struct EnumDeclVariant
+{
+    curlee::source::Span span;
+    std::string_view name;
+    std::optional<TypeName> payload;
+};
+
+struct EnumDecl
+{
+    curlee::source::Span span;
+    std::string_view name;
+    std::vector<EnumDeclVariant> variants;
 };
 
 struct Program
 {
     std::vector<ImportDecl> imports;
+    std::vector<StructDecl> structs;
+    std::vector<EnumDecl> enums;
     std::vector<Function> functions;
 };
 

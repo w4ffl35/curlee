@@ -790,13 +790,34 @@ class Verifier
 
     void check_stmt_node(const LetStmt& s, Span, TypeKind)
     {
-        auto var_type = supported_type(s.type);
-        if (!var_type.has_value())
+        // Verification scope only reasons about Int/Bool values.
+        // Non-scalar bindings (e.g. structs/enums) are allowed as long as we don't
+        // attach refinements to them, since we can't lower them into the solver.
+        const auto core_t = curlee::types::core_type_from_name(s.type.name);
+        if (!core_t.has_value())
         {
+            if (s.refinement.has_value())
+            {
+                diags_.push_back(error_at(
+                    s.refinement->span,
+                    "verification does not support refinements on non-scalar type '" +
+                        std::string(s.type.name) + "'"));
+            }
+            check_expr_for_calls(s.value);
             return;
         }
 
-        declare_var(s.name, *var_type);
+        if (core_t->kind != TypeKind::Int && core_t->kind != TypeKind::Bool)
+        {
+            diags_.push_back(error_at(
+                s.type.span,
+                "verification does not support type '" +
+                    std::string(curlee::types::to_string(*core_t)) + "'"));
+            check_expr_for_calls(s.value);
+            return;
+        }
+
+        declare_var(s.name, core_t->kind);
 
         if (s.refinement.has_value())
         {

@@ -51,9 +51,11 @@ int main()
 
     const fs::path ok_path = temp_path("curlee_cli_bundle_ok.bundle");
     const fs::path bad_path = temp_path("curlee_cli_bundle_bad.bundle");
+    const fs::path bad_entry_path = temp_path("curlee_cli_bundle_bad_entry.curlee");
 
     fs::remove(ok_path);
     fs::remove(bad_path);
+    fs::remove(bad_entry_path);
 
     Bundle bundle;
     bundle.manifest.capabilities = {"io:stdout", "net:none"};
@@ -125,6 +127,11 @@ int main()
         out << "bytecode=AQIDBA==\n";
         out.close();
 
+        {
+            std::ofstream entry(bad_entry_path);
+            entry << "fn main() -> Int { return 0; }\n";
+        }
+
         std::string cli_out;
         std::string cli_err;
         const int rc = run_cli({"curlee", "bundle", "verify", bad_path.string()}, cli_out, cli_err);
@@ -135,6 +142,28 @@ int main()
         if (cli_err.find("bytecode hash mismatch") == std::string::npos)
         {
             fail("expected stderr to mention bytecode hash mismatch");
+        }
+
+        // The same verification should gate `curlee run --bundle`.
+        {
+            std::string out;
+            std::string err;
+            const int run_rc =
+                run_cli({"curlee", "run", "--bundle", bad_path.string(), bad_entry_path.string()},
+                        out, err);
+            if (run_rc == 0)
+            {
+                fail("expected run to fail when bundle cannot be loaded");
+            }
+            if (err.find("failed to load bundle") == std::string::npos ||
+                err.find("bytecode hash mismatch") == std::string::npos)
+            {
+                fail("expected run stderr to mention bundle load failure and hash mismatch");
+            }
+            if (!out.empty())
+            {
+                fail("expected run stdout to be empty on failure");
+            }
         }
     }
 
@@ -171,13 +200,8 @@ int main()
 
         std::string out;
         std::string err;
-        const int rc = run_cli({"curlee",
-                                "run",
-                                "--bundle",
-                                bundle_path.string(),
-                                entry.string()},
-                               out,
-                               err);
+        const int rc =
+            run_cli({"curlee", "run", "--bundle", bundle_path.string(), entry.string()}, out, err);
         if (rc == 0)
         {
             fail("expected run to fail for unpinned import in bundle mode");
@@ -227,10 +251,8 @@ int main()
         {
             std::string out;
             std::string err;
-            const int rc =
-                run_cli({"curlee", "run", "--bundle", bundle_path.string(), entry.string()},
-                        out,
-                        err);
+            const int rc = run_cli(
+                {"curlee", "run", "--bundle", bundle_path.string(), entry.string()}, out, err);
             if (rc == 0)
             {
                 fail("expected run to fail when bundle capability is not granted");
@@ -241,31 +263,25 @@ int main()
             }
         }
 
-        // Allowed past the bundle check when capability is granted; VM then errors deterministically
-        // because python interop is not implemented.
+        // Allowed past the bundle check when capability is granted; VM executes the runner
+        // round-trip (currently a no-op handshake) and continues.
         {
             std::string out;
             std::string err;
-            const int rc = run_cli({"curlee",
-                                    "run",
-                                    "--cap",
-                                    "python:ffi",
-                                    "--bundle",
-                                    bundle_path.string(),
-                                    entry.string()},
-                                   out,
-                                   err);
-            if (rc == 0)
+            const int rc = run_cli({"curlee", "run", "--cap", "python:ffi", "--bundle",
+                                    bundle_path.string(), entry.string()},
+                                   out, err);
+            if (rc != 0)
             {
-                fail("expected run to fail (python interop not implemented), but not due to capability");
+                fail("expected run to succeed when bundle capability is granted");
             }
-            if (err.find("python capability required") != std::string::npos)
+            if (!err.empty())
             {
-                fail("expected capability to be granted for python:ffi");
+                fail("expected stderr to be empty on success");
             }
-            if (err.find("python interop not implemented") == std::string::npos)
+            if (out.find("curlee run: result 0") == std::string::npos)
             {
-                fail("expected stderr to mention python interop not implemented");
+                fail("expected stdout to include result 0");
             }
         }
 
@@ -274,6 +290,7 @@ int main()
 
     fs::remove(ok_path);
     fs::remove(bad_path);
+    fs::remove(bad_entry_path);
 
     std::cout << "OK\n";
     return 0;

@@ -24,7 +24,9 @@ using curlee::parser::LetStmt;
 using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
+using curlee::parser::ScopedNameExpr;
 using curlee::parser::Stmt;
+using curlee::parser::StructLiteralExpr;
 using curlee::parser::UnsafeStmt;
 using curlee::parser::WhileStmt;
 using curlee::source::Span;
@@ -165,6 +167,10 @@ class Emitter
         for (const auto& stmt : fn.body.stmts)
         {
             emit_stmt(stmt);
+            if (!diags_.empty())
+            {
+                return;
+            }
         }
 
         // Conservative implicit return (reachable if user omitted an explicit return).
@@ -229,6 +235,10 @@ class Emitter
         for (const auto& nested : stmt.block->stmts)
         {
             emit_stmt(nested);
+            if (!diags_.empty())
+            {
+                return;
+            }
         }
     }
 
@@ -237,6 +247,10 @@ class Emitter
         for (const auto& nested : stmt.body->stmts)
         {
             emit_stmt(nested);
+            if (!diags_.empty())
+            {
+                return;
+            }
         }
     }
 
@@ -254,10 +268,10 @@ class Emitter
         for (const auto& s : stmt.then_block->stmts)
         {
             emit_stmt(s);
-        }
-        if (!diags_.empty())
-        {
-            return;
+            if (!diags_.empty())
+            {
+                return;
+            }
         }
 
         if (stmt.else_block != nullptr)
@@ -269,10 +283,10 @@ class Emitter
             for (const auto& s : stmt.else_block->stmts)
             {
                 emit_stmt(s);
-            }
-            if (!diags_.empty())
-            {
-                return;
+                if (!diags_.empty())
+                {
+                    return;
+                }
             }
             patch_u16(end_patch, static_cast<std::uint16_t>(ip()));
         }
@@ -298,10 +312,10 @@ class Emitter
         for (const auto& s : stmt.body->stmts)
         {
             emit_stmt(s);
-        }
-        if (!diags_.empty())
-        {
-            return;
+            if (!diags_.empty())
+            {
+                return;
+            }
         }
 
         chunk_.emit(OpCode::Jump, stmt.cond.span);
@@ -405,6 +419,16 @@ class Emitter
     void emit_expr_node(const MemberExpr&, Span span)
     {
         diags_.push_back(error_at(span, "member access not supported in emitter yet"));
+    }
+
+    void emit_expr_node(const ScopedNameExpr&, Span span)
+    {
+        diags_.push_back(error_at(span, "scoped names (::) not supported in emitter yet"));
+    }
+
+    void emit_expr_node(const StructLiteralExpr&, Span span)
+    {
+        diags_.push_back(error_at(span, "struct literals not supported in emitter yet"));
     }
 
     void emit_expr_node(const curlee::parser::UnaryExpr& expr, Span span)

@@ -16,7 +16,9 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -368,19 +370,202 @@ std::string json_serialize(const Json& value)
         return out;
     }
     const auto& obj = *value.as_object();
+    std::vector<std::string> keys;
+    keys.reserve(obj.size());
+    for (const auto& [key, _] : obj)
+    {
+        keys.push_back(key);
+    }
+    std::sort(keys.begin(), keys.end());
+
     std::string out = "{";
     bool first = true;
-    for (const auto& [key, val] : obj)
+    for (const auto& key : keys)
     {
+        const auto it = obj.find(key);
+        if (it == obj.end())
+        {
+            continue;
+        }
         if (!first)
         {
             out += ',';
         }
         first = false;
-        out += "\"" + json_escape(key) + "\":" + json_serialize(val);
+        out += "\"" + json_escape(key) + "\":" + json_serialize(it->second);
     }
     out += "}";
     return out;
+}
+
+std::string token_op_to_string(curlee::lexer::TokenKind kind)
+{
+    using curlee::lexer::TokenKind;
+    switch (kind)
+    {
+    case TokenKind::EqualEqual:
+        return "==";
+    case TokenKind::BangEqual:
+        return "!=";
+    case TokenKind::Less:
+        return "<";
+    case TokenKind::LessEqual:
+        return "<=";
+    case TokenKind::Greater:
+        return ">";
+    case TokenKind::GreaterEqual:
+        return ">=";
+    case TokenKind::AndAnd:
+        return "&&";
+    case TokenKind::OrOr:
+        return "||";
+    case TokenKind::Bang:
+        return "!";
+    case TokenKind::Plus:
+        return "+";
+    case TokenKind::Minus:
+        return "-";
+    case TokenKind::Star:
+        return "*";
+    case TokenKind::Slash:
+        return "/";
+    default:
+        break;
+    }
+    return "<op>";
+}
+
+std::string pred_to_string(const curlee::parser::Pred& pred)
+{
+    return std::visit(
+        [&](const auto& node) -> std::string
+        {
+            using Node = std::decay_t<decltype(node)>;
+            if constexpr (std::is_same_v<Node, curlee::parser::PredInt>)
+            {
+                return std::string(node.lexeme);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PredBool>)
+            {
+                return node.value ? "true" : "false";
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PredName>)
+            {
+                return std::string(node.name);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PredUnary>)
+            {
+                return token_op_to_string(node.op) + pred_to_string(*node.rhs);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PredBinary>)
+            {
+                return "(" + pred_to_string(*node.lhs) + " " + token_op_to_string(node.op) + " " +
+                       pred_to_string(*node.rhs) + ")";
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PredGroup>)
+            {
+                return "(" + pred_to_string(*node.inner) + ")";
+            }
+            return "<pred>";
+        },
+        pred.node);
+}
+
+std::string slice_span_text(std::string_view text, const curlee::source::Span span)
+{
+    if (span.end <= span.start || span.start >= text.size())
+    {
+        return std::string();
+    }
+    const std::size_t end = std::min<std::size_t>(span.end, text.size());
+    const std::size_t start = std::min<std::size_t>(span.start, end);
+    return std::string(text.substr(start, end - start));
+}
+
+std::string
+pred_to_string_with_subst(const curlee::parser::Pred& pred,
+                          const std::unordered_map<std::string, std::string>& substitutions)
+{
+    return std::visit(
+        [&](const auto& node) -> std::string
+        {
+            using T = std::decay_t<decltype(node)>;
+            if constexpr (std::is_same_v<T, curlee::parser::PredInt>)
+            {
+                return std::string(node.lexeme);
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::PredBool>)
+            {
+                return node.value ? "true" : "false";
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::PredName>)
+            {
+                const auto it = substitutions.find(std::string(node.name));
+                if (it != substitutions.end())
+                {
+                    return it->second;
+                }
+                return std::string(node.name);
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::PredUnary>)
+            {
+                return token_op_to_string(node.op) +
+                       pred_to_string_with_subst(*node.rhs, substitutions);
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::PredBinary>)
+            {
+                return "(" + pred_to_string_with_subst(*node.lhs, substitutions) + " " +
+                       token_op_to_string(node.op) + " " +
+                       pred_to_string_with_subst(*node.rhs, substitutions) + ")";
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::PredGroup>)
+            {
+                return "(" + pred_to_string_with_subst(*node.inner, substitutions) + ")";
+            }
+            else
+            {
+                static_assert(!sizeof(T), "unhandled Pred node");
+            }
+        },
+        pred.node);
+}
+
+std::string function_signature_to_string(const curlee::parser::Function& f)
+{
+    std::ostringstream oss;
+    oss << "fn " << f.name << "(";
+    for (std::size_t i = 0; i < f.params.size(); ++i)
+    {
+        if (i > 0)
+        {
+            oss << ", ";
+        }
+        const auto& p = f.params[i];
+        oss << p.name << ": " << p.type.name;
+        if (p.refinement.has_value())
+        {
+            oss << " where " << pred_to_string(*p.refinement);
+        }
+    }
+    oss << ")";
+    if (f.return_type.has_value())
+    {
+        oss << " -> " << f.return_type->name;
+    }
+    return oss.str();
+}
+
+const curlee::parser::Function* find_function_by_name(const curlee::parser::Program& prog,
+                                                      std::string_view name)
+{
+    for (const auto& f : prog.functions)
+    {
+        if (f.name == name)
+        {
+            return &f;
+        }
+    }
+    return nullptr;
 }
 
 std::optional<Json> parse_json(std::string_view input)
@@ -530,6 +715,15 @@ struct LspRange
     LspPosition start;
     LspPosition end;
 };
+
+Json lsp_range_json(const LspRange& range)
+{
+    Json::Object start{{"line", Json{static_cast<double>(range.start.line)}},
+                       {"character", Json{static_cast<double>(range.start.character)}}};
+    Json::Object end{{"line", Json{static_cast<double>(range.end.line)}},
+                     {"character", Json{static_cast<double>(range.end.character)}}};
+    return Json{Json::Object{{"start", Json{start}}, {"end", Json{end}}}};
+}
 
 LspRange to_lsp_range(const curlee::source::Span& span, const curlee::source::LineMap& map)
 {
@@ -695,6 +889,134 @@ const curlee::parser::Expr* find_expr_at(const curlee::parser::Expr& expr, std::
     }
 
     return best;
+}
+
+const curlee::parser::Expr* find_call_expr_at(const curlee::parser::Expr& expr, std::size_t offset,
+                                              const curlee::parser::Expr* best)
+{
+    if (span_contains(expr.span, offset) &&
+        std::holds_alternative<curlee::parser::CallExpr>(expr.node))
+    {
+        if (!best || expr.span.length() < best->span.length())
+        {
+            best = &expr;
+        }
+    }
+
+    if (const auto* unary = std::get_if<curlee::parser::UnaryExpr>(&expr.node))
+    {
+        if (unary->rhs)
+        {
+            best = find_call_expr_at(*unary->rhs, offset, best);
+        }
+    }
+    else if (const auto* binary = std::get_if<curlee::parser::BinaryExpr>(&expr.node))
+    {
+        if (binary->lhs)
+        {
+            best = find_call_expr_at(*binary->lhs, offset, best);
+        }
+        if (binary->rhs)
+        {
+            best = find_call_expr_at(*binary->rhs, offset, best);
+        }
+    }
+    else if (const auto* call = std::get_if<curlee::parser::CallExpr>(&expr.node))
+    {
+        if (call->callee)
+        {
+            best = find_call_expr_at(*call->callee, offset, best);
+        }
+        for (const auto& arg : call->args)
+        {
+            best = find_call_expr_at(arg, offset, best);
+        }
+    }
+    else if (const auto* member = std::get_if<curlee::parser::MemberExpr>(&expr.node))
+    {
+        if (member->base)
+        {
+            best = find_call_expr_at(*member->base, offset, best);
+        }
+    }
+    else if (const auto* group = std::get_if<curlee::parser::GroupExpr>(&expr.node))
+    {
+        if (group->inner)
+        {
+            best = find_call_expr_at(*group->inner, offset, best);
+        }
+    }
+
+    return best;
+}
+
+void find_call_exprs_in_stmt(const curlee::parser::Stmt& stmt, std::size_t offset,
+                             const curlee::parser::Expr*& best)
+{
+    if (const auto* let_stmt = std::get_if<curlee::parser::LetStmt>(&stmt.node))
+    {
+        best = find_call_expr_at(let_stmt->value, offset, best);
+    }
+    else if (const auto* ret_stmt = std::get_if<curlee::parser::ReturnStmt>(&stmt.node))
+    {
+        if (ret_stmt->value)
+        {
+            best = find_call_expr_at(*ret_stmt->value, offset, best);
+        }
+    }
+    else if (const auto* expr_stmt = std::get_if<curlee::parser::ExprStmt>(&stmt.node))
+    {
+        best = find_call_expr_at(expr_stmt->expr, offset, best);
+    }
+    else if (const auto* if_stmt = std::get_if<curlee::parser::IfStmt>(&stmt.node))
+    {
+        best = find_call_expr_at(if_stmt->cond, offset, best);
+        if (if_stmt->then_block)
+        {
+            for (const auto& inner : if_stmt->then_block->stmts)
+            {
+                find_call_exprs_in_stmt(inner, offset, best);
+            }
+        }
+        if (if_stmt->else_block)
+        {
+            for (const auto& inner : if_stmt->else_block->stmts)
+            {
+                find_call_exprs_in_stmt(inner, offset, best);
+            }
+        }
+    }
+    else if (const auto* while_stmt = std::get_if<curlee::parser::WhileStmt>(&stmt.node))
+    {
+        best = find_call_expr_at(while_stmt->cond, offset, best);
+        if (while_stmt->body)
+        {
+            for (const auto& inner : while_stmt->body->stmts)
+            {
+                find_call_exprs_in_stmt(inner, offset, best);
+            }
+        }
+    }
+    else if (const auto* block_stmt = std::get_if<curlee::parser::BlockStmt>(&stmt.node))
+    {
+        if (block_stmt->block)
+        {
+            for (const auto& inner : block_stmt->block->stmts)
+            {
+                find_call_exprs_in_stmt(inner, offset, best);
+            }
+        }
+    }
+    else if (const auto* unsafe_stmt = std::get_if<curlee::parser::UnsafeStmt>(&stmt.node))
+    {
+        if (unsafe_stmt->body)
+        {
+            for (const auto& inner : unsafe_stmt->body->stmts)
+            {
+                find_call_exprs_in_stmt(inner, offset, best);
+            }
+        }
+    }
 }
 
 void find_exprs_in_stmt(const curlee::parser::Stmt& stmt, std::size_t offset,
@@ -1017,12 +1339,21 @@ int main()
                 continue;
             }
 
-            const curlee::parser::Expr* best = nullptr;
+            const curlee::parser::Expr* best_call = nullptr;
             for (const auto& func : analysis->program.functions)
             {
                 for (const auto& stmt : func.body.stmts)
                 {
-                    find_exprs_in_stmt(stmt, *offset_opt, best);
+                    find_call_exprs_in_stmt(stmt, *offset_opt, best_call);
+                }
+            }
+
+            const curlee::parser::Expr* best_expr = nullptr;
+            for (const auto& func : analysis->program.functions)
+            {
+                for (const auto& stmt : func.body.stmts)
+                {
+                    find_exprs_in_stmt(stmt, *offset_opt, best_expr);
                 }
             }
 
@@ -1033,9 +1364,103 @@ int main()
                 response["id"] = id_it->second;
             }
 
-            if (best)
+            if (best_call)
             {
-                const auto it = analysis->type_info.expr_types.find(best->id);
+                const auto* call = std::get_if<curlee::parser::CallExpr>(&best_call->node);
+                if (call && call->callee)
+                {
+                    const auto* callee_name =
+                        std::get_if<curlee::parser::NameExpr>(&call->callee->node);
+                    if (callee_name != nullptr)
+                    {
+                        const auto* f = find_function_by_name(analysis->program, callee_name->name);
+                        if (f != nullptr)
+                        {
+                            std::unordered_map<std::string, std::string> substitutions;
+                            const std::size_t n = std::min(f->params.size(), call->args.size());
+                            substitutions.reserve(n);
+                            for (std::size_t i = 0; i < n; ++i)
+                            {
+                                substitutions.emplace(
+                                    std::string(f->params[i].name),
+                                    slice_span_text(doc.text, call->args[i].span));
+                            }
+
+                            std::vector<std::string> obligations;
+                            obligations.reserve(f->requires_clauses.size() + f->params.size());
+                            std::unordered_set<std::string> seen;
+
+                            for (const auto& req : f->requires_clauses)
+                            {
+                                const auto s = pred_to_string_with_subst(req, substitutions);
+                                if (seen.insert(s).second)
+                                {
+                                    obligations.push_back(s);
+                                }
+                            }
+                            for (const auto& p : f->params)
+                            {
+                                if (!p.refinement.has_value())
+                                {
+                                    continue;
+                                }
+                                const auto s =
+                                    pred_to_string_with_subst(*p.refinement, substitutions);
+                                if (seen.insert(s).second)
+                                {
+                                    obligations.push_back(s);
+                                }
+                            }
+
+                            std::ostringstream body;
+                            body << function_signature_to_string(*f);
+                            for (const auto& req : f->requires_clauses)
+                            {
+                                body << "\nrequires "
+                                     << pred_to_string_with_subst(req, substitutions);
+                            }
+                            for (const auto& p : f->params)
+                            {
+                                if (p.refinement.has_value())
+                                {
+                                    body << "\nrefines " << p.name << ": "
+                                         << pred_to_string_with_subst(*p.refinement, substitutions);
+                                }
+                            }
+                            if (!obligations.empty())
+                            {
+                                body << "\nobligations: ";
+                                for (std::size_t i = 0; i < obligations.size(); ++i)
+                                {
+                                    if (i > 0)
+                                    {
+                                        body << ", ";
+                                    }
+                                    body << obligations[i];
+                                }
+                            }
+
+                            Json::Object contents;
+                            contents["kind"] = Json{std::string("plaintext")};
+                            contents["value"] = Json{body.str()};
+
+                            const auto range = to_lsp_range(
+                                call->callee ? call->callee->span : best_call->span, map);
+                            Json::Object hover;
+                            hover["contents"] = Json{contents};
+                            hover["range"] = lsp_range_json(range);
+
+                            response["result"] = Json{hover};
+                            write_lsp_message(json_serialize(Json{response}));
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            if (best_expr)
+            {
+                const auto it = analysis->type_info.expr_types.find(best_expr->id);
                 if (it != analysis->type_info.expr_types.end())
                 {
                     const auto type_name = std::string(curlee::types::to_string(it->second));

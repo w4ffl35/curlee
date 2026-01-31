@@ -14,6 +14,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 option(CURLEE_USE_SYSTEM_Z3 "Use system-installed Z3 if available; otherwise fetch" ON)
+option(CURLEE_ENABLE_FUZZING "Build fuzz targets (libFuzzer when using Clang)" OFF)
 
 if(CURLEE_USE_SYSTEM_Z3)
   find_package(Z3 QUIET)
@@ -141,9 +142,33 @@ add_executable(curlee_cli_diagnostics_golden_tests
 target_include_directories(curlee_cli_diagnostics_golden_tests PRIVATE include)
 target_link_libraries(curlee_cli_diagnostics_golden_tests PRIVATE Z3::Z3)
 
+add_executable(curlee_python_runner_fake_error
+  tests/python_runner_fake_error.cpp
+)
+
+add_executable(curlee_python_runner_fake_hang
+  tests/python_runner_fake_hang.cpp
+)
+
+add_executable(curlee_python_runner_fake_spam
+  tests/python_runner_fake_spam.cpp
+)
+
+add_executable(curlee_python_runner_fake_env_check
+  tests/python_runner_fake_env_check.cpp
+)
+
+add_executable(curlee_python_runner_fake_sandbox_required
+  tests/python_runner_fake_sandbox_required.cpp
+)
+
+add_executable(curlee_bwrap_fake
+  tests/bwrap_fake.cpp
+)
+
 add_test(
   NAME curlee_cli_diagnostics_golden_tests
-  COMMAND curlee_cli_diagnostics_golden_tests ${CMAKE_SOURCE_DIR}/tests/cli_diagnostics
+  COMMAND curlee_cli_diagnostics_golden_tests ${CMAKE_SOURCE_DIR}/tests/cli_diagnostics $<TARGET_FILE:curlee_python_runner_fake_error> $<TARGET_FILE:curlee_python_runner_fake_hang> $<TARGET_FILE:curlee_python_runner_fake_spam> $<TARGET_FILE:curlee_python_runner_fake_env_check> $<TARGET_FILE:curlee_python_runner_fake_sandbox_required> $<TARGET_FILE:curlee_bwrap_fake>
 )
 set_tests_properties(curlee_cli_diagnostics_golden_tests PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
@@ -155,6 +180,44 @@ target_include_directories(curlee_lexer_tests PRIVATE include)
 
 add_test(NAME curlee_lexer_tests COMMAND curlee_lexer_tests)
 
+if(CURLEE_ENABLE_FUZZING)
+  add_executable(curlee_lexer_fuzz
+    tests/lexer_fuzz.cpp
+    src/lexer/lexer.cpp
+  )
+  target_include_directories(curlee_lexer_fuzz PRIVATE include)
+
+  add_executable(curlee_parser_fuzz
+    tests/parser_fuzz.cpp
+    src/lexer/lexer.cpp
+    src/parser/parser.cpp
+  )
+  target_include_directories(curlee_parser_fuzz PRIVATE include)
+
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(curlee_lexer_fuzz PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
+    target_link_options(curlee_lexer_fuzz PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
+
+    target_compile_options(curlee_parser_fuzz PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
+    target_link_options(curlee_parser_fuzz PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
+
+    add_test(
+      NAME curlee_lexer_fuzz_smoke
+      COMMAND curlee_lexer_fuzz -seed=1 -runs=200 -max_len=4096
+    )
+    set_tests_properties(curlee_lexer_fuzz_smoke PROPERTIES TIMEOUT 20)
+
+    add_test(
+      NAME curlee_parser_fuzz_smoke
+      COMMAND curlee_parser_fuzz -seed=1 -runs=200 -max_len=4096
+    )
+    set_tests_properties(curlee_parser_fuzz_smoke PROPERTIES TIMEOUT 20)
+  else()
+    target_compile_definitions(curlee_lexer_fuzz PRIVATE CURLEE_FUZZER_STANDALONE)
+    target_compile_definitions(curlee_parser_fuzz PRIVATE CURLEE_FUZZER_STANDALONE)
+  endif()
+endif()
+
 add_executable(curlee_parser_tests
   tests/parser_tests.cpp
   src/lexer/lexer.cpp
@@ -163,6 +226,28 @@ add_executable(curlee_parser_tests
 target_include_directories(curlee_parser_tests PRIVATE include)
 
 add_test(NAME curlee_parser_tests COMMAND curlee_parser_tests)
+
+add_executable(curlee_lsp_hover_golden_tests
+  tests/lsp_hover_golden_tests.cpp
+)
+
+add_test(
+  NAME curlee_lsp_hover_golden_tests
+  COMMAND curlee_lsp_hover_golden_tests ${CMAKE_SOURCE_DIR}/tests/lsp_hover $<TARGET_FILE:curlee_lsp>
+)
+set_tests_properties(curlee_lsp_hover_golden_tests PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(curlee_fuzz_regression_tests
+  tests/fuzz_regression_tests.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+)
+target_include_directories(curlee_fuzz_regression_tests PRIVATE include)
+
+add_test(
+  NAME curlee_fuzz_regression_tests
+  COMMAND curlee_fuzz_regression_tests ${CMAKE_SOURCE_DIR}/tests/fuzz_regressions
+)
 
 add_executable(curlee_resolver_tests
   tests/resolver_tests.cpp
@@ -262,6 +347,19 @@ target_include_directories(curlee_interop_tests PRIVATE include)
 
 add_test(NAME curlee_interop_tests COMMAND curlee_interop_tests)
 
+add_executable(curlee_python_runner
+  src/interop/python_runner_main.cpp
+)
+
+add_executable(curlee_python_runner_tests
+  tests/python_runner_tests.cpp
+)
+
+add_test(
+  NAME curlee_python_runner_tests
+  COMMAND curlee_python_runner_tests $<TARGET_FILE:curlee_python_runner>
+)
+
 add_executable(curlee_e2e_tests
   tests/e2e_tests.cpp
   src/compiler/emitter.cpp
@@ -295,6 +393,23 @@ add_executable(curlee_compiler_tests
 target_include_directories(curlee_compiler_tests PRIVATE include)
 
 add_test(NAME curlee_compiler_tests COMMAND curlee_compiler_tests)
+
+add_executable(curlee_tensor_ir_tests
+  tests/tensor_ir_tests.cpp
+  src/compiler/tensor_ir.cpp
+)
+target_include_directories(curlee_tensor_ir_tests PRIVATE include)
+
+add_test(NAME curlee_tensor_ir_tests COMMAND curlee_tensor_ir_tests)
+
+add_executable(curlee_tensor_backend_tests
+  tests/tensor_backend_tests.cpp
+  src/compiler/tensor_backend.cpp
+  src/compiler/tensor_ir.cpp
+)
+target_include_directories(curlee_tensor_backend_tests PRIVATE include)
+
+add_test(NAME curlee_tensor_backend_tests COMMAND curlee_tensor_backend_tests)
 
 add_executable(curlee_verification_tests
   tests/verification_solver_tests.cpp

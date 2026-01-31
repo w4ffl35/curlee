@@ -160,6 +160,13 @@ class Lexer
                 continue;
             }
 
+            if (c == ':' && next == ':')
+            {
+                pos_ += 2;
+                tokens.push_back(make_token(TokenKind::ColonColon, start, pos_));
+                continue;
+            }
+
             // Single-character tokens
             advance();
             switch (c)
@@ -308,6 +315,18 @@ class Lexer
         if (lexeme == "import")
         {
             return TokenKind::KwImport;
+        }
+        if (lexeme == "as")
+        {
+            return TokenKind::KwAs;
+        }
+        if (lexeme == "struct")
+        {
+            return TokenKind::KwStruct;
+        }
+        if (lexeme == "enum")
+        {
+            return TokenKind::KwEnum;
         }
         return TokenKind::Identifier;
     }

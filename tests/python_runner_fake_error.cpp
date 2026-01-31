@@ -1,0 +1,15 @@
+#include <iostream>
+#include <string>
+
+int main()
+{
+    // Minimal deterministic fake runner for tests.
+    // Reads a line (ignored) and returns a structured error response.
+    std::string line;
+    (void)std::getline(std::cin, line);
+
+    std::cout
+        << "{\"error\":{\"kind\":\"runner_crash\",\"message\":\"forced runner "
+           "error\",\"retryable\":false},\"id\":\"vm\",\"ok\":false,\"protocol_version\":1}\n";
+    return 2;
+}

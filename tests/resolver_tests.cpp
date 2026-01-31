@@ -189,6 +189,100 @@ fn main() -> Unit {
     }
 
     {
+        // Import aliasing + qualified call via alias.
+        const std::string src = R"(import foo.bar as baz;
+
+fn main() -> Unit {
+  baz.helper();
+  return 0;
+})";
+
+        namespace fs = std::filesystem;
+        const fs::path base = fs::temp_directory_path() / "curlee_resolver_tests_import_alias";
+        const fs::path module_dir = base / "foo";
+        fs::create_directories(module_dir);
+        const fs::path module_path = module_dir / "bar.curlee";
+        write_file(module_path, "fn helper() -> Unit { return 0; }");
+
+        const fs::path main_path = base / "main.curlee";
+        const auto res = resolve_with_source(src, main_path.string());
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for alias-qualified call");
+        }
+    }
+
+    {
+        // Qualified reference via full import path: foo.bar.helper()
+        const std::string src = R"(import foo.bar;
+
+fn main() -> Unit {
+  foo.bar.helper();
+  return 0;
+})";
+
+        namespace fs = std::filesystem;
+        const fs::path base = fs::temp_directory_path() / "curlee_resolver_tests_qualified_path";
+        const fs::path module_dir = base / "foo";
+        fs::create_directories(module_dir);
+        const fs::path module_path = module_dir / "bar.curlee";
+        write_file(module_path, "fn helper() -> Unit { return 0; }");
+
+        const fs::path main_path = base / "main.curlee";
+        const auto res = resolve_with_source(src, main_path.string());
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for path-qualified call");
+        }
+    }
+
+    {
+        // Unknown qualified name should produce a deterministic diagnostic.
+        const std::string src = R"(import foo.bar as baz;
+
+fn main() -> Unit {
+  baz.missing();
+  return 0;
+})";
+
+        namespace fs = std::filesystem;
+        const fs::path base = fs::temp_directory_path() / "curlee_resolver_tests_unknown_qualified";
+        const fs::path module_dir = base / "foo";
+        fs::create_directories(module_dir);
+        const fs::path module_path = module_dir / "bar.curlee";
+        write_file(module_path, "fn helper() -> Unit { return 0; }");
+
+        const fs::path main_path = base / "main.curlee";
+        const auto res = resolve_with_source(src, main_path.string());
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
+        {
+            fail("expected resolver error for unknown qualified name");
+        }
+    }
+
+    {
+        // Alias conflicts with a local top-level function name.
+        const std::string src = R"(import foo.bar as helper;
+
+fn helper() -> Unit { return 0; }
+fn main() -> Unit { return 0; })";
+
+        namespace fs = std::filesystem;
+        const fs::path base = fs::temp_directory_path() / "curlee_resolver_tests_alias_conflict";
+        const fs::path module_dir = base / "foo";
+        fs::create_directories(module_dir);
+        const fs::path module_path = module_dir / "bar.curlee";
+        write_file(module_path, "fn helper() -> Unit { return 0; }");
+
+        const fs::path main_path = base / "main.curlee";
+        const auto res = resolve_with_source(src, main_path.string());
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
+        {
+            fail("expected resolver error for alias conflict");
+        }
+    }
+
+    {
         // Cross-root resolution: module lives under a subdirectory, but it imports a sibling
         // module that exists only in the entry directory.
         // Entry dir: <base>
