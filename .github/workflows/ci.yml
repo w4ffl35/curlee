@@ -35,6 +35,10 @@ jobs:
           # Works even before you add tests (will report "0 tests")
           ctest --preset ${{ matrix.preset }} --output-on-failure
 
+      - name: Smoke (debug)
+        if: matrix.preset == 'linux-debug'
+        run: bash scripts/smoke.sh --preset linux-debug --skip-build
+
       - name: Smoke (release)
         if: matrix.preset == 'linux-release'
         run: bash scripts/smoke.sh --preset linux-release --skip-build
