@@ -738,6 +738,11 @@ int main(int argc, char** argv)
     const fs::path run_success_err_golden = dir / "run_success.stderr.golden";
     const fs::path check_python_ffi_requires_unsafe_golden =
         dir / "check_python_ffi_requires_unsafe.golden";
+
+    const fs::path run_python_ffi_sandbox_exec_failed_out_golden =
+        dir / "run_python_ffi_sandbox_exec_failed.stdout.golden";
+    const fs::path run_python_ffi_sandbox_exec_failed_err_golden =
+        dir / "run_python_ffi_sandbox_exec_failed.stderr.golden";
     const fs::path check_struct_ok_golden = dir / "check_struct_ok.golden";
     const fs::path run_python_ffi_missing_cap_out_golden =
         dir / "run_python_ffi_missing_cap.stdout.golden";
@@ -973,6 +978,26 @@ int main(int argc, char** argv)
                 {
                     return 1;
                 }
+            }
+
+            // If sandboxing is requested but the sandbox wrapper cannot be executed,
+            // Curlee must fail deterministically (no fallback to unsandboxed execution).
+            {
+                const std::string missing_bwrap =
+                    "/this/path/should/not/exist/curlee_bwrap_missing";
+                (void)setenv("CURLEE_BWRAP", missing_bwrap.c_str(), 1);
+
+                const std::vector<std::string> argv_storage = {
+                    "curlee", "run", "--cap", "python:ffi", "--cap", "python:sandbox", rel_path};
+                if (!run_run_python_ffi_case(argv_storage,
+                                             run_python_ffi_sandbox_exec_failed_out_golden,
+                                             run_python_ffi_sandbox_exec_failed_err_golden,
+                                             "run-python-ffi-sandbox-exec-failed", 1))
+                {
+                    return 1;
+                }
+
+                (void)setenv("CURLEE_BWRAP", fake_bwrap.c_str(), 1);
             }
 
             (void)unsetenv("CURLEE_PYTHON_RUNNER");
