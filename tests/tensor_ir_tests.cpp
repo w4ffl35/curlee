@@ -35,7 +35,8 @@ int main()
         const auto got2 = p2.dump();
         if (got2 != "%0 = zeros <unknown>[]\n")
         {
-            fail("unexpected dump output (edge cases)\n--- got ---\n" + got2 + "--- expected ---\n%0 = zeros <unknown>[]\n");
+            fail("unexpected dump output (edge cases)\n--- got ---\n" + got2 +
+                 "--- expected ---\n%0 = zeros <unknown>[]\n");
         }
     }
 
