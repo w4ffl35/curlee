@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <variant>
 
@@ -56,6 +57,23 @@ int main()
         }
         const auto& err = std::get<LoadError>(res);
         if (err.message != "failed to open file")
+        {
+            fail("unexpected error message: " + err.message);
+        }
+    }
+
+    // Read-failure path.
+    {
+        std::istringstream in("hello");
+        in.setstate(std::ios::badbit);
+
+        const auto res = load_source_stream(in, "synthetic.curlee");
+        if (!std::holds_alternative<LoadError>(res))
+        {
+            fail("expected LoadError for bad stream");
+        }
+        const auto& err = std::get<LoadError>(res);
+        if (err.message != "failed while reading file")
         {
             fail("unexpected error message: " + err.message);
         }
