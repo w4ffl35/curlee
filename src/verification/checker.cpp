@@ -862,7 +862,24 @@ class Verifier
     {
         check_expr_for_calls(s.cond);
 
+        std::optional<z3::expr> cond_fact;
+        {
+            auto lowered = lower_expr(s.cond);
+            if (std::holds_alternative<ExprValue>(lowered))
+            {
+                auto value = std::get<ExprValue>(std::move(lowered));
+                if (value.kind == TypeKind::Bool)
+                {
+                    cond_fact = std::move(value.expr);
+                }
+            }
+        }
+
         push_scope();
+        if (cond_fact.has_value())
+        {
+            facts_.push_back(*cond_fact);
+        }
         for (const auto& stmt : s.then_block->stmts)
         {
             check_stmt(stmt, expected_return);
@@ -872,6 +889,10 @@ class Verifier
         if (s.else_block != nullptr)
         {
             push_scope();
+            if (cond_fact.has_value())
+            {
+                facts_.push_back(!*cond_fact);
+            }
             for (const auto& stmt : s.else_block->stmts)
             {
                 check_stmt(stmt, expected_return);
