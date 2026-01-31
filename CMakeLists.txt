@@ -161,6 +161,14 @@ target_include_directories(curlee_line_map_tests PRIVATE include)
 
 add_test(NAME curlee_line_map_tests COMMAND curlee_line_map_tests)
 
+add_executable(curlee_source_file_tests
+  tests/source_file_tests.cpp
+  src/source/source_file.cpp
+)
+target_include_directories(curlee_source_file_tests PRIVATE include)
+
+add_test(NAME curlee_source_file_tests COMMAND curlee_source_file_tests)
+
 add_executable(curlee_diagnostic_golden_tests
   tests/diagnostic_golden_tests.cpp
   src/diag/render.cpp
