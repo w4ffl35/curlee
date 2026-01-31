@@ -1,0 +1,4 @@
+tests/fixtures/check_struct_ok.curlee:9:21: error: struct literals not supported in emitter yet
+  |
+  |     let p : Point = Point{x : 1, y : 2};
+  |                     ^^^^^^^^^^^^^^^^^^^

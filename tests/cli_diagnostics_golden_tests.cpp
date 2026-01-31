@@ -280,6 +280,49 @@ static bool run_run_ensures_fail_case(const fs::path& golden_path)
     return true;
 }
 
+static bool run_run_struct_not_runnable_case(const fs::path& golden_path)
+{
+    std::ostringstream captured_out;
+    std::ostringstream captured_err;
+
+    auto* old_cout = std::cout.rdbuf(captured_out.rdbuf());
+    auto* old_cerr = std::cerr.rdbuf(captured_err.rdbuf());
+
+    const std::string rel_path = "tests/fixtures/check_struct_ok.curlee";
+
+    std::vector<std::string> argv_storage = {"curlee", "run", rel_path};
+    std::vector<char*> argv;
+    argv.reserve(argv_storage.size());
+    for (auto& s : argv_storage)
+    {
+        argv.push_back(s.data());
+    }
+
+    const int rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
+
+    std::cout.rdbuf(old_cout);
+    std::cerr.rdbuf(old_cerr);
+
+    const std::string got = captured_err.str();
+    const std::string expected = slurp(golden_path);
+
+    if (rc == 0)
+    {
+        std::cerr << "expected non-zero exit code for run-struct-not-runnable\n";
+        return false;
+    }
+
+    if (got != expected)
+    {
+        std::cerr << "GOLDEN MISMATCH: " << golden_path.filename().string() << "\n";
+        std::cerr << "--- expected ---\n" << expected;
+        std::cerr << "--- got ---\n" << got;
+        return false;
+    }
+
+    return true;
+}
+
 static bool run_run_success_case(const fs::path& out_golden_path, const fs::path& err_golden_path)
 {
     std::ostringstream captured_out;
@@ -690,6 +733,7 @@ int main(int argc, char** argv)
     const fs::path run_requires_divide_golden = dir / "run_requires_divide.golden";
     const fs::path check_ensures_fail_golden = dir / "check_ensures_fail.golden";
     const fs::path run_ensures_fail_golden = dir / "run_ensures_fail.golden";
+    const fs::path run_struct_not_runnable_golden = dir / "run_struct_not_runnable.golden";
     const fs::path run_success_out_golden = dir / "run_success.stdout.golden";
     const fs::path run_success_err_golden = dir / "run_success.stderr.golden";
     const fs::path check_python_ffi_requires_unsafe_golden =
@@ -783,6 +827,11 @@ int main(int argc, char** argv)
         }
 
         if (!run_run_ensures_fail_case(run_ensures_fail_golden))
+        {
+            return 1;
+        }
+
+        if (!run_run_struct_not_runnable_case(run_struct_not_runnable_golden))
         {
             return 1;
         }

@@ -167,6 +167,10 @@ class Emitter
         for (const auto& stmt : fn.body.stmts)
         {
             emit_stmt(stmt);
+            if (!diags_.empty())
+            {
+                return;
+            }
         }
 
         // Conservative implicit return (reachable if user omitted an explicit return).
@@ -231,6 +235,10 @@ class Emitter
         for (const auto& nested : stmt.block->stmts)
         {
             emit_stmt(nested);
+            if (!diags_.empty())
+            {
+                return;
+            }
         }
     }
 
@@ -239,6 +247,10 @@ class Emitter
         for (const auto& nested : stmt.body->stmts)
         {
             emit_stmt(nested);
+            if (!diags_.empty())
+            {
+                return;
+            }
         }
     }
 
@@ -256,10 +268,10 @@ class Emitter
         for (const auto& s : stmt.then_block->stmts)
         {
             emit_stmt(s);
-        }
-        if (!diags_.empty())
-        {
-            return;
+            if (!diags_.empty())
+            {
+                return;
+            }
         }
 
         if (stmt.else_block != nullptr)
@@ -271,10 +283,10 @@ class Emitter
             for (const auto& s : stmt.else_block->stmts)
             {
                 emit_stmt(s);
-            }
-            if (!diags_.empty())
-            {
-                return;
+                if (!diags_.empty())
+                {
+                    return;
+                }
             }
             patch_u16(end_patch, static_cast<std::uint16_t>(ip()));
         }
@@ -300,10 +312,10 @@ class Emitter
         for (const auto& s : stmt.body->stmts)
         {
             emit_stmt(s);
-        }
-        if (!diags_.empty())
-        {
-            return;
+            if (!diags_.empty())
+            {
+                return;
+            }
         }
 
         chunk_.emit(OpCode::Jump, stmt.cond.span);
