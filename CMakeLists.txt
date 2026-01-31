@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.23)
 
 project(curlee VERSION 0.1.0 LANGUAGES CXX)
 
+include(GNUInstallDirs)
+
 # Build identifier info for `curlee --version`.
 set(CURLEE_SEMVER "${PROJECT_VERSION}")
 
@@ -111,6 +113,10 @@ target_include_directories(curlee PRIVATE include)
 target_link_libraries(curlee PRIVATE Z3::Z3)
 curlee_add_build_info(curlee)
 
+install(TARGETS curlee
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
 add_executable(curlee_lsp
   src/lsp/lsp.cpp
   src/lexer/lexer.cpp
@@ -122,7 +128,20 @@ add_executable(curlee_lsp
 )
 target_include_directories(curlee_lsp PRIVATE include)
 
+install(TARGETS curlee_lsp
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
 enable_testing()
+
+add_test(
+  NAME curlee_install_smoke
+  COMMAND ${CMAKE_COMMAND}
+    -Dcurlee_build_dir=${CMAKE_BINARY_DIR}
+    -Dcurlee_bindir=${CMAKE_INSTALL_BINDIR}
+    -Dcurlee_config=${CMAKE_BUILD_TYPE}
+    -P ${CMAKE_SOURCE_DIR}/cmake/install_smoke.cmake
+)
 
 add_test(NAME curlee_help COMMAND curlee --help)
 
