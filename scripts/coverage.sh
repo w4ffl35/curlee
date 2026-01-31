@@ -4,10 +4,13 @@ set -euo pipefail
 preset="linux-debug-coverage"
 fail_under="100"
 out_dir="build/coverage"
+exclude_throw_branches=1
+exclude_unreachable_branches=1
 
 usage() {
   cat <<'EOF'
 Usage: scripts/coverage.sh [--preset <cmake-preset>] [--out <dir>] [--fail-under <percent>] [--no-fail]
+                           [--include-throw-branches] [--include-unreachable-branches]
 
 Builds + runs tests under coverage instrumentation, then prints a coverage summary.
 
@@ -24,6 +27,7 @@ Examples:
   bash scripts/coverage.sh
   bash scripts/coverage.sh --fail-under 95
   bash scripts/coverage.sh --no-fail
+  bash scripts/coverage.sh --include-throw-branches
 EOF
 }
 
@@ -39,6 +43,10 @@ while [[ $# -gt 0 ]]; do
       fail_under="$2"; shift 2 ;;
     --no-fail)
       no_fail=1; shift ;;
+    --include-throw-branches)
+      exclude_throw_branches=0; shift ;;
+    --include-unreachable-branches)
+      exclude_unreachable_branches=0; shift ;;
     -h|--help)
       usage; exit 0 ;;
     *)
@@ -87,6 +95,14 @@ if command -v gcovr >/dev/null 2>&1; then
     --output "$out_dir/coverage.txt"
     --html-details "$out_dir/coverage.html"
   )
+
+  if [[ $exclude_throw_branches -eq 1 ]]; then
+    args+=(--exclude-throw-branches)
+  fi
+
+  if [[ $exclude_unreachable_branches -eq 1 ]]; then
+    args+=(--exclude-unreachable-branches)
+  fi
 
   if [[ $no_fail -eq 0 ]]; then
     args+=(--fail-under-line "$fail_under")

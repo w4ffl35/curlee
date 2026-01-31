@@ -209,6 +209,13 @@ This will:
 - Generate an HTML report at `build/coverage/coverage.html`.
 - Fail the run if line coverage is below the threshold (default: 100%).
 
+Note: the gcovr report excludes `throw` and unreachable branches by default (so branch coverage isn't dominated by exception edges). You can opt back in with:
+
+```bash
+bash scripts/coverage.sh --include-throw-branches
+bash scripts/coverage.sh --include-unreachable-branches
+```
+
 Adjust threshold or disable failing:
 
 ```bash
