@@ -12,27 +12,13 @@ LineMap::LineMap(std::string_view text) : text_size_(text.size())
         if (text[i] == '\n')
         {
             const std::size_t next = i + 1;
-            if (next <= text.size())
-            {
-                line_starts_.push_back(next);
-            }
+            line_starts_.push_back(next);
         }
-    }
-
-    // Ensure at least one line.
-    if (line_starts_.empty())
-    {
-        line_starts_.push_back(0);
     }
 }
 
 LineCol LineMap::offset_to_line_col(std::size_t offset) const
 {
-    if (line_starts_.empty())
-    {
-        return LineCol{.line = 1, .col = 1};
-    }
-
     // Clamp to end-of-text.
     if (offset > text_size_)
     {
@@ -59,11 +45,6 @@ std::size_t LineMap::line_start_offset(std::size_t line) const
         return 0;
     }
 
-    if (line_starts_.empty())
-    {
-        return 0;
-    }
-
     const std::size_t index = line - 1;
     if (index >= line_starts_.size())
     {
@@ -75,7 +56,7 @@ std::size_t LineMap::line_start_offset(std::size_t line) const
 
 std::size_t LineMap::line_count() const
 {
-    return line_starts_.empty() ? 1 : line_starts_.size();
+    return line_starts_.size();
 }
 
 } // namespace curlee::source

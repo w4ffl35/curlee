@@ -173,6 +173,15 @@ add_test(
   COMMAND curlee_diagnostic_golden_tests ${CMAKE_SOURCE_DIR}/tests/diagnostics
 )
 
+add_executable(curlee_diag_render_tests
+  tests/diag_render_tests.cpp
+  src/diag/render.cpp
+  src/source/line_map.cpp
+)
+target_include_directories(curlee_diag_render_tests PRIVATE include)
+
+add_test(NAME curlee_diag_render_tests COMMAND curlee_diag_render_tests)
+
 add_executable(curlee_cli_diagnostics_golden_tests
   tests/cli_diagnostics_golden_tests.cpp
   src/bundle/bundle.cpp
