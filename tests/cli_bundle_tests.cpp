@@ -102,7 +102,7 @@ int main()
 
         const std::string expected_hash = hash_bytes(bundle.bytecode);
         const std::string expected = "curlee bundle info:\n"
-                                     "version: 1\n"
+                                     "format_version: 1\n"
                                      "bytecode_hash: " +
                                      expected_hash +
                                      "\n"
@@ -119,7 +119,7 @@ int main()
     {
         std::ofstream out(bad_path);
         out << "CURLEE_BUNDLE_V1\n";
-        out << "version=" << kBundleVersion << "\n";
+        out << "version=" << kBundleFormatVersion << "\n";
         out << "bytecode_hash=deadbeef\n";
         out << "capabilities=io:stdout\n";
         out << "imports=stdlib.math:bead\n";

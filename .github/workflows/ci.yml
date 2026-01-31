@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++ libz3-dev pkg-config clang-format
+          sudo apt-get install -y cmake ninja-build g++ libz3-dev pkg-config clang-format ripgrep
 
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}
@@ -30,6 +30,15 @@ jobs:
         run: cmake --build --preset ${{ matrix.preset }}
 
       - name: Test
+        if: matrix.preset == 'linux-debug'
         run: |
           # Works even before you add tests (will report "0 tests")
           ctest --preset ${{ matrix.preset }} --output-on-failure
+
+      - name: Smoke (debug)
+        if: matrix.preset == 'linux-debug'
+        run: bash scripts/smoke.sh --preset linux-debug --skip-build
+
+      - name: Smoke (release)
+        if: matrix.preset == 'linux-release'
+        run: bash scripts/smoke.sh --preset linux-release --skip-build

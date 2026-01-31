@@ -1,0 +1,4 @@
+tests/fixtures/run_python_ffi.curlee:2:12: error: python sandbox exec failed
+  |
+  |   unsafe { python_ffi.call(); }
+  |            ^^^^^^^^^^^^^^^^^

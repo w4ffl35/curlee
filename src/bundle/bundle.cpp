@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <curlee/bundle/bundle.h>
 #include <fstream>
 #include <sstream>
@@ -10,7 +11,21 @@ namespace curlee::bundle
 namespace
 {
 
-constexpr std::string_view kHeader = "CURLEE_BUNDLE_V1";
+constexpr std::string_view kHeader = "CURLEE_BUNDLE";
+constexpr std::string_view kHeaderLegacyV1 = "CURLEE_BUNDLE_V1";
+
+std::optional<int> parse_int(std::string_view input)
+{
+    int value = 0;
+    const auto* begin = input.data();
+    const auto* end = input.data() + input.size();
+    const auto [ptr, ec] = std::from_chars(begin, end, value);
+    if (ec != std::errc{} || ptr != end)
+    {
+        return std::nullopt;
+    }
+    return value;
+}
 
 std::string to_hex(std::uint64_t value)
 {
@@ -196,11 +211,11 @@ BundleError write_bundle(const std::string& path, const Bundle& bundle)
     }
 
     Bundle bundle_copy = bundle;
-    bundle_copy.manifest.version = kBundleVersion;
+    bundle_copy.manifest.format_version = kBundleFormatVersion;
     bundle_copy.manifest.bytecode_hash = hash_bytes(bundle.bytecode);
 
     out << kHeader << "\n";
-    out << "version=" << bundle_copy.manifest.version << "\n";
+    out << "format_version=" << bundle_copy.manifest.format_version << "\n";
     out << "bytecode_hash=" << bundle_copy.manifest.bytecode_hash << "\n";
     out << "capabilities=";
     for (std::size_t i = 0; i < bundle_copy.manifest.capabilities.size(); ++i)
@@ -233,14 +248,21 @@ BundleResult read_bundle(const std::string& path)
     {
         return BundleError{"empty bundle"};
     }
-    if (line != kHeader)
+    const bool legacy_v1_header = (line == kHeaderLegacyV1);
+    if (line != kHeader && !legacy_v1_header)
     {
         return BundleError{"invalid bundle header"};
     }
 
     Manifest manifest;
-    bool saw_version = false;
+    bool saw_format_version = false;
     std::string bytecode_b64;
+
+    if (legacy_v1_header)
+    {
+        manifest.format_version = 1;
+        saw_format_version = true;
+    }
 
     while (std::getline(in, line))
     {
@@ -256,10 +278,15 @@ BundleResult read_bundle(const std::string& path)
         const std::string key = line.substr(0, eq);
         const std::string value = line.substr(eq + 1);
 
-        if (key == "version")
+        if (key == "format_version" || key == "version")
         {
-            manifest.version = std::stoi(value);
-            saw_version = true;
+            const auto parsed = parse_int(value);
+            if (!parsed.has_value())
+            {
+                return BundleError{"invalid bundle format version"};
+            }
+            manifest.format_version = *parsed;
+            saw_format_version = true;
         }
         else if (key == "bytecode_hash")
         {
@@ -300,13 +327,15 @@ BundleResult read_bundle(const std::string& path)
         }
     }
 
-    if (!saw_version)
+    if (!saw_format_version)
     {
-        return BundleError{"missing version"};
+        return BundleError{"missing bundle format version"};
     }
-    if (manifest.version != kBundleVersion)
+    if (manifest.format_version != kBundleFormatVersion)
     {
-        return BundleError{"unsupported bundle version"};
+        return BundleError{"unsupported bundle format version: " +
+                           std::to_string(manifest.format_version) +
+                           " (supported: " + std::to_string(kBundleFormatVersion) + ")"};
     }
     if (manifest.bytecode_hash.empty())
     {
