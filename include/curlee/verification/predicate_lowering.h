@@ -9,9 +9,19 @@
 #include <vector>
 #include <z3++.h>
 
+/**
+ * @file predicate_lowering.h
+ * @brief Lower parser predicates into Z3 expressions for verification.
+ */
+
 namespace curlee::verification
 {
 
+/**
+ * @brief Context used when lowering predicates to Z3 expressions.
+ *
+ * Holds temporary results and symbol maps for int and bool variables.
+ */
 struct LoweringContext
 {
     explicit LoweringContext(z3::context& context) : ctx(context) {}
@@ -23,8 +33,10 @@ struct LoweringContext
     std::unordered_map<std::string_view, z3::expr> bool_vars;
 };
 
+/** @brief Result of lowering: either a z3::expr or a diagnostic on error. */
 using LoweringResult = std::variant<z3::expr, curlee::diag::Diagnostic>;
 
+/** @brief Lower a parsed predicate into a Z3 expression using the given context. */
 [[nodiscard]] LoweringResult lower_predicate(const curlee::parser::Pred& pred,
                                              const LoweringContext& ctx);
 

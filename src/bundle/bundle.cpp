@@ -333,9 +333,9 @@ BundleResult read_bundle(const std::string& path)
     }
     if (manifest.format_version != kBundleFormatVersion)
     {
-        return BundleError{"unsupported bundle format version: " +
-                           std::to_string(manifest.format_version) +
-                           " (supported: " + std::to_string(kBundleFormatVersion) + ")"};
+        return BundleError{
+            "unsupported bundle format version: " + std::to_string(manifest.format_version) +
+            " (supported: " + std::to_string(kBundleFormatVersion) + ")"};
     }
     if (manifest.bytecode_hash.empty())
     {

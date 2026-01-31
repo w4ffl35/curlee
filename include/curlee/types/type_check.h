@@ -14,9 +14,15 @@ struct Expr;
 struct Program;
 } // namespace curlee::parser
 
+/**
+ * @file type_check.h
+ * @brief Type checking API and result types.
+ */
+
 namespace curlee::types
 {
 
+/** @brief Type information mapping expression ids to inferred types. */
 struct TypeInfo
 {
     std::unordered_map<std::size_t, Type> expr_types;
@@ -32,8 +38,10 @@ struct TypeInfo
     }
 };
 
+/** @brief Result of running type checking: either TypeInfo or a list of diagnostics. */
 using TypeCheckResult = std::variant<TypeInfo, std::vector<curlee::diag::Diagnostic>>;
 
+/** @brief Run type checking on the program, returning types or diagnostics. */
 [[nodiscard]] TypeCheckResult type_check(const curlee::parser::Program& program);
 
 } // namespace curlee::types

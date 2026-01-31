@@ -186,6 +186,43 @@ You can also run both debug + release presets:
 bash scripts/smoke.sh --both
 ```
 
+### Coverage (unit tests)
+
+To generate a coverage report from unit tests, Curlee provides a coverage preset + helper script.
+
+Dependencies (Ubuntu/Debian):
+
+```bash
+sudo apt-get update
+sudo apt-get install -y gcovr
+```
+
+Run:
+
+```bash
+bash scripts/coverage.sh
+```
+
+This will:
+
+- Configure/build/test with the `linux-debug-coverage` preset.
+- Generate an HTML report at `build/coverage/coverage.html`.
+- Fail the run if line coverage is below the threshold (default: 100%).
+
+Note: the gcovr report excludes `throw` and unreachable branches by default (so branch coverage isn't dominated by exception edges). You can opt back in with:
+
+```bash
+bash scripts/coverage.sh --include-throw-branches
+bash scripts/coverage.sh --include-unreachable-branches
+```
+
+Adjust threshold or disable failing:
+
+```bash
+bash scripts/coverage.sh --fail-under 95
+bash scripts/coverage.sh --no-fail
+```
+
 ---
 
 ## Quick start examples
@@ -235,5 +272,15 @@ MIT. See LICENSE.
 - Curlee is verification-first: unsupported constructs must produce clear errors (no guessing).
 - Keep changes small and test-driven.
 - Prefer golden tests for diagnostics and verification failures.
+
+### GitHub CLI: `gh pr edit` workaround
+
+In this repo, `gh pr edit` may fail due to a GraphQL error involving deprecated classic project cards.
+
+Workaround: patch the PR body via the REST API using:
+
+```bash
+scripts/gh_pr_patch_body.sh <pr-number> <body-file>
+```
 
 For agent guidance, see [.github/copilot-instructions.md](.github/copilot-instructions.md).

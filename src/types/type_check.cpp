@@ -33,6 +33,45 @@ using curlee::parser::UnsafeStmt;
 using curlee::parser::WhileStmt;
 using curlee::source::Span;
 
+static std::string join_path(const std::vector<std::string_view>& parts)
+{
+    std::string out;
+    for (std::size_t i = 0; i < parts.size(); ++i)
+    {
+        out += std::string(parts[i]);
+        if (i + 1 < parts.size())
+        {
+            out += '.';
+        }
+    }
+    return out;
+}
+
+static bool collect_member_chain(const Expr& expr, std::vector<std::string_view>& out)
+{
+    if (const auto* name = std::get_if<NameExpr>(&expr.node))
+    {
+        out.push_back(name->name);
+        return true;
+    }
+
+    if (const auto* mem = std::get_if<MemberExpr>(&expr.node))
+    {
+        if (mem->base == nullptr)
+        {
+            return false;
+        }
+        if (!collect_member_chain(*mem->base, out))
+        {
+            return false;
+        }
+        out.push_back(mem->member);
+        return true;
+    }
+
+    return false;
+}
+
 struct Scope
 {
     std::unordered_map<std::string_view, Type> vars;
@@ -43,6 +82,18 @@ class Checker
   public:
     [[nodiscard]] TypeCheckResult run(const curlee::parser::Program& program)
     {
+        imported_module_keys_.clear();
+        imported_module_aliases_.clear();
+        for (const auto& imp : program.imports)
+        {
+            const std::string key = join_path(imp.path);
+            imported_module_keys_.insert(key);
+            if (imp.alias.has_value())
+            {
+                imported_module_aliases_.emplace(*imp.alias, key);
+            }
+        }
+
         collect_structs_and_enums(program);
 
         // Builtins (compiler/runtime-provided).
@@ -87,6 +138,8 @@ class Checker
 
   private:
     std::unordered_map<std::string_view, FunctionType> functions_;
+    std::unordered_set<std::string> imported_module_keys_;
+    std::unordered_map<std::string_view, std::string> imported_module_aliases_;
     std::vector<Scope> scopes_;
     std::vector<Diagnostic> diags_;
     TypeInfo info_;
@@ -674,14 +727,58 @@ class Checker
             return Type{.kind = TypeKind::Enum, .name = callee_scoped->lhs};
         }
 
-        const auto* callee_name = std::get_if<NameExpr>(&e.callee->node);
-        if (callee_name == nullptr)
+        std::string_view callee_name;
+        if (const auto* callee_direct = std::get_if<NameExpr>(&e.callee->node);
+            callee_direct != nullptr)
+        {
+            callee_name = callee_direct->name;
+        }
+        else if (const auto* callee_member = std::get_if<MemberExpr>(&e.callee->node);
+                 callee_member != nullptr)
+        {
+            // Module-qualified call: either `alias.fn(...)` or `foo.bar.fn(...)`.
+            std::vector<std::string_view> parts;
+            if (!collect_member_chain(*e.callee, parts) || parts.size() < 2)
+            {
+                error_at(span, "only direct calls are supported (callee must be a name)");
+                return std::nullopt;
+            }
+
+            const std::string_view member = parts.back();
+            const std::vector<std::string_view> qualifier(parts.begin(), parts.end() - 1);
+
+            bool qualifier_ok = false;
+            if (qualifier.size() == 1)
+            {
+                if (imported_module_aliases_.contains(qualifier[0]))
+                {
+                    qualifier_ok = true;
+                }
+            }
+            if (!qualifier_ok)
+            {
+                const std::string key = join_path(qualifier);
+                if (imported_module_keys_.contains(key))
+                {
+                    qualifier_ok = true;
+                }
+            }
+
+            if (!qualifier_ok)
+            {
+                error_at(span, "unknown module qualifier in call: '" + join_path(qualifier) + "'");
+                return std::nullopt;
+            }
+
+            callee_name = member;
+        }
+        else
         {
             error_at(span, "only direct calls are supported (callee must be a name)");
             return std::nullopt;
         }
 
-        if (callee_name->name == "print")
+        if (callee_name == "print")
         {
             if (e.args.size() != 1)
             {
@@ -702,10 +799,10 @@ class Checker
             return Type{.kind = TypeKind::Unit};
         }
 
-        const auto it = functions_.find(callee_name->name);
+        const auto it = functions_.find(callee_name);
         if (it == functions_.end())
         {
-            error_at(span, "unknown function '" + std::string(callee_name->name) + "'");
+            error_at(span, "unknown function '" + std::string(callee_name) + "'");
             return std::nullopt;
         }
 
@@ -713,8 +810,8 @@ class Checker
         // Builtin placeholder signatures may not match; only user functions are checked here.
         if (e.args.size() != sig.params.size())
         {
-            error_at(span, "wrong number of arguments for call to '" +
-                               std::string(callee_name->name) + "'");
+            error_at(span,
+                     "wrong number of arguments for call to '" + std::string(callee_name) + "'");
             return std::nullopt;
         }
 
@@ -727,8 +824,8 @@ class Checker
             }
             if (*arg_t != sig.params[i])
             {
-                error_at(span, "argument type mismatch for call to '" +
-                                   std::string(callee_name->name) + "'");
+                error_at(span,
+                         "argument type mismatch for call to '" + std::string(callee_name) + "'");
             }
         }
 

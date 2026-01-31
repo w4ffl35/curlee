@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace curlee::compiler
 {
@@ -34,6 +35,45 @@ using curlee::vm::Chunk;
 using curlee::vm::OpCode;
 using curlee::vm::Value;
 
+static std::string join_path(const std::vector<std::string_view>& parts)
+{
+    std::string out;
+    for (std::size_t i = 0; i < parts.size(); ++i)
+    {
+        out += std::string(parts[i]);
+        if (i + 1 < parts.size())
+        {
+            out += '.';
+        }
+    }
+    return out;
+}
+
+static bool collect_member_chain(const Expr& expr, std::vector<std::string_view>& out)
+{
+    if (const auto* name = std::get_if<NameExpr>(&expr.node))
+    {
+        out.push_back(name->name);
+        return true;
+    }
+
+    if (const auto* mem = std::get_if<MemberExpr>(&expr.node))
+    {
+        if (mem->base == nullptr)
+        {
+            return false;
+        }
+        if (!collect_member_chain(*mem->base, out))
+        {
+            return false;
+        }
+        out.push_back(mem->member);
+        return true;
+    }
+
+    return false;
+}
+
 Diagnostic error_at(Span span, std::string message)
 {
     Diagnostic d;
@@ -48,6 +88,30 @@ class Emitter
   public:
     EmitResult run(const curlee::parser::Program& program)
     {
+        imported_module_keys_.clear();
+        imported_module_aliases_.clear();
+        for (const auto& imp : program.imports)
+        {
+            const std::string key = join_path(imp.path);
+            imported_module_keys_.insert(key);
+            if (imp.alias.has_value())
+            {
+                imported_module_aliases_.emplace(*imp.alias, key);
+            }
+        }
+
+        functions_.clear();
+        for (const auto& f : program.functions)
+        {
+            if (functions_.contains(f.name))
+            {
+                diags_.push_back(error_at(f.span, "duplicate function declaration '" +
+                                                      std::string(f.name) + "'"));
+                return diags_;
+            }
+            functions_.emplace(f.name, &f);
+        }
+
         for (const auto& f : program.functions)
         {
             if (f.name == "print")
@@ -116,6 +180,11 @@ class Emitter
     std::uint16_t next_local_base_ = 0;
     bool current_is_main_ = false;
 
+    std::unordered_map<std::string_view, const Function*> functions_;
+
+    std::unordered_set<std::string> imported_module_keys_;
+    std::unordered_map<std::string_view, std::string> imported_module_aliases_;
+
     std::unordered_map<std::string_view, std::size_t> function_addrs_;
     std::unordered_map<std::string_view, std::vector<std::size_t>> pending_calls_;
 
@@ -158,10 +227,40 @@ class Emitter
         locals_.clear();
         local_base_ = next_local_base_;
 
-        if (!fn.params.empty())
+        if (is_main && !fn.params.empty())
         {
-            diags_.push_back(error_at(fn.span, "function parameters not supported in emitter yet"));
+            diags_.push_back(error_at(fn.span, "main cannot take parameters in runnable code"));
             return;
+        }
+
+        // Parameters live in the first slots of this function's locals range.
+        for (std::size_t i = 0; i < fn.params.size(); ++i)
+        {
+            const auto& p = fn.params[i];
+            if (p.type.name != "Int" && p.type.name != "Bool")
+            {
+                diags_.push_back(
+                    error_at(p.type.span, "parameter type not supported in runnable code: '" +
+                                              std::string(p.type.name) + "'"));
+                return;
+            }
+
+            const auto slot = static_cast<std::uint16_t>(local_base_ + i);
+            locals_.emplace(p.name, slot);
+        }
+
+        // Callee prologue: pop call arguments into parameter locals.
+        // Call sites evaluate args left-to-right, so we pop into params right-to-left.
+        for (std::size_t i = fn.params.size(); i > 0; --i)
+        {
+            const auto& p = fn.params[i - 1];
+            const auto it = locals_.find(p.name);
+            if (it == locals_.end())
+            {
+                diags_.push_back(error_at(p.span, "internal error: missing parameter local slot"));
+                return;
+            }
+            chunk_.emit_local(OpCode::StoreLocal, it->second, p.span);
         }
 
         for (const auto& stmt : fn.body.stmts)
@@ -586,12 +685,7 @@ class Emitter
             return;
         }
 
-        if (!expr.args.empty())
-        {
-            diags_.push_back(error_at(span, "call arguments not supported in emitter yet"));
-            return;
-        }
-
+        std::string_view callee_fn_name;
         if (const auto* callee_member = std::get_if<MemberExpr>(&expr.callee->node);
             callee_member != nullptr && callee_member->base != nullptr)
         {
@@ -604,18 +698,83 @@ class Emitter
                 return;
             }
 
-            diags_.push_back(error_at(span, "only name calls are supported in emitter yet"));
-            return;
-        }
+            // Module-qualified call: either `alias.fn(...)` or `foo.bar.fn(...)`.
+            std::vector<std::string_view> parts;
+            if (!collect_member_chain(*expr.callee, parts) || parts.size() < 2)
+            {
+                diags_.push_back(error_at(span, "only name calls and module-qualified calls are "
+                                                "supported in runnable code"));
+                return;
+            }
 
-        const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
-        if (callee_name == nullptr)
+            const std::string_view member = parts.back();
+            const std::vector<std::string_view> qualifier(parts.begin(), parts.end() - 1);
+
+            bool qualifier_ok = false;
+            if (qualifier.size() == 1)
+            {
+                if (imported_module_aliases_.contains(qualifier[0]))
+                {
+                    qualifier_ok = true;
+                }
+            }
+            if (!qualifier_ok)
+            {
+                const std::string key = join_path(qualifier);
+                if (imported_module_keys_.contains(key))
+                {
+                    qualifier_ok = true;
+                }
+            }
+
+            if (!qualifier_ok)
+            {
+                diags_.push_back(error_at(span, "unknown module qualifier in runnable call: '" +
+                                                    join_path(qualifier) + "'"));
+                return;
+            }
+
+            callee_fn_name = member;
+        }
+        else
         {
-            diags_.push_back(error_at(span, "only name calls are supported in emitter yet"));
+            const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            if (callee_name == nullptr)
+            {
+                diags_.push_back(error_at(span, "only name calls and module-qualified calls are "
+                                                "supported in runnable code"));
+                return;
+            }
+            callee_fn_name = callee_name->name;
+        }
+
+        auto fn_it = functions_.find(callee_fn_name);
+        if (fn_it == functions_.end() || fn_it->second == nullptr)
+        {
+            diags_.push_back(
+                error_at(span, "unknown function '" + std::string(callee_fn_name) + "'"));
             return;
         }
 
-        emit_call(callee_name->name, span);
+        const auto* callee_decl = fn_it->second;
+        if (expr.args.size() != callee_decl->params.size())
+        {
+            diags_.push_back(
+                error_at(span, "call to '" + std::string(callee_fn_name) + "' expects " +
+                                   std::to_string(callee_decl->params.size()) + " argument(s)"));
+            return;
+        }
+
+        for (const auto& arg : expr.args)
+        {
+            emit_expr(arg);
+            if (!diags_.empty())
+            {
+                return;
+            }
+        }
+
+        emit_call(callee_fn_name, span);
     }
 
     void emit_expr_node(const curlee::parser::GroupExpr& expr, Span) { emit_expr(*expr.inner); }

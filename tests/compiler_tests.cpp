@@ -172,6 +172,75 @@ int main()
     }
 
     {
+        const std::string source =
+            "fn inc(x: Int) -> Int { return x + 1; } fn main() -> Int { return inc(41); }";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(42)))
+        {
+            fail("expected inc(41) to equal 42");
+        }
+    }
+
+    {
+        const std::string source = "fn add(x: Int, y: Int) -> Int { return x + y; } fn main() -> "
+                                   "Int { return add(1, 2); }";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(3)))
+        {
+            fail("expected add(1,2) to equal 3");
+        }
+    }
+
+    {
+        const std::string source =
+            "fn negate(x: Bool) -> Bool { return !x; } fn main() -> Bool { return negate(false); }";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::bool_v(true)))
+        {
+            fail("expected negate(false) to equal true");
+        }
+    }
+
+    {
+        const std::string source =
+            "fn f(x: String) -> Int { return 1; } fn main() -> Int { return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for unsupported param type case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for unsupported param type case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected bytecode emission to fail for unsupported parameter types");
+        }
+
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("parameter type not supported in runnable code") ==
+                std::string::npos)
+        {
+            fail("expected diagnostic for unsupported parameter type in runnable code");
+        }
+    }
+
+    {
         const std::string source = "fn main() -> Int { return -1; }";
         const auto chunk = compile_to_chunk(source);
         const auto ops = decode_ops(chunk);

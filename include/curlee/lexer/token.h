@@ -3,9 +3,15 @@
 #include <curlee/source/span.h>
 #include <string_view>
 
+/**
+ * @file token.h
+ * @brief Token kinds and token representation produced by the lexer.
+ */
+
 namespace curlee::lexer
 {
 
+/** @brief Kinds of tokens recognized by the lexer. */
 enum class TokenKind
 {
     Eof,
@@ -71,6 +77,7 @@ enum class TokenKind
     OrOr,
 };
 
+/** @brief Representation of a token with kind, lexeme and source span. */
 struct Token
 {
     TokenKind kind = TokenKind::Eof;
@@ -78,6 +85,7 @@ struct Token
     curlee::source::Span span;
 };
 
+/** @brief Stringify a TokenKind for diagnostics and tests. */
 [[nodiscard]] constexpr std::string_view to_string(TokenKind kind)
 {
     switch (kind)

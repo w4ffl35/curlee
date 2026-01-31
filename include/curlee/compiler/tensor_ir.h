@@ -4,24 +4,33 @@
 #include <string>
 #include <vector>
 
+/**
+ * @file tensor_ir.h
+ * @brief Minimal IR for tensor computation used by compiler tests.
+ */
+
 namespace curlee::compiler::tensor_ir
 {
 
+/** @brief Element dtype for tensors (MVP: only I32 supported). */
 enum class DType
 {
     I32,
 };
 
+/** @brief Shape descriptor for tensors. */
 struct Shape
 {
     std::vector<std::int64_t> dims;
 };
 
+/** @brief Opaque handle to a value produced within a Program. */
 struct ValueId
 {
     std::uint32_t id;
 };
 
+/** @brief A simple tensor program builder. */
 class Program
 {
   public:

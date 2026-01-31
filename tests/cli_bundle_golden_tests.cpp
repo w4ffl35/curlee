@@ -53,10 +53,8 @@ static int run_cli(const std::vector<std::string>& argv_storage, std::string& ou
     return rc;
 }
 
-static void run_golden_case(const fs::path& stdout_golden,
-                            const fs::path& stderr_golden,
-                            const std::vector<std::string>& argv,
-                            bool expect_success)
+static void run_golden_case(const fs::path& stdout_golden, const fs::path& stderr_golden,
+                            const std::vector<std::string>& argv, bool expect_success)
 {
     std::string out;
     std::string err;
@@ -105,16 +103,14 @@ int main(int argc, char** argv)
         const fs::path bundle = golden_dir / "current_v1.bundle";
         run_golden_case(golden_dir / "current_v1.stdout.golden",
                         golden_dir / "current_v1.stderr.golden",
-                        {"curlee", "bundle", "info", bundle.string()},
-                        true);
+                        {"curlee", "bundle", "info", bundle.string()}, true);
     }
 
     {
         const fs::path bundle = golden_dir / "future_v2.bundle";
         run_golden_case(golden_dir / "future_v2.stdout.golden",
                         golden_dir / "future_v2.stderr.golden",
-                        {"curlee", "bundle", "verify", bundle.string()},
-                        false);
+                        {"curlee", "bundle", "verify", bundle.string()}, false);
     }
 
     std::cout << "OK\n";
