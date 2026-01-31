@@ -116,6 +116,19 @@ int main()
         expect_contains(err, "error: expected capability name after --cap", "stderr");
     }
 
+    // run: --capability alias
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "run", "--capability", "io:stdout", "--fuel", "0"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for missing run file (with --capability)");
+        }
+        expect_contains(err, "error: expected <file.curlee>", "stderr");
+    }
+
     // run: empty --cap=
     {
         std::string out;
@@ -160,6 +173,18 @@ int main()
         if (rc != 2)
         {
             fail("expected usage exit code for invalid --fuel=");
+        }
+        expect_contains(err, "error: expected non-negative integer for --fuel=", "stderr");
+    }
+
+    // run: empty --fuel=
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--fuel=", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for empty --fuel=");
         }
         expect_contains(err, "error: expected non-negative integer for --fuel=", "stderr");
     }
@@ -211,6 +236,19 @@ int main()
             fail("expected usage exit code for multiple <file.curlee>");
         }
         expect_contains(err, "error: expected a single <file.curlee>", "stderr");
+    }
+
+    // run: bundle load failure path
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "run", "--bundle", "definitely_missing.bundle", "x.curlee"}, out, err);
+        if (rc != 1)
+        {
+            fail("expected error exit code for failed bundle load");
+        }
+        expect_contains(err, "error: failed to load bundle: failed to open bundle", "stderr");
     }
 
     // fmt: wrong args
