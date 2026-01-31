@@ -236,4 +236,14 @@ MIT. See LICENSE.
 - Keep changes small and test-driven.
 - Prefer golden tests for diagnostics and verification failures.
 
+### GitHub CLI: `gh pr edit` workaround
+
+In this repo, `gh pr edit` may fail due to a GraphQL error involving deprecated classic project cards.
+
+Workaround: patch the PR body via the REST API using:
+
+```bash
+scripts/gh_pr_patch_body.sh <pr-number> <body-file>
+```
+
 For agent guidance, see [.github/copilot-instructions.md](.github/copilot-instructions.md).
