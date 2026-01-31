@@ -182,6 +182,13 @@ target_include_directories(curlee_diag_render_tests PRIVATE include)
 
 add_test(NAME curlee_diag_render_tests COMMAND curlee_diag_render_tests)
 
+add_executable(curlee_header_smoke_tests
+  tests/header_smoke_tests.cpp
+)
+target_include_directories(curlee_header_smoke_tests PRIVATE include)
+
+add_test(NAME curlee_header_smoke_tests COMMAND curlee_header_smoke_tests)
+
 add_executable(curlee_cli_diagnostics_golden_tests
   tests/cli_diagnostics_golden_tests.cpp
   src/bundle/bundle.cpp
