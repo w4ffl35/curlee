@@ -23,6 +23,25 @@
             }
         },
         {
+            "name": "linux-debug-coverage",
+            "displayName": "Linux Debug (Coverage)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/linux-debug-coverage",
+            "installDir": "${sourceDir}/build/linux-debug-coverage/install",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "CMAKE_CXX_FLAGS": "-O0 -g --coverage",
+                "CMAKE_EXE_LINKER_FLAGS": "--coverage",
+                "CMAKE_SHARED_LINKER_FLAGS": "--coverage"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            }
+        },
+        {
             "name": "linux-release",
             "displayName": "Linux Release",
             "generator": "Ninja",
@@ -45,6 +64,10 @@
             "configurePreset": "linux-debug"
         },
         {
+            "name": "linux-debug-coverage",
+            "configurePreset": "linux-debug-coverage"
+        },
+        {
             "name": "linux-release",
             "configurePreset": "linux-release"
         }
@@ -53,6 +76,10 @@
         {
             "name": "linux-debug",
             "configurePreset": "linux-debug"
+        },
+        {
+            "name": "linux-debug-coverage",
+            "configurePreset": "linux-debug-coverage"
         },
         {
             "name": "linux-release",

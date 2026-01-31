@@ -186,6 +186,36 @@ You can also run both debug + release presets:
 bash scripts/smoke.sh --both
 ```
 
+### Coverage (unit tests)
+
+To generate a coverage report from unit tests, Curlee provides a coverage preset + helper script.
+
+Dependencies (Ubuntu/Debian):
+
+```bash
+sudo apt-get update
+sudo apt-get install -y gcovr
+```
+
+Run:
+
+```bash
+bash scripts/coverage.sh
+```
+
+This will:
+
+- Configure/build/test with the `linux-debug-coverage` preset.
+- Generate an HTML report at `build/coverage/coverage.html`.
+- Fail the run if line coverage is below the threshold (default: 100%).
+
+Adjust threshold or disable failing:
+
+```bash
+bash scripts/coverage.sh --fail-under 95
+bash scripts/coverage.sh --no-fail
+```
+
 ---
 
 ## Quick start examples
