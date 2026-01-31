@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <charconv>
 #include <cstdlib>
 #include <curlee/bundle/bundle.h>
 #include <curlee/cli/cli.h>
@@ -28,9 +29,23 @@ namespace curlee::cli
 namespace
 {
 
+#ifndef CURLEE_VERSION
+#define CURLEE_VERSION "0.0.0"
+#endif
+
+#ifndef CURLEE_GIT_SHA
+#define CURLEE_GIT_SHA ""
+#endif
+
+#ifndef CURLEE_BUILD_TYPE
+#define CURLEE_BUILD_TYPE "Unknown"
+#endif
+
 constexpr int kExitOk = 0;
 constexpr int kExitError = 1;
 constexpr int kExitUsage = 2;
+
+constexpr std::size_t kDefaultFuel = 10000;
 
 const curlee::runtime::Capabilities& empty_caps()
 {
@@ -43,11 +58,13 @@ void print_usage(std::ostream& out)
     out << "curlee: verification-first language (early scaffold)\n\n";
     out << "usage:\n";
     out << "  curlee --help\n";
+    out << "  curlee --version\n";
     out << "  curlee <file.curlee>\n";
     out << "  curlee lex <file.curlee>\n";
     out << "  curlee parse <file.curlee>\n";
     out << "  curlee check <file.curlee>\n";
-    out << "  curlee run [--bundle <file.bundle>] [--cap <capability>]... <file.curlee>\n";
+    out << "  curlee run [--fuel <n>] [--bundle <file.bundle>] [--cap <capability>]... "
+           "<file.curlee>\n";
     out << "  curlee fmt [--check] <file>\n";
     out << "  curlee bundle verify <file.bundle>\n";
     out << "  curlee bundle info <file.bundle>\n";
@@ -61,6 +78,20 @@ bool ends_with(std::string_view s, std::string_view suffix)
 bool is_help_flag(std::string_view arg)
 {
     return arg == "--help" || arg == "-h" || arg == "help";
+}
+
+bool is_version_flag(std::string_view arg)
+{
+    return arg == "--version" || arg == "version";
+}
+
+void print_version(std::ostream& out)
+{
+    const std::string_view sha = CURLEE_GIT_SHA;
+    out << "curlee " << CURLEE_VERSION;
+    out << " sha=" << (sha.empty() ? "unknown" : sha);
+    out << " build=" << CURLEE_BUILD_TYPE;
+    out << "\n";
 }
 
 std::string join_csv(const std::vector<std::string>& xs)
@@ -95,7 +126,7 @@ std::string join_import_pins(const std::vector<curlee::bundle::ImportPin>& pins)
 
 int cmd_read_only(std::string_view cmd, const std::string& path,
                   const curlee::runtime::Capabilities& granted_caps,
-                  const curlee::bundle::Manifest* bundle_manifest)
+                  const curlee::bundle::Manifest* bundle_manifest, std::size_t fuel)
 {
     auto loaded = source::load_source_file(path);
     if (auto* err = std::get_if<source::LoadError>(&loaded))
@@ -254,9 +285,8 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                         d.severity = diag::Severity::Error;
                         d.message = "import not pinned: '" + import_name + "'";
                         d.span = imp.span;
-                        d.notes.push_back(diag::Related{.message = "expected pin '" +
-                                                                   import_name + ":" +
-                                                                   actual_hash + "'",
+                        d.notes.push_back(diag::Related{.message = "expected pin '" + import_name +
+                                                                   ":" + actual_hash + "'",
                                                         .span = std::nullopt});
                         return d;
                     }
@@ -292,9 +322,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             d.message = "import not found: '" + import_name + "'";
             d.span = imp.span;
 
-            fs::path expected_path = roots.empty()
-                                        ? fs::path{}
-                                        : roots.front();
+            fs::path expected_path = roots.empty() ? fs::path{} : roots.front();
             for (const auto& part : imp.path)
             {
                 expected_path /= std::string(part);
@@ -302,10 +330,9 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             expected_path += ".curlee";
 
             const std::string err_msg = last_err.has_value() ? *last_err : "failed to open file";
-            d.notes.push_back(diag::Related{.message = "expected module at " +
-                                                       expected_path.string() + " (" + err_msg +
-                                                       ")",
-                                            .span = std::nullopt});
+            d.notes.push_back(diag::Related{
+                .message = "expected module at " + expected_path.string() + " (" + err_msg + ")",
+                .span = std::nullopt});
             return d;
         };
 
@@ -716,7 +743,8 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                         .span = std::nullopt,
                     });
                     d.notes.push_back(diag::Related{
-                        .message = "grant it with: curlee run --cap " + cap + " --bundle <file.bundle> <file.curlee>",
+                        .message = "grant it with: curlee run --cap " + cap +
+                                   " --bundle <file.bundle> <file.curlee>",
                         .span = std::nullopt,
                     });
                     std::cerr << diag::render(d, file);
@@ -726,7 +754,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             }
         }
 
-        const auto result = machine.run(chunk, 10000, effective_caps);
+        const auto result = machine.run(chunk, fuel, effective_caps);
         if (!result.ok)
         {
             diag::Diagnostic d;
@@ -743,6 +771,19 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
 
     std::cerr << "error: unknown command: " << cmd << "\n";
     return kExitUsage;
+}
+
+std::optional<std::size_t> parse_size(std::string_view s)
+{
+    std::size_t out = 0;
+    const char* begin = s.data();
+    const char* end = s.data() + s.size();
+    const auto res = std::from_chars(begin, end, out);
+    if (res.ec != std::errc{} || res.ptr != end)
+    {
+        return std::nullopt;
+    }
+    return out;
 }
 
 int cmd_fmt(const std::string& path, bool check)
@@ -792,11 +833,17 @@ int run(int argc, char** argv)
         return kExitOk;
     }
 
+    if (is_version_flag(first))
+    {
+        print_version(std::cout);
+        return kExitOk;
+    }
+
     // Python-style shorthand: `curlee path/to/file.curlee` is the same as `curlee run
     // path/to/file.curlee`.
     if (argc == 2 && !first.starts_with('-') && ends_with(first, ".curlee"))
     {
-        return cmd_read_only("run", std::string(first), empty_caps(), nullptr);
+        return cmd_read_only("run", std::string(first), empty_caps(), nullptr, kDefaultFuel);
     }
 
     const std::string_view cmd = argv[1];
@@ -874,6 +921,7 @@ int run(int argc, char** argv)
         std::optional<std::string> bundle_path;
         std::optional<curlee::bundle::Bundle> bundle;
         std::optional<std::string> path;
+        std::size_t fuel = kDefaultFuel;
 
         for (std::size_t i = 0; i < args.size();)
         {
@@ -921,6 +969,41 @@ int run(int argc, char** argv)
                 }
                 bundle_path = std::string(args[i + 1]);
                 i += 2;
+                continue;
+            }
+
+            if (a == "--fuel")
+            {
+                if (i + 1 >= args.size())
+                {
+                    std::cerr << "error: expected integer after --fuel\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                const auto parsed = parse_size(args[i + 1]);
+                if (!parsed.has_value())
+                {
+                    std::cerr << "error: expected non-negative integer for --fuel\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                fuel = *parsed;
+                i += 2;
+                continue;
+            }
+
+            if (a.starts_with("--fuel="))
+            {
+                const auto raw = a.substr(std::string_view("--fuel=").size());
+                const auto parsed = parse_size(raw);
+                if (!parsed.has_value())
+                {
+                    std::cerr << "error: expected non-negative integer for --fuel=\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                fuel = *parsed;
+                ++i;
                 continue;
             }
 
@@ -980,9 +1063,8 @@ int run(int argc, char** argv)
             bundle = std::get<curlee::bundle::Bundle>(loaded);
         }
 
-        const curlee::bundle::Manifest* manifest =
-            bundle.has_value() ? &bundle->manifest : nullptr;
-        return cmd_read_only(cmd, *path, caps, manifest);
+        const curlee::bundle::Manifest* manifest = bundle.has_value() ? &bundle->manifest : nullptr;
+        return cmd_read_only(cmd, *path, caps, manifest, fuel);
     }
 
     if (argc != 3)
@@ -993,7 +1075,7 @@ int run(int argc, char** argv)
     }
 
     const std::string path = argv[2];
-    return cmd_read_only(cmd, path, empty_caps(), nullptr);
+    return cmd_read_only(cmd, path, empty_caps(), nullptr, kDefaultFuel);
 }
 
 } // namespace curlee::cli

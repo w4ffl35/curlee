@@ -1,6 +1,37 @@
 cmake_minimum_required(VERSION 3.23)
 
-project(curlee LANGUAGES CXX)
+project(curlee VERSION 0.1.0 LANGUAGES CXX)
+
+# Build identifier info for `curlee --version`.
+set(CURLEE_SEMVER "${PROJECT_VERSION}")
+
+execute_process(
+  COMMAND git rev-parse --short=8 HEAD
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  OUTPUT_VARIABLE CURLEE_GIT_SHA
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET
+  RESULT_VARIABLE CURLEE_GIT_SHA_RESULT
+)
+if(NOT CURLEE_GIT_SHA_RESULT EQUAL 0)
+  set(CURLEE_GIT_SHA "")
+endif()
+
+if(CMAKE_CONFIGURATION_TYPES)
+  set(CURLEE_BUILD_TYPE_DEF "$<CONFIG>")
+elseif(CMAKE_BUILD_TYPE)
+  set(CURLEE_BUILD_TYPE_DEF "${CMAKE_BUILD_TYPE}")
+else()
+  set(CURLEE_BUILD_TYPE_DEF "Unknown")
+endif()
+
+function(curlee_add_build_info target)
+  target_compile_definitions(${target} PRIVATE
+    CURLEE_VERSION=\"${CURLEE_SEMVER}\"
+    CURLEE_GIT_SHA=\"${CURLEE_GIT_SHA}\"
+    CURLEE_BUILD_TYPE=\"${CURLEE_BUILD_TYPE_DEF}\"
+  )
+endfunction()
 
 # Curlee is Linux-first for now.
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -78,6 +109,7 @@ add_executable(curlee
 
 target_include_directories(curlee PRIVATE include)
 target_link_libraries(curlee PRIVATE Z3::Z3)
+curlee_add_build_info(curlee)
 
 add_executable(curlee_lsp
   src/lsp/lsp.cpp
@@ -141,6 +173,7 @@ add_executable(curlee_cli_diagnostics_golden_tests
 )
 target_include_directories(curlee_cli_diagnostics_golden_tests PRIVATE include)
 target_link_libraries(curlee_cli_diagnostics_golden_tests PRIVATE Z3::Z3)
+curlee_add_build_info(curlee_cli_diagnostics_golden_tests)
 
 add_executable(curlee_python_runner_fake_error
   tests/python_runner_fake_error.cpp
@@ -298,6 +331,7 @@ add_executable(curlee_cli_fmt_tests
 )
 target_include_directories(curlee_cli_fmt_tests PRIVATE include)
 target_link_libraries(curlee_cli_fmt_tests PRIVATE Z3::Z3)
+curlee_add_build_info(curlee_cli_fmt_tests)
 
 add_test(NAME curlee_cli_fmt_tests COMMAND curlee_cli_fmt_tests)
 
@@ -320,8 +354,55 @@ add_executable(curlee_cli_bundle_tests
 )
 target_include_directories(curlee_cli_bundle_tests PRIVATE include)
 target_link_libraries(curlee_cli_bundle_tests PRIVATE Z3::Z3)
+curlee_add_build_info(curlee_cli_bundle_tests)
+
+add_executable(curlee_cli_version_tests
+  tests/cli_version_tests.cpp
+  src/bundle/bundle.cpp
+  src/cli/cli.cpp
+  src/compiler/emitter.cpp
+  src/diag/render.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+  src/resolver/resolver.cpp
+  src/source/line_map.cpp
+  src/source/source_file.cpp
+  src/types/type_check.cpp
+  src/verification/checker.cpp
+  src/verification/predicate_lowering.cpp
+  src/verification/solver.cpp
+  src/vm/vm.cpp
+)
+target_include_directories(curlee_cli_version_tests PRIVATE include)
+target_link_libraries(curlee_cli_version_tests PRIVATE Z3::Z3)
+curlee_add_build_info(curlee_cli_version_tests)
+
+add_test(NAME curlee_cli_version_tests COMMAND curlee_cli_version_tests)
 
 add_test(NAME curlee_cli_bundle_tests COMMAND curlee_cli_bundle_tests)
+
+add_executable(curlee_cli_fuel_tests
+  tests/cli_fuel_tests.cpp
+  src/bundle/bundle.cpp
+  src/cli/cli.cpp
+  src/compiler/emitter.cpp
+  src/diag/render.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+  src/resolver/resolver.cpp
+  src/source/line_map.cpp
+  src/source/source_file.cpp
+  src/types/type_check.cpp
+  src/verification/checker.cpp
+  src/verification/predicate_lowering.cpp
+  src/verification/solver.cpp
+  src/vm/vm.cpp
+)
+target_include_directories(curlee_cli_fuel_tests PRIVATE include)
+target_link_libraries(curlee_cli_fuel_tests PRIVATE Z3::Z3)
+curlee_add_build_info(curlee_cli_fuel_tests)
+
+add_test(NAME curlee_cli_fuel_tests COMMAND curlee_cli_fuel_tests)
 
 add_executable(curlee_vm_tests
   tests/vm_tests.cpp
