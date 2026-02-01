@@ -242,6 +242,15 @@ add_executable(curlee_bwrap_fake
   tests/bwrap_fake.cpp
 )
 
+add_executable(curlee_fake_exes_tests
+  tests/fake_exes_tests.cpp
+)
+
+add_test(
+  NAME curlee_fake_exes_tests
+  COMMAND curlee_fake_exes_tests $<TARGET_FILE:curlee_bwrap_fake> $<TARGET_FILE:curlee_python_runner_fake_hang> $<TARGET_FILE:curlee_python_runner_fake_spam>
+)
+
 add_test(
   NAME curlee_cli_diagnostics_golden_tests
   COMMAND curlee_cli_diagnostics_golden_tests ${CMAKE_SOURCE_DIR}/tests/cli_diagnostics $<TARGET_FILE:curlee_python_runner_fake_error> $<TARGET_FILE:curlee_python_runner_fake_hang> $<TARGET_FILE:curlee_python_runner_fake_spam> $<TARGET_FILE:curlee_python_runner_fake_env_check> $<TARGET_FILE:curlee_python_runner_fake_sandbox_required> $<TARGET_FILE:curlee_bwrap_fake>
