@@ -241,6 +241,8 @@ add_executable(curlee_python_runner_fake_sandbox_required
 add_executable(curlee_bwrap_fake
   tests/bwrap_fake.cpp
 )
+add_test(NAME curlee_bwrap_fake_smoke COMMAND $<TARGET_FILE:curlee_bwrap_fake>)
+set_tests_properties(curlee_bwrap_fake_smoke PROPERTIES WILL_FAIL TRUE)
 
 add_test(
   NAME curlee_cli_diagnostics_golden_tests
