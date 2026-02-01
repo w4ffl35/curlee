@@ -47,6 +47,10 @@ class Program
 
     const std::vector<Op>& ops() const { return ops_; }
 
+    // Test-only escape hatch: allow constructing malformed programs to exercise
+    // backend/validator error paths deterministically.
+    void unsafe_push_op_for_tests(Op op) { ops_.push_back(std::move(op)); }
+
     std::string dump() const;
 
   private:

@@ -253,5 +253,93 @@ int main()
         }
     }
 
+    // CpuBackend::add(): underflow-side overflow.
+    {
+        CpuBackend backend;
+
+        Tensor a;
+        a.dtype = DType::I32;
+        a.shape = Shape{{1}};
+        a.i32 = {std::numeric_limits<std::int32_t>::min()};
+
+        Tensor b;
+        b.dtype = DType::I32;
+        b.shape = Shape{{1}};
+        b.i32 = {-1};
+
+        const auto res = backend.add(a, b);
+        const auto* err = std::get_if<ExecError>(&res);
+        if (err == nullptr)
+        {
+            fail("expected error but got success");
+        }
+        if (err->message != "tensor backend: add overflow")
+        {
+            fail("unexpected error: " + err->message);
+        }
+    }
+
+    // execute(): malformed op inputs and unknown ops.
+    {
+        CpuBackend backend;
+        Program p;
+
+        // add with wrong arity.
+        p.unsafe_push_op_for_tests(Program::Op{"add", DType::I32, Shape{{1}}, {ValueId{0}}});
+        auto res = execute(p, ValueId{0}, backend);
+        auto* err = std::get_if<ExecError>(&res);
+        if (err == nullptr || err->message != "tensor backend: add expects 2 inputs")
+        {
+            fail("expected add expects 2 inputs error");
+        }
+    }
+
+    {
+        CpuBackend backend;
+        Program p;
+
+        // add uses forward references (values is still empty when i == 0).
+        p.unsafe_push_op_for_tests(
+            Program::Op{"add", DType::I32, Shape{{1}}, {ValueId{0}, ValueId{0}}});
+        auto res = execute(p, ValueId{0}, backend);
+        auto* err = std::get_if<ExecError>(&res);
+        if (err == nullptr || err->message != "tensor backend: op uses forward reference")
+        {
+            fail("expected forward reference error");
+        }
+    }
+
+    {
+        CpuBackend backend;
+        Program p;
+
+        // Forward reference: lhs ok, rhs invalid (exercises rhs side of the ||).
+        const auto a = p.zeros(Shape{{1}}, DType::I32);
+        (void)a;
+        p.unsafe_push_op_for_tests(
+            Program::Op{"add", DType::I32, Shape{{1}}, {ValueId{0}, ValueId{1}}});
+
+        auto res = execute(p, ValueId{1}, backend);
+        auto* err = std::get_if<ExecError>(&res);
+        if (err == nullptr || err->message != "tensor backend: op uses forward reference")
+        {
+            fail("expected forward reference error (rhs invalid)");
+        }
+    }
+
+    {
+        CpuBackend backend;
+        Program p;
+
+        // Unknown op name.
+        p.unsafe_push_op_for_tests(Program::Op{"wat", DType::I32, Shape{{1}}, {}});
+        auto res = execute(p, ValueId{0}, backend);
+        auto* err = std::get_if<ExecError>(&res);
+        if (err == nullptr || err->message != "tensor backend: unknown op 'wat'")
+        {
+            fail("expected unknown op error");
+        }
+    }
+
     return 0;
 }
