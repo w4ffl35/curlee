@@ -12,6 +12,47 @@ static void fail(const std::string& msg)
     std::exit(1);
 }
 
+static curlee::parser::Program parse_program_or_fail(std::string_view source,
+                                                     const std::string& what)
+{
+    const auto lexed = curlee::lexer::lex(source);
+    if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+    {
+        fail("expected lexing to succeed for " + what);
+    }
+    const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+    auto parsed = curlee::parser::parse(tokens);
+    if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+    {
+        fail("expected parsing to succeed for " + what);
+    }
+    return std::get<curlee::parser::Program>(std::move(parsed));
+}
+
+static std::vector<curlee::diag::Diagnostic> type_check_should_fail(std::string_view source,
+                                                                    const std::string& what)
+{
+    const auto program = parse_program_or_fail(source, what);
+    const auto typed = curlee::types::type_check(program);
+    if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(typed))
+    {
+        fail("expected type checking to fail for " + what);
+    }
+    return std::get<std::vector<curlee::diag::Diagnostic>>(typed);
+}
+
+static curlee::types::TypeInfo type_check_should_succeed(std::string_view source,
+                                                         const std::string& what)
+{
+    const auto program = parse_program_or_fail(source, what);
+    const auto typed = curlee::types::type_check(program);
+    if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(typed))
+    {
+        fail("expected type checking to succeed for " + what);
+    }
+    return std::get<curlee::types::TypeInfo>(typed);
+}
+
 int main()
 {
     using namespace curlee::types;
@@ -537,6 +578,268 @@ int main()
         {
             fail("expected enum constructor payload type diagnostic");
         }
+    }
+
+    {
+        // Function signature: missing return type annotation should be rejected.
+        const std::string source = "fn main() { return 0; }";
+
+        const auto diags = type_check_should_fail(source, "missing return type annotation test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("missing return type annotation") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected missing return type annotation diagnostic");
+        }
+    }
+
+    {
+        // Unknown type names should be rejected with a precise span.
+        const std::string source = "fn main() -> Int { let x: Nope = 0; return 0; }";
+
+        const auto diags = type_check_should_fail(source, "unknown type test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("unknown type") != std::string::npos && d.span.has_value())
+            {
+                const auto span_text =
+                    source.substr(d.span->start, static_cast<std::size_t>(d.span->length()));
+                if (span_text == "Nope")
+                {
+                    saw = true;
+                }
+            }
+        }
+        if (!saw)
+        {
+            fail("expected unknown type diagnostic on span `Nope`");
+        }
+    }
+
+    {
+        // Return without value in non-Unit function should be rejected.
+        const std::string source = "fn main() -> Int { return; }";
+
+        const auto diags = type_check_should_fail(source, "return; in non-Unit test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("return; used in non-Unit") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected return; used in non-Unit diagnostic");
+        }
+    }
+
+    {
+        // Unary operator typing: - expects Int.
+        const std::string source = "fn main() -> Int { return -true; }";
+
+        const auto diags = type_check_should_fail(source, "unary '-' type mismatch test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("unary '-' expects Int") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected unary '-' expects Int diagnostic");
+        }
+    }
+
+    {
+        // Unary operator typing: ! expects Bool.
+        const std::string source = "fn main() -> Bool { return !1; }";
+
+        const auto diags = type_check_should_fail(source, "unary '!' type mismatch test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("unary '!' expects Bool") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected unary '!' expects Bool diagnostic");
+        }
+    }
+
+    {
+        // Binary operator typing: '+' expects Int+Int or String+String.
+        const std::string source = "fn main() -> Int { return \"a\" + 1; }";
+
+        const auto diags = type_check_should_fail(source, "'+' operand type mismatch test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("'+' expects Int+Int or String+String") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected '+' expects Int+Int or String+String diagnostic");
+        }
+    }
+
+    {
+        // Calls: print arity and argument type should be validated.
+        const std::string source_arity = "fn main() -> Unit { print(); }";
+        {
+            const auto diags = type_check_should_fail(source_arity, "print arity test");
+            bool saw = false;
+            for (const auto& d : diags)
+            {
+                if (d.message.find("print expects exactly 1 argument") != std::string::npos)
+                {
+                    saw = true;
+                }
+            }
+            if (!saw)
+            {
+                fail("expected print arity diagnostic");
+            }
+        }
+
+        const std::string source_type =
+            "struct Point { x: Int; } fn main() -> Unit { let p: Point = Point{ x: 1 }; print(p); "
+            "}";
+        {
+            const auto diags = type_check_should_fail(source_type, "print argument type test");
+            bool saw = false;
+            for (const auto& d : diags)
+            {
+                if (d.message.find("print only supports Int, Bool, or String") != std::string::npos)
+                {
+                    saw = true;
+                }
+            }
+            if (!saw)
+            {
+                fail("expected print supported-types diagnostic");
+            }
+        }
+    }
+
+    {
+        // python_ffi.call requires unsafe, and is stubbed to 0 arguments.
+        const std::string source_requires_unsafe = "fn main() -> Unit { python_ffi.call(); }";
+        {
+            const auto diags =
+                type_check_should_fail(source_requires_unsafe, "python_ffi unsafe test");
+            bool saw = false;
+            for (const auto& d : diags)
+            {
+                if (d.message.find("python_ffi.call requires an unsafe context") !=
+                    std::string::npos)
+                {
+                    saw = true;
+                }
+            }
+            if (!saw)
+            {
+                fail("expected python_ffi.call requires unsafe diagnostic");
+            }
+        }
+
+        const std::string source_args = "fn main() -> Unit { unsafe { python_ffi.call(1); } }";
+        {
+            const auto diags = type_check_should_fail(source_args, "python_ffi args test");
+            bool saw = false;
+            for (const auto& d : diags)
+            {
+                if (d.message.find("python_ffi.call is stubbed") != std::string::npos)
+                {
+                    saw = true;
+                }
+            }
+            if (!saw)
+            {
+                fail("expected python_ffi.call stubbed-args diagnostic");
+            }
+        }
+    }
+
+    {
+        // Enum variants that require payloads should reject bare references.
+        const std::string source =
+            "enum OptionInt { None; Some(Int); } fn main() -> OptionInt { return OptionInt::Some; "
+            "}";
+
+        const auto diags = type_check_should_fail(source, "enum variant requires payload test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("requires a payload") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected enum variant requires payload diagnostic");
+        }
+    }
+
+    {
+        // Enum constructor calls should validate payload arity.
+        const std::string source =
+            "enum OptionInt { Some(Int); } fn main() -> OptionInt { return OptionInt::Some(); }";
+
+        const auto diags = type_check_should_fail(source, "enum payload arity test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("expects exactly 1 payload argument") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected enum payload arity diagnostic");
+        }
+    }
+
+    {
+        // Calls: module-qualified calls should validate import qualifiers.
+        const std::string source_unknown_qual =
+            "fn f(x: Int) -> Int { return x; } fn main() -> Int { return nope.f(1); }";
+
+        const auto diags = type_check_should_fail(source_unknown_qual, "unknown module qualifier");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("unknown module qualifier in call") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected unknown module qualifier diagnostic");
+        }
+
+        const std::string source_ok =
+            "import foo; fn f(x: Int) -> Int { return x; } fn main() -> Int { return foo.f(1); }";
+        (void)type_check_should_succeed(source_ok, "module-qualified call with import test");
     }
 
     std::cout << "OK\n";
