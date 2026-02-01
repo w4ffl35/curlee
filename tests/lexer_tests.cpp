@@ -244,6 +244,46 @@ int main()
         }
     }
 
+    // Unterminated string due to newline.
+    {
+        const std::string src = "\"hi\nthere\"";
+        const auto res = lex(src);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(res))
+        {
+            fail("expected error for newline in string literal");
+        }
+
+        const auto& d = std::get<curlee::diag::Diagnostic>(res);
+        if (d.message != "unterminated string literal")
+        {
+            fail("unexpected diagnostic message for newline in string literal");
+        }
+        if (!d.span.has_value() || d.span->start != 0 || d.span->end != 3)
+        {
+            fail("unexpected span for newline in string literal");
+        }
+    }
+
+    // Unterminated string due to trailing backslash at EOF.
+    {
+        const std::string src = "\"hi\\";
+        const auto res = lex(src);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(res))
+        {
+            fail("expected error for trailing backslash in string literal");
+        }
+
+        const auto& d = std::get<curlee::diag::Diagnostic>(res);
+        if (d.message != "unterminated string literal")
+        {
+            fail("unexpected diagnostic message for trailing backslash");
+        }
+        if (!d.span.has_value() || d.span->start != 0 || d.span->end != 4)
+        {
+            fail("unexpected span for trailing backslash");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

@@ -733,8 +733,8 @@ LspRange to_lsp_range(const curlee::source::Span& span, const curlee::source::Li
                     .end = {end_lc.line - 1, end_lc.col - 1}};
 }
 
-std::optional<curlee::source::Span> identifier_span_in_definition(const curlee::resolver::Symbol& sym,
-                                                                  const std::string& text)
+std::optional<curlee::source::Span>
+identifier_span_in_definition(const curlee::resolver::Symbol& sym, const std::string& text)
 {
     if (sym.name.empty())
     {
@@ -1331,8 +1331,8 @@ int main()
                         {
                             if (sym.id == use.target)
                             {
-                                target_span = identifier_span_in_definition(sym, doc.text)
-                                                  .value_or(sym.span);
+                                target_span =
+                                    identifier_span_in_definition(sym, doc.text).value_or(sym.span);
                                 break;
                             }
                         }
