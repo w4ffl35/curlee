@@ -1,5 +1,6 @@
 #include <curlee/compiler/tensor_ir.h>
 #include <sstream>
+#include <utility>
 
 namespace curlee::compiler::tensor_ir
 {
@@ -31,7 +32,12 @@ static void append_shape(std::ostringstream& out, const Shape& shape)
 ValueId Program::zeros(Shape shape, DType dtype)
 {
     const ValueId id{static_cast<std::uint32_t>(ops_.size())};
-    ops_.push_back(Op{"zeros", dtype, std::move(shape), {}});
+    Op op;
+    op.name = "zeros";
+    op.dtype = dtype;
+    op.shape = std::move(shape);
+    op.inputs = {};
+    ops_.push_back(std::move(op));
     return id;
 }
 
@@ -40,7 +46,12 @@ ValueId Program::add(ValueId lhs, ValueId rhs)
     const ValueId id{static_cast<std::uint32_t>(ops_.size())};
     // Minimal: inherit dtype/shape from lhs for now.
     const auto& lhs_op = ops_.at(lhs.id);
-    ops_.push_back(Op{"add", lhs_op.dtype, lhs_op.shape, {lhs, rhs}});
+    Op op;
+    op.name = "add";
+    op.dtype = lhs_op.dtype;
+    op.shape = lhs_op.shape;
+    op.inputs = {lhs, rhs};
+    ops_.push_back(std::move(op));
     return id;
 }
 
