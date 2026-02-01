@@ -618,6 +618,112 @@ int main()
         }
     }
 
+    // Builtin print should enforce argument count.
+    {
+        const std::string source = "fn main() -> Int { print(1, 2); return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for print argcount case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for print argcount case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for print argcount case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("print expects exactly 1 argument") == std::string::npos)
+        {
+            fail("expected print argcount diagnostic");
+        }
+    }
+
+    // python_ffi.call(...) should lower to a PythonCall opcode.
+    {
+        const std::string source = "fn main() -> Int { python_ffi.call(); return 0; }";
+        const auto chunk = compile_to_chunk(source);
+        const auto ops = decode_ops(chunk);
+        if (!contains_op(ops, curlee::vm::OpCode::PythonCall))
+        {
+            fail("expected python_ffi.call() to emit PythonCall opcode");
+        }
+    }
+
+    // main cannot take parameters in runnable code.
+    {
+        const std::string source = "fn main(x: Int) -> Int { return x; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for main params case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for main params case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for main params case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("main cannot take parameters") == std::string::npos)
+        {
+            fail("expected main params diagnostic");
+        }
+    }
+
+    // Only Int and Bool parameter types are supported in runnable code.
+    {
+        const std::string source = "fn foo(x: String) -> Int { return 0; }"
+                                   "fn main() -> Int { return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for unsupported param type case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for unsupported param type case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for unsupported param type case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("parameter type not supported in runnable code") ==
+                std::string::npos)
+        {
+            fail("expected unsupported parameter type diagnostic");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }
