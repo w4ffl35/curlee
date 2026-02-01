@@ -244,6 +244,8 @@ add_executable(curlee_bwrap_fake
 add_test(NAME curlee_bwrap_fake_smoke COMMAND $<TARGET_FILE:curlee_bwrap_fake>)
 set_tests_properties(curlee_bwrap_fake_smoke PROPERTIES WILL_FAIL TRUE)
 
+add_test(NAME curlee_bwrap_fake_exec COMMAND $<TARGET_FILE:curlee_bwrap_fake> -- /bin/true)
+
 add_test(
   NAME curlee_cli_diagnostics_golden_tests
   COMMAND curlee_cli_diagnostics_golden_tests ${CMAKE_SOURCE_DIR}/tests/cli_diagnostics $<TARGET_FILE:curlee_python_runner_fake_error> $<TARGET_FILE:curlee_python_runner_fake_hang> $<TARGET_FILE:curlee_python_runner_fake_spam> $<TARGET_FILE:curlee_python_runner_fake_env_check> $<TARGET_FILE:curlee_python_runner_fake_sandbox_required> $<TARGET_FILE:curlee_bwrap_fake>
@@ -347,6 +349,15 @@ add_executable(curlee_types_tests
 target_include_directories(curlee_types_tests PRIVATE include)
 
 add_test(NAME curlee_types_tests COMMAND curlee_types_tests)
+
+add_executable(curlee_types_extra_tests
+  tests/types_extra_tests.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+  src/types/type_check.cpp
+)
+target_include_directories(curlee_types_extra_tests PRIVATE include)
+add_test(NAME curlee_types_extra_tests COMMAND curlee_types_extra_tests)
 
 add_executable(curlee_training_data_tests
   tests/training_data_tests.cpp
