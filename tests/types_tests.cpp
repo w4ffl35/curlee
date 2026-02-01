@@ -57,21 +57,23 @@ int main()
 {
     using namespace curlee::types;
 
-    if (to_string(TypeKind::Struct) != "Struct")
+    if (!(to_string(TypeKind::Struct) == "Struct" && to_string(TypeKind::Enum) == "Enum" &&
+          to_string(Type{.kind = TypeKind::Struct, .name = "S"}) == "S" &&
+          to_string(Type{.kind = TypeKind::Enum, .name = "E"}) == "E"))
     {
-        fail("expected Struct kind to stringify");
+        fail("expected TypeKind and nominal Type stringification to work");
     }
-    if (to_string(TypeKind::Enum) != "Enum")
+
+    if (!(!(Type{.kind = TypeKind::Int} == Type{.kind = TypeKind::Bool}) &&
+          (Type{.kind = TypeKind::Struct, .name = "S"} ==
+           Type{.kind = TypeKind::Struct, .name = "S"}) &&
+          !(Type{.kind = TypeKind::Struct, .name = "S"} ==
+            Type{.kind = TypeKind::Struct, .name = "T"}) &&
+          !(Type{.kind = TypeKind::Enum, .name = "E"} == Type{.kind = TypeKind::Enum, .name = "F"}) &&
+          !(Type{.kind = TypeKind::Struct, .name = "S"} ==
+            Type{.kind = TypeKind::Enum, .name = "S"})))
     {
-        fail("expected Enum kind to stringify");
-    }
-    if (to_string(Type{.kind = TypeKind::Struct, .name = "S"}) != "S")
-    {
-        fail("expected nominal Struct type to stringify to its name");
-    }
-    if (to_string(Type{.kind = TypeKind::Enum, .name = "E"}) != "E")
-    {
-        fail("expected nominal Enum type to stringify to its name");
+        fail("expected Type equality to respect kind and nominal name");
     }
 
     if (core_type_from_name("Int") != Type{.kind = TypeKind::Int})
