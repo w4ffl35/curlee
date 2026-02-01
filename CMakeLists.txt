@@ -225,10 +225,12 @@ add_executable(curlee_python_runner_fake_error
 add_executable(curlee_python_runner_fake_hang
   tests/python_runner_fake_hang.cpp
 )
+add_test(NAME curlee_python_runner_fake_hang_smoke COMMAND cmake -E env CURLEE_TEST_SHORT_SLEEP=1 $<TARGET_FILE:curlee_python_runner_fake_hang>)
 
 add_executable(curlee_python_runner_fake_spam
   tests/python_runner_fake_spam.cpp
 )
+add_test(NAME curlee_python_runner_fake_spam_smoke COMMAND cmake -E env CURLEE_TEST_SMALL_SPAM=1 $<TARGET_FILE:curlee_python_runner_fake_spam>)
 
 add_executable(curlee_python_runner_fake_env_check
   tests/python_runner_fake_env_check.cpp

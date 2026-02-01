@@ -9,7 +9,13 @@ int main()
     std::string line;
     (void)std::getline(std::cin, line);
 
-    ::sleep(10);
+    // For tests we allow a short-circuit by setting CURLEE_TEST_SHORT_SLEEP=1
+    // to avoid long sleeps in coverage runs while still exercising code paths.
+    const char* short_sleep = std::getenv("CURLEE_TEST_SHORT_SLEEP");
+    if (short_sleep == nullptr || std::string(short_sleep) != "1")
+    {
+        ::sleep(10);
+    }
 
     // If the VM didn't kill us, emit a valid response.
     std::cout << "{\"protocol_version\":1,\"id\":\"vm\",\"ok\":true}\n";
