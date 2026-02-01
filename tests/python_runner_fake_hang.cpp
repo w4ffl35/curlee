@@ -1,13 +1,22 @@
 #include <iostream>
 #include <string>
 #include <unistd.h>
+#include <sys/select.h>
 
 int main()
 {
     // Minimal deterministic fake runner for tests.
-    // Reads a line (ignored) and then blocks long enough to trigger the VM timeout.
+    // Avoid blocking if stdin has no data (CTest leaves stdin open). Poll with zero timeout.
     std::string line;
-    (void)std::getline(std::cin, line);
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(0, &rfds);
+    struct timeval tv = {0, 0};
+    const int rv = select(1, &rfds, nullptr, nullptr, &tv);
+    if (rv > 0)
+    {
+        (void)std::getline(std::cin, line);
+    }
 
     // For tests we allow a short-circuit by setting CURLEE_TEST_SHORT_SLEEP=1
     // to avoid long sleeps in coverage runs while still exercising code paths.
