@@ -266,9 +266,9 @@ int main()
     }
 
     {
-        // Predicate rendering: bool literals currently stringify as "<pred>".
+        // Predicate rendering: bool literals stringify as "true"/"false".
         const std::string source = "fn main() -> Int [\n"
-                                   "  ensures false;\n"
+                                   "  ensures true && false;\n"
                                    "] {\n"
                                    "  return 0;\n"
                                    "}\n";
@@ -283,9 +283,9 @@ int main()
         {
             fail("expected ensures failure diagnostic for bool literal predicate rendering test");
         }
-        if (!any_note_has_prefix(diags, "goal: <pred>"))
+        if (!any_note_has_prefix(diags, "goal: (true && false)"))
         {
-            fail("expected goal note to include <pred> for bool literal predicate");
+            fail("expected goal note to include rendered bool literals for bool literal predicate");
         }
     }
 

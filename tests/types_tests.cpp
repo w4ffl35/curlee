@@ -67,6 +67,7 @@ int main()
     if (!(!(Type{.kind = TypeKind::Int} == Type{.kind = TypeKind::Bool}) &&
           (Type{.kind = TypeKind::Struct, .name = "S"} ==
            Type{.kind = TypeKind::Struct, .name = "S"}) &&
+                    (Type{.kind = TypeKind::Enum, .name = "E"} == Type{.kind = TypeKind::Enum, .name = "E"}) &&
           !(Type{.kind = TypeKind::Struct, .name = "S"} ==
             Type{.kind = TypeKind::Struct, .name = "T"}) &&
           !(Type{.kind = TypeKind::Enum, .name = "E"} == Type{.kind = TypeKind::Enum, .name = "F"}) &&
@@ -113,6 +114,11 @@ int main()
             .result = Type{.kind = TypeKind::Unit},
         };
 
+        const FunctionType different_result{
+            .params = {Type{.kind = TypeKind::Int}, Type{.kind = TypeKind::Bool}},
+            .result = Type{.kind = TypeKind::Int},
+        };
+
         if (!(ft == same))
         {
             fail("expected function type equality to hold");
@@ -120,6 +126,10 @@ int main()
         if (ft == different)
         {
             fail("expected different function types to compare unequal");
+        }
+        if (ft == different_result)
+        {
+            fail("expected different function result types to compare unequal");
         }
     }
 

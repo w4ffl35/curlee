@@ -84,6 +84,10 @@ std::string pred_to_string(const curlee::parser::Pred& pred)
             {
                 return std::string(node.lexeme);
             }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PredBool>)
+            {
+                return node.value ? "true" : "false";
+            }
             else if constexpr (std::is_same_v<Node, curlee::parser::PredName>)
             {
                 return std::string(node.name);
