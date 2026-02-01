@@ -4,6 +4,7 @@
 #include <curlee/parser/parser.h>
 #include <curlee/vm/vm.h>
 #include <iostream>
+#include <memory>
 #include <vector>
 
 static void fail(const std::string& msg)
@@ -474,6 +475,146 @@ int main()
         if (diags.empty() || diags[0].message.find("unknown function 'foo'") == std::string::npos)
         {
             fail("expected unknown function diagnostic");
+        }
+    }
+
+    // Module-qualified calls should accept imported aliases.
+    {
+        const std::string source = "import mymod.math as m;"
+                                   "fn add1(x: Int) -> Int { return x + 1; }"
+                                   "fn main() -> Int { return m.add1(41); }";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(42)))
+        {
+            fail("expected alias-qualified call to succeed");
+        }
+    }
+
+    // Module-qualified calls should accept imported paths.
+    {
+        const std::string source = "import mymod.math;"
+                                   "fn add1(x: Int) -> Int { return x + 1; }"
+                                   "fn main() -> Int { return mymod.math.add1(1); }";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(2)))
+        {
+            fail("expected path-qualified call to succeed");
+        }
+    }
+
+    // Module-qualified calls should reject unknown qualifiers.
+    {
+        const std::string source = "fn add1(x: Int) -> Int { return x + 1; }"
+                                   "fn main() -> Int { return nope.add1(1); }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for unknown module qualifier case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for unknown module qualifier case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for unknown module qualifier case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("unknown module qualifier in runnable call") == std::string::npos)
+        {
+            fail("expected unknown module qualifier diagnostic");
+        }
+    }
+
+    // collect_member_chain failure should trigger a runnable-call diagnostic.
+    {
+        const std::string source = "fn f() -> Int { return 0; }"
+                                   "fn main() -> Int { return (1 + 2).f(); }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for non-name base member call case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for non-name base member call case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for non-name base member call case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("only name calls and module-qualified calls") ==
+                                 std::string::npos)
+        {
+            fail("expected runnable-call restriction diagnostic");
+        }
+    }
+
+    // Force the internal collect_member_chain null-base path via manual AST construction.
+    {
+        using curlee::parser::CallExpr;
+        using curlee::parser::Expr;
+        using curlee::parser::Function;
+        using curlee::parser::MemberExpr;
+        using curlee::parser::Program;
+        using curlee::parser::ReturnStmt;
+        using curlee::parser::Stmt;
+        using curlee::parser::TypeName;
+
+        Expr inner_bad;
+        inner_bad.node = MemberExpr{.base = nullptr, .member = "bad"};
+
+        Expr outer;
+        outer.node =
+            MemberExpr{.base = std::make_unique<Expr>(std::move(inner_bad)), .member = "call"};
+
+        CallExpr call;
+        call.callee = std::make_unique<Expr>(std::move(outer));
+
+        Expr call_expr;
+        call_expr.node = std::move(call);
+
+        Stmt ret_stmt;
+        ret_stmt.node = ReturnStmt{.value = std::move(call_expr)};
+
+        Function main_fn;
+        main_fn.name = "main";
+        main_fn.return_type = TypeName{.span = {}, .name = "Int"};
+        main_fn.body.stmts.push_back(std::move(ret_stmt));
+
+        Program program;
+        program.functions.push_back(std::move(main_fn));
+
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for manual member chain null-base case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("only name calls and module-qualified calls") ==
+                                 std::string::npos)
+        {
+            fail("expected runnable-call restriction diagnostic for null-base chain");
         }
     }
 
