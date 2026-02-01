@@ -15,7 +15,10 @@ LoadResult load_source_stream(std::istream& in, const std::string& path)
         return LoadError{.message = "failed while reading file"};
     }
 
-    return SourceFile{.path = path, .contents = buffer.str()};
+    SourceFile sf;
+    sf.path = path;
+    sf.contents = buffer.str();
+    return sf;
 }
 
 LoadResult load_source_file(const std::string& path)
