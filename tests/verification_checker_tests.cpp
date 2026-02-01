@@ -78,6 +78,22 @@ static bool any_note_has_prefix(const std::vector<curlee::diag::Diagnostic>& dia
     return false;
 }
 
+static bool any_note_has_substr(const std::vector<curlee::diag::Diagnostic>& diags,
+                                std::string_view needle)
+{
+    for (const auto& d : diags)
+    {
+        for (const auto& n : d.notes)
+        {
+            if (n.message.find(needle) != std::string::npos)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 int main()
 {
     {
@@ -246,6 +262,154 @@ int main()
         if (!has_message_substr(diags, "verification does not support type 'String'"))
         {
             fail("expected unsupported let type diagnostic");
+        }
+    }
+
+    {
+        // Predicate rendering: bool literals currently stringify as "<pred>".
+        const std::string source = "fn main() -> Int [\n"
+                                   "  ensures false;\n"
+                                   "] {\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "bool literal predicate rendering test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for bool literal predicate rendering test");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "ensures clause not satisfied"))
+        {
+            fail("expected ensures failure diagnostic for bool literal predicate rendering test");
+        }
+        if (!any_note_has_prefix(diags, "goal: <pred>"))
+        {
+            fail("expected goal note to include <pred> for bool literal predicate");
+        }
+    }
+
+    {
+        // Bool literals in runtime expressions are currently unsupported by verifier lowering.
+        const std::string source = "fn bad_bool() -> Bool [\n"
+                                   "  ensures result;\n"
+                                   "] {\n"
+                                   "  return false;\n"
+                                   "}\n"
+                                   "fn main() -> Int { return 0; }\n";
+
+        const auto verified = verify_program(source, "bool literal return lowering test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for bool literal return lowering test");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "unsupported expression in verification"))
+        {
+            fail(
+                "expected unsupported expression diagnostic for bool literal return lowering test");
+        }
+    }
+
+    {
+        // Bool result modeling: include result in model vars for Bool results.
+        // Use a non-literal Bool expression so lowering succeeds.
+        const std::string source = "fn bad_bool() -> Bool [\n"
+                                   "  ensures result;\n"
+                                   "] {\n"
+                                   "  return 0 == 1;\n"
+                                   "}\n"
+                                   "fn main() -> Int { return 0; }\n";
+
+        const auto verified = verify_program(source, "bool result model var test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for bool result model var test");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "ensures clause not satisfied"))
+        {
+            fail("expected ensures failure diagnostic for bool result model var test");
+        }
+        if (!any_note_has_prefix(diags, "goal: result"))
+        {
+            fail("expected goal note 'goal: result' for bool result model var test");
+        }
+        if (!any_note_has_prefix(diags, "model:"))
+        {
+            fail("expected model note for bool result model var test");
+        }
+    }
+
+    {
+        // Goal string coverage: exercise a variety of operators in goal rendering.
+        const std::string source = "fn f() -> Int [\n"
+                                   "  ensures ((result > 0) && !(result != 0)) || (result < 0);\n"
+                                   "] {\n"
+                                   "  return 0;\n"
+                                   "}\n"
+                                   "fn main() -> Int { return f(); }\n";
+
+        const auto verified = verify_program(source, "goal operator rendering test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for goal operator rendering test");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "ensures clause not satisfied"))
+        {
+            fail("expected ensures failure diagnostic for goal operator rendering test");
+        }
+        if (!any_note_has_prefix(diags, "goal: "))
+        {
+            fail("expected a goal note for goal operator rendering test");
+        }
+        if (!any_note_has_substr(diags, "&&") || !any_note_has_substr(diags, "||") ||
+            !any_note_has_substr(diags, "!=") || !any_note_has_substr(diags, "!") ||
+            !any_note_has_substr(diags, ">") || !any_note_has_substr(diags, "<"))
+        {
+            fail("expected goal note to include rendered operators for goal operator rendering "
+                 "test");
+        }
+    }
+
+    {
+        // Bool parameter model vars: include param bool vars in model rendering.
+        const std::string source = "fn take_true(b: Bool) -> Int [\n"
+                                   "  requires b == true;\n"
+                                   "] {\n"
+                                   "  return 0;\n"
+                                   "}\n"
+                                   "fn main() -> Int {\n"
+                                   "  return take_true(0 == 1);\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "bool param model var test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for bool param model var test");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "requires clause not satisfied"))
+        {
+            for (const auto& d : diags)
+            {
+                std::cerr << "diag: " << d.message << "\n";
+                for (const auto& n : d.notes)
+                {
+                    std::cerr << "note: " << n.message << "\n";
+                }
+            }
+            fail("expected requires failure diagnostic for bool param model var test");
+        }
+        if (!any_note_has_prefix(diags, "goal: ") || !any_note_has_substr(diags, "b") ||
+            !any_note_has_substr(diags, "=="))
+        {
+            fail("expected goal note to include b and == for bool param model var test");
+        }
+        if (!any_note_has_prefix(diags, "model:"))
+        {
+            fail("expected model note for bool param model var test");
         }
     }
 

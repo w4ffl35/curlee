@@ -57,6 +57,23 @@ int main()
 {
     using namespace curlee::types;
 
+    if (to_string(TypeKind::Struct) != "Struct")
+    {
+        fail("expected Struct kind to stringify");
+    }
+    if (to_string(TypeKind::Enum) != "Enum")
+    {
+        fail("expected Enum kind to stringify");
+    }
+    if (to_string(Type{.kind = TypeKind::Struct, .name = "S"}) != "S")
+    {
+        fail("expected nominal Struct type to stringify to its name");
+    }
+    if (to_string(Type{.kind = TypeKind::Enum, .name = "E"}) != "E")
+    {
+        fail("expected nominal Enum type to stringify to its name");
+    }
+
     if (core_type_from_name("Int") != Type{.kind = TypeKind::Int})
     {
         fail("expected Int core type");
