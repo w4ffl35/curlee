@@ -320,9 +320,8 @@ int main()
 
     // Exercise: two-character operators (<=, >=, ==, !=, &&, ||) and trivia skipping.
     {
-        const std::string src =
-            " \t// line comment\n"
-            "/* block */ if x <= 1 && x >= 0 || x == 2 || x != 3 { }";
+        const std::string src = " \t// line comment\n"
+                                "/* block */ if x <= 1 && x >= 0 || x == 2 || x != 3 { }";
         const auto res = lex(src);
         if (!std::holds_alternative<std::vector<Token>>(res))
         {

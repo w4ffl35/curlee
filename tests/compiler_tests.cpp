@@ -354,6 +354,129 @@ int main()
         }
     }
 
+    // Emitter should reject duplicate function declarations.
+    {
+        const std::string source = "fn main() -> Int { return 0; } fn main() -> Int { return 1; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for duplicate function case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for duplicate function case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for duplicate function case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("duplicate function declaration") == std::string::npos)
+        {
+            fail("expected duplicate function diagnostic");
+        }
+    }
+
+    // Emitter should reject declaring builtin print.
+    {
+        const std::string source = "fn print() -> Int { return 0; } fn main() -> Int { return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for builtin print case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for builtin print case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for builtin print case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("cannot declare builtin function 'print'") == std::string::npos)
+        {
+            fail("expected builtin print diagnostic");
+        }
+    }
+
+    // Emitter should report missing entry point.
+    {
+        const std::string source = "fn foo() -> Int { return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for missing main case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for missing main case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for missing main case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("no entry function 'main' found") == std::string::npos)
+        {
+            fail("expected missing main diagnostic");
+        }
+    }
+
+    // Emitter should detect unresolved calls.
+    {
+        const std::string source = "fn main() -> Int { return foo(); }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for unknown call case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for unknown call case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for unknown call case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown function 'foo'") == std::string::npos)
+        {
+            fail("expected unknown function diagnostic");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }
