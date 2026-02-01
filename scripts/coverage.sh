@@ -4,7 +4,7 @@ set -euo pipefail
 preset="linux-debug-coverage"
 # Keep this as an incremental ratchet rather than an aspirational goal.
 # Raise over time as coverage improves.
-fail_under="77"
+fail_under="78"
 out_dir="build/coverage"
 exclude_throw_branches=1
 exclude_unreachable_branches=1
@@ -64,6 +64,14 @@ cd "$repo_root"
 
 cmake --preset "$preset"
 cmake --build --preset "$preset"
+
+# Ensure we don't pick up stale profiling data from previous builds/tests.
+# This avoids gcov/gcovr failures on old .gcda files for targets that no longer exist
+# or whose sources moved.
+build_dir="$repo_root/build/${preset}"
+find "$build_dir" -name '*.gcda' -delete 2>/dev/null || true
+find "$build_dir" -name '*.gcov' -delete 2>/dev/null || true
+
 ctest --preset "$preset" --output-on-failure
 
 mkdir -p "$out_dir"
@@ -77,7 +85,7 @@ if command -v gcovr >/dev/null 2>&1; then
   # - root = repo root
   # - object-directory = preset build dir
   # - exclude build/ and any third_party-style dirs (none currently)
-  build_dir="$repo_root/build/${preset}"
+  # build_dir defined above
 
   # CMake compiler-id objects can emit .gcno/.gcda files that don't map back to
   # stable sources, which causes noisy gcovr warnings/errors.

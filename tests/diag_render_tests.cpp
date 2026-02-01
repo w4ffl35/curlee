@@ -79,6 +79,17 @@ int main()
         expect_contains(out, "^", "multiline caret");
     }
 
+    // Note severity should render as "note".
+    {
+        curlee::diag::Diagnostic diag;
+        diag.severity = curlee::diag::Severity::Note;
+        diag.message = "just so you know";
+        diag.span = std::nullopt;
+
+        const std::string out = curlee::diag::render(diag, file);
+        expect_contains(out, "test.curlee: note: just so you know", "note severity header");
+    }
+
     // Invalid enum value hits the default severity_string() fallback.
     {
         curlee::diag::Diagnostic diag;

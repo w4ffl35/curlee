@@ -549,6 +549,129 @@ static bool run_hover_call_case(const fs::path& data_dir, const std::string& lsp
     return true;
 }
 
+static bool run_definition_call_case(const fs::path& data_dir, const std::string& lsp_exe)
+{
+    (void)data_dir;
+
+    const fs::path fixture_path = fs::path("tests/fixtures/lsp_hover_call.curlee");
+    const std::string text = slurp(fixture_path);
+
+    const std::string uri = "file://" + (fs::current_path() / fixture_path).string();
+
+    const std::size_t call_pos = text.find("take_nonzero(y)");
+    if (call_pos == std::string::npos)
+    {
+        fail("failed to find call site in fixture");
+    }
+
+    // Expected definition span: the identifier in the function definition.
+    const std::size_t def_pos = text.find("fn take_nonzero");
+    if (def_pos == std::string::npos)
+    {
+        fail("failed to find function definition in fixture");
+    }
+    const std::size_t name_start = text.find("take_nonzero", def_pos);
+    if (name_start == std::string::npos)
+    {
+        fail("failed to find function name in fixture");
+    }
+    const std::size_t name_end = name_start + std::string("take_nonzero").size();
+
+    std::size_t expected_start_line = 0;
+    std::size_t expected_start_col = 0;
+    std::size_t expected_end_line = 0;
+    std::size_t expected_end_col = 0;
+    compute_line_col(text, name_start, expected_start_line, expected_start_col);
+    compute_line_col(text, name_end, expected_end_line, expected_end_col);
+
+    std::size_t line = 0;
+    std::size_t col = 0;
+    compute_line_col(text, call_pos + 2, line, col); // position inside identifier
+
+    const std::string init =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}";
+
+    const std::string did_open = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                                 "didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                                 json_escape(uri) +
+                                 "\",\"languageId\":\"curlee\",\"version\":1,\"text\":\"" +
+                                 json_escape(text) + "\"}}}";
+
+    // Exercise didChange + array parsing path (contentChanges is an array).
+    const std::string did_change = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                                   "didChange\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                                   json_escape(uri) +
+                                   "\",\"version\":2},\"contentChanges\":[{\"text\":\"" +
+                                   json_escape(text) + "\"}]}}";
+
+    std::ostringstream def;
+    def << "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/"
+           "definition\",\"params\":{\"textDocument\":{\"uri\":\""
+        << json_escape(uri) << "\"},\"position\":{\"line\":" << line << ",\"character\":" << col
+        << "}}}";
+
+    const std::string shutdown =
+        "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"shutdown\",\"params\":{}}";
+    const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
+
+    std::string stdin_data;
+    stdin_data += lsp_frame(init);
+    stdin_data += lsp_frame(did_open);
+    stdin_data += lsp_frame(did_change);
+    stdin_data += lsp_frame(def.str());
+    stdin_data += lsp_frame(shutdown);
+    stdin_data += lsp_frame(exit);
+
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+
+    const auto payloads = split_lsp_frames(result.out);
+    std::optional<std::string> got_uri;
+    std::optional<HoverRange> got_range;
+    for (const auto& p : payloads)
+    {
+        if (p.find("\"id\":4") == std::string::npos)
+        {
+            continue;
+        }
+        got_uri = extract_json_string_value(p, "uri");
+        got_range = extract_hover_range(p);
+        break;
+    }
+
+    if (!got_uri.has_value() || !got_range.has_value())
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("did not find definition response (id=4) with uri and range");
+    }
+
+    if (*got_uri != uri)
+    {
+        std::cerr << "URI MISMATCH for definition\n";
+        std::cerr << "expected: " << uri << "\n";
+        std::cerr << "got:      " << *got_uri << "\n";
+        return false;
+    }
+
+    if (got_range->start_line != expected_start_line ||
+        got_range->start_character != expected_start_col ||
+        got_range->end_line != expected_end_line || got_range->end_character != expected_end_col)
+    {
+        std::cerr << "RANGE MISMATCH for definition\n";
+        std::cerr << "expected start(" << expected_start_line << "," << expected_start_col
+                  << ") end(" << expected_end_line << "," << expected_end_col << ")\n";
+        std::cerr << "got start(" << got_range->start_line << "," << got_range->start_character
+                  << ") end(" << got_range->end_line << "," << got_range->end_character << ")\n";
+        return false;
+    }
+
+    return true;
+}
+
 int main(int argc, char** argv)
 {
     if (argc != 3)
@@ -561,6 +684,11 @@ int main(int argc, char** argv)
     const std::string lsp_exe = argv[2];
 
     if (!run_hover_call_case(data_dir, lsp_exe))
+    {
+        return 1;
+    }
+
+    if (!run_definition_call_case(data_dir, lsp_exe))
     {
         return 1;
     }
