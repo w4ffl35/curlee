@@ -790,3 +790,17 @@ add_test(
   NAME curlee_verification_predicate_lowering_tests
   COMMAND curlee_verification_predicate_lowering_tests
 )
+
+add_executable(curlee_verification_checker_tests
+  tests/verification_checker_tests.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+  src/types/type_check.cpp
+  src/verification/checker.cpp
+  src/verification/predicate_lowering.cpp
+  src/verification/solver.cpp
+)
+target_include_directories(curlee_verification_checker_tests PRIVATE include)
+target_link_libraries(curlee_verification_checker_tests PRIVATE Z3::Z3)
+
+add_test(NAME curlee_verification_checker_tests COMMAND curlee_verification_checker_tests)
