@@ -549,6 +549,186 @@ static bool run_hover_call_case(const fs::path& data_dir, const std::string& lsp
     return true;
 }
 
+static bool run_hover_expr_case(const fs::path& data_dir, const std::string& lsp_exe)
+{
+    const fs::path fixture_path = fs::path("tests/fixtures/lsp_hover_expr.curlee");
+    const std::string text = slurp(fixture_path);
+
+    const std::string expected = slurp(data_dir / "hover_expr.expected");
+
+    const std::string uri = "file://" + (fs::current_path() / fixture_path).string();
+
+    const std::size_t ret_pos = text.find("return y;");
+    if (ret_pos == std::string::npos)
+    {
+        fail("failed to find return statement in fixture");
+    }
+
+    std::size_t line = 0;
+    std::size_t col = 0;
+    compute_line_col(text, ret_pos + std::string("return ").size(), line, col); // hover on the 'y'
+
+    const std::string init =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}";
+
+    const std::string did_open = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                                 "didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                                 json_escape(uri) +
+                                 "\",\"languageId\":\"curlee\",\"version\":1,\"text\":\"" +
+                                 json_escape(text) + "\"}}}";
+
+    std::ostringstream hover;
+    hover << "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/"
+             "hover\",\"params\":{\"textDocument\":{\"uri\":\""
+          << json_escape(uri) << "\"},\"position\":{\"line\":" << line << ",\"character\":" << col
+          << "}}}";
+
+    const std::string shutdown =
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{}}";
+    const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
+
+    std::string stdin_data;
+    stdin_data += lsp_frame(init);
+    stdin_data += lsp_frame(did_open);
+    stdin_data += lsp_frame(hover.str());
+    stdin_data += lsp_frame(shutdown);
+    stdin_data += lsp_frame(exit);
+
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+
+    const auto payloads = split_lsp_frames(result.out);
+    std::optional<std::string> got;
+    for (const auto& p : payloads)
+    {
+        if (p.find("\"id\":2") == std::string::npos)
+        {
+            continue;
+        }
+        got = extract_json_string_value(p, "value");
+        break;
+    }
+
+    if (!got.has_value())
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("did not find hover response (id=2) with a contents.value");
+    }
+
+    if (*got != expected)
+    {
+        std::cerr << "GOLDEN MISMATCH: hover_expr.expected\n";
+        std::cerr << "--- expected ---\n" << expected << "\n";
+        std::cerr << "--- got ---\n" << *got << "\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool run_publish_diagnostics_nonempty_case(const std::string& lsp_exe)
+{
+    const std::string bad_text = "fn main() -> Int { let x: Int = ; return 0; }";
+    const std::string uri =
+        "file://" + (fs::current_path() / "tests/fixtures" / "hello.curlee").string();
+
+    const std::string init =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}";
+
+    const std::string did_open = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                                 "didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                                 json_escape(uri) +
+                                 "\",\"languageId\":\"curlee\",\"version\":1,\"text\":\"" +
+                                 json_escape(bad_text) + "\"}}}";
+
+    const std::string shutdown =
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"shutdown\",\"params\":{}}";
+    const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
+
+    std::string stdin_data;
+    stdin_data += lsp_frame(init);
+    stdin_data += lsp_frame(did_open);
+    stdin_data += lsp_frame(shutdown);
+    stdin_data += lsp_frame(exit);
+
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+
+    const auto payloads = split_lsp_frames(result.out);
+    bool saw_diag = false;
+    for (const auto& p : payloads)
+    {
+        if (p.find("\"method\":\"textDocument/publishDiagnostics\"") == std::string::npos)
+        {
+            continue;
+        }
+        // Assert at least one diagnostic object is present.
+        if (p.find("\"diagnostics\":[{") != std::string::npos)
+        {
+            saw_diag = true;
+        }
+    }
+
+    if (!saw_diag)
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("expected a non-empty publishDiagnostics diagnostics array for invalid source");
+    }
+
+    return true;
+}
+
+static bool run_hover_without_open_case(const std::string& lsp_exe)
+{
+    const std::string uri =
+        "file://" + (fs::current_path() / "tests/fixtures" / "hello.curlee").string();
+
+    const std::string init =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}";
+
+    std::ostringstream hover;
+    hover << "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/"
+             "hover\",\"params\":{\"textDocument\":{\"uri\":\""
+          << json_escape(uri) << "\"},\"position\":{\"line\":0,\"character\":0}}}";
+
+    const std::string shutdown =
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{}}";
+    const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
+
+    std::string stdin_data;
+    stdin_data += lsp_frame(init);
+    stdin_data += lsp_frame(hover.str());
+    stdin_data += lsp_frame(shutdown);
+    stdin_data += lsp_frame(exit);
+
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+
+    const auto payloads = split_lsp_frames(result.out);
+    for (const auto& p : payloads)
+    {
+        if (p.find("\"id\":2") != std::string::npos)
+        {
+            std::cerr << "LSP stdout:\n" << result.out << "\n";
+            fail("unexpected hover response for unopened document (id=2)");
+        }
+    }
+
+    return true;
+}
+
 static bool run_definition_call_case(const fs::path& data_dir, const std::string& lsp_exe)
 {
     (void)data_dir;
@@ -689,6 +869,21 @@ int main(int argc, char** argv)
     }
 
     if (!run_definition_call_case(data_dir, lsp_exe))
+    {
+        return 1;
+    }
+
+    if (!run_hover_expr_case(data_dir, lsp_exe))
+    {
+        return 1;
+    }
+
+    if (!run_publish_diagnostics_nonempty_case(lsp_exe))
+    {
+        return 1;
+    }
+
+    if (!run_hover_without_open_case(lsp_exe))
     {
         return 1;
     }
