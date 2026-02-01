@@ -416,6 +416,97 @@ int main()
         }
     }
 
+    {
+        // If/else checking: cover path-fact injection for then/else branches.
+        // The else branch returns 0, which violates ensures result > 0.
+        const std::string source = "fn f(x: Int) -> Int [\n"
+                                   "  ensures result > 0;\n"
+                                   "] {\n"
+                                   "  if (x > 0) {\n"
+                                   "    return 1;\n"
+                                   "  } else {\n"
+                                   "    return 0;\n"
+                                   "  }\n"
+                                   "}\n"
+                                   "fn main() -> Int { return f(0); }\n";
+
+        const auto verified = verify_program(source, "if/else fact injection test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for if/else fact injection test");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "ensures clause not satisfied"))
+        {
+            fail("expected ensures failure diagnostic for if/else fact injection test");
+        }
+        if (!any_note_has_prefix(diags, "goal: "))
+        {
+            fail("expected goal note for if/else fact injection test");
+        }
+    }
+
+    {
+        // While checking: cover condition lowering and loop body traversal.
+        // The call in the body should trigger call-site checking.
+        const std::string source = "fn take_true(b: Bool) -> Int [\n"
+                                   "  requires b == true;\n"
+                                   "] {\n"
+                                   "  return 0;\n"
+                                   "}\n"
+                                   "fn main() -> Int {\n"
+                                   "  while (0 == 0) {\n"
+                                   "    take_true(false);\n"
+                                   "    return 0;\n"
+                                   "  }\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "while condition traversal test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for while condition traversal test");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "requires clause not satisfied"))
+        {
+            fail("expected requires failure diagnostic for while condition traversal test");
+        }
+        if (!any_note_has_prefix(diags, "goal: "))
+        {
+            fail("expected goal note for while condition traversal test");
+        }
+    }
+
+    {
+        // Non-scalar let without refinements is allowed.
+        const std::string source = "struct S { x: Int; }\n"
+                                   "fn main() -> Int {\n"
+                                   "  let s: S = S{ x: 1 };\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "non-scalar let without refinement test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification to succeed for non-scalar let without refinement test");
+        }
+    }
+
+    {
+        // Expr call-walk coverage: traverse Unary/Binary/Group nodes.
+        const std::string source = "fn main() -> Int {\n"
+                                   "  let b: Bool = !((0 == 1) && (1 == 1));\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "expr traversal unary/binary/group test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification to succeed for expr traversal unary/binary/group test");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }
