@@ -91,6 +91,11 @@ if command -v gcovr >/dev/null 2>&1; then
   # stable sources, which causes noisy gcovr warnings/errors.
   find "$build_dir/CMakeFiles" -path '*/CompilerIdCXX/*' \( -name '*.gcno' -o -name '*.gcda' \) -delete 2>/dev/null || true
 
+  # Clean up stale test targets that were removed/renamed, but can leave behind
+  # CMakeFiles/*_extra_tests.dir artifacts. These can reference non-existent
+  # sources and cause GCOV to emit noisy errors.
+  find "$build_dir/CMakeFiles" -maxdepth 2 -type d -name '*_extra_tests.dir' -exec rm -rf {} + 2>/dev/null || true
+
   args=(
     --root "$repo_root"
     --object-directory "$build_dir"
