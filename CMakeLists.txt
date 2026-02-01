@@ -773,6 +773,14 @@ add_executable(curlee_verification_tests
   tests/verification_solver_tests.cpp
   src/verification/solver.cpp
 )
+
+add_executable(curlee_verification_solver_extra_tests
+  tests/verification_solver_extra_tests.cpp
+  src/verification/solver.cpp
+)
+target_include_directories(curlee_verification_solver_extra_tests PRIVATE include)
+target_link_libraries(curlee_verification_solver_extra_tests PRIVATE Z3::Z3)
+add_test(NAME curlee_verification_solver_extra_tests COMMAND curlee_verification_solver_extra_tests)
 target_include_directories(curlee_verification_tests PRIVATE include)
 target_link_libraries(curlee_verification_tests PRIVATE Z3::Z3)
 
