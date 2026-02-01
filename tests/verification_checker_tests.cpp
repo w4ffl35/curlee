@@ -290,7 +290,7 @@ int main()
     }
 
     {
-        // Bool literals in runtime expressions are currently unsupported by verifier lowering.
+        // Bool literals in runtime expressions are supported by verifier lowering.
         const std::string source = "fn bad_bool() -> Bool [\n"
                                    "  ensures result;\n"
                                    "] {\n"
@@ -304,10 +304,13 @@ int main()
             fail("expected verification to fail for bool literal return lowering test");
         }
         const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
-        if (!has_message_substr(diags, "unsupported expression in verification"))
+        if (!has_message_substr(diags, "ensures clause not satisfied"))
         {
-            fail(
-                "expected unsupported expression diagnostic for bool literal return lowering test");
+            fail("expected ensures failure diagnostic for bool literal return lowering test");
+        }
+        if (!any_note_has_prefix(diags, "goal: result"))
+        {
+            fail("expected goal note 'goal: result' for bool literal return lowering test");
         }
     }
 
@@ -381,7 +384,7 @@ int main()
                                    "  return 0;\n"
                                    "}\n"
                                    "fn main() -> Int {\n"
-                                   "  return take_true(0 == 1);\n"
+                                   "  return take_true(false);\n"
                                    "}\n";
 
         const auto verified = verify_program(source, "bool param model var test");

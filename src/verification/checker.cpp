@@ -369,6 +369,11 @@ class Verifier
                     return ExprValue{solver_.context().int_val(literal.c_str()), TypeKind::Int,
                                      true};
                 }
+                else if constexpr (std::is_same_v<Node, curlee::parser::BoolExpr>)
+                {
+                    return ExprValue{solver_.context().bool_val(node.value), TypeKind::Bool,
+                                     true};
+                }
                 else if constexpr (std::is_same_v<Node, curlee::parser::StringExpr>)
                 {
                     return error_at(e.span, "verification does not support String expressions");
