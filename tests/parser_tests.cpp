@@ -1058,8 +1058,7 @@ fn main() -> Unit {
                                 "expected ']' to end contract block");
 
     // Refinement/predicate errors.
-    expect_parse_error_contains("fn f(x: Int where ) -> Int { return 0; }\n",
-                                "expected predicate");
+    expect_parse_error_contains("fn f(x: Int where ) -> Int { return 0; }\n", "expected predicate");
     expect_parse_error_contains("fn f(x: Int) -> Int [ requires (true; ] { return 0; }\n",
                                 "expected ')' after predicate");
 
