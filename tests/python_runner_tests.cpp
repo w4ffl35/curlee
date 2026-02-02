@@ -231,6 +231,67 @@ int main(int argc, char** argv)
         }
     }
 
+    // protocol_version: exponent form should parse as an integral 1.
+    {
+        const auto res = run_runner(
+            runner, "{\"protocol_version\":1e0,\"id\":\"t_exp\",\"op\":\"handshake\"}\n");
+        if (res.exit_code != 0)
+        {
+            fail("expected exponent protocol_version to exit 0");
+        }
+        const std::string expected =
+            "{\"id\":\"t_exp\",\"ok\":true,\"protocol_version\":1,\"result\":"
+            "{\"type\":\"string\",\"value\":\"ok\"}}\n";
+        if (res.out != expected)
+        {
+            fail("exponent protocol_version stdout mismatch");
+        }
+        if (!res.err.empty())
+        {
+            fail("exponent protocol_version expected empty stderr");
+        }
+    }
+
+    // Extra fields: exercise array/object parsing plus null/true/false and more number forms.
+    {
+        const auto res =
+            run_runner(runner, "{\"protocol_version\":1E+0,\"id\":\"t_extra\",\"op\":\"handshake\","
+                               "\"arr\":[null,true,false,1,-2.5e1],\"obj\":{\"k\":\"v\"}}\n");
+        if (res.exit_code != 0)
+        {
+            fail("expected extra-fields handshake to exit 0");
+        }
+        const std::string expected =
+            "{\"id\":\"t_extra\",\"ok\":true,\"protocol_version\":1,\"result\":"
+            "{\"type\":\"string\",\"value\":\"ok\"}}\n";
+        if (res.out != expected)
+        {
+            fail("extra-fields handshake stdout mismatch");
+        }
+        if (!res.err.empty())
+        {
+            fail("extra-fields handshake expected empty stderr");
+        }
+    }
+
+    // More string escapes (/, \b, \f, \r, \t) should be accepted.
+    {
+        const auto res =
+            run_runner(runner, "{\"protocol_version\":1,\"id\":\"t_esc2\",\"op\":\"handshake\","
+                               "\"x\":\"\\/\\b\\f\\r\\t\"}\n");
+        if (res.exit_code != 0)
+        {
+            fail("expected additional-escapes handshake to exit 0");
+        }
+        const std::string expected =
+            "{\"id\":\"t_esc2\",\"ok\":true,\"protocol_version\":1,\"result\":"
+            "{\"type\":\"string\",\"value\":\"ok\"}}\n";
+        if (res.out != expected)
+        {
+            fail("additional-escapes handshake stdout mismatch");
+        }
+    }
+
     {
         const auto res =
             run_runner(runner, "{\"protocol_version\":2,\"id\":\"t3\",\"op\":\"handshake\"}\n");
@@ -260,6 +321,76 @@ int main(int argc, char** argv)
         if (res.out != expected)
         {
             fail("malformed json stdout mismatch");
+        }
+    }
+
+    // Malformed number: '-' should fail number parsing.
+    {
+        const auto res = run_runner(
+            runner, "{\"protocol_version\":-,\"id\":\"t_badnum\",\"op\":\"handshake\"}\n");
+        if (res.exit_code != 2)
+        {
+            fail("expected malformed number to exit 2");
+        }
+        const std::string expected =
+            "{\"error\":{\"kind\":\"invalid_request\",\"message\":\"malformed "
+            "json\",\"retryable\":false},\"id\":\"\",\"ok\":false,\"protocol_version\":1}\n";
+        if (res.out != expected)
+        {
+            fail("malformed number stdout mismatch");
+        }
+    }
+
+    // Malformed array: missing comma.
+    {
+        const auto res = run_runner(
+            runner,
+            "{\"protocol_version\":1,\"id\":\"t_badarr\",\"op\":\"handshake\",\"arr\":[1 2]}\n");
+        if (res.exit_code != 2)
+        {
+            fail("expected malformed array to exit 2");
+        }
+        const std::string expected =
+            "{\"error\":{\"kind\":\"invalid_request\",\"message\":\"malformed "
+            "json\",\"retryable\":false},\"id\":\"\",\"ok\":false,\"protocol_version\":1}\n";
+        if (res.out != expected)
+        {
+            fail("malformed array stdout mismatch");
+        }
+    }
+
+    // Malformed object: missing ':' after key.
+    {
+        const auto res = run_runner(runner, "{\"protocol_version\":1,\"id\":\"t_badobj\",\"op\":"
+                                            "\"handshake\",\"obj\":{\"k\" \"v\"}}\n");
+        if (res.exit_code != 2)
+        {
+            fail("expected malformed object to exit 2");
+        }
+        const std::string expected =
+            "{\"error\":{\"kind\":\"invalid_request\",\"message\":\"malformed "
+            "json\",\"retryable\":false},\"id\":\"\",\"ok\":false,\"protocol_version\":1}\n";
+        if (res.out != expected)
+        {
+            fail("malformed object stdout mismatch");
+        }
+    }
+
+    // Malformed string: trailing backslash before end-of-input.
+    {
+        const auto res = run_runner(
+            runner,
+            "{\"protocol_version\":1,\"id\":\"t_badesc\",\"op\":\"handshake\",\"x\":\"abc\\\\\n");
+        if (res.exit_code != 2)
+        {
+            fail("expected malformed string to exit 2");
+        }
+        const std::string expected =
+            "{\"error\":{\"kind\":\"invalid_request\",\"message\":\"malformed "
+            "json\",\"retryable\":false},\"id\":\"\",\"ok\":false,\"protocol_version\":1}\n";
+        if (res.out != expected)
+        {
+            fail("malformed string stdout mismatch");
         }
     }
 
