@@ -724,6 +724,363 @@ int main()
         }
     }
 
+    {
+        // String literal escape decoding should support common escapes.
+        const std::string source = "fn main() -> String { return \"\\n\\t\\r\\\\\\\"\"; }";
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::string_v("\n\t\r\\\"")))
+        {
+            fail("expected string escapes to decode correctly");
+        }
+    }
+
+    {
+        // Unsupported escapes in string literals should be rejected by the emitter.
+        const std::string source = "fn main() -> String { return \"\\q\"; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for unsupported escape case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for unsupported escape case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for unsupported escape case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unsupported escape \\q'") == std::string::npos)
+        {
+            fail("expected unsupported escape diagnostic");
+        }
+    }
+
+    {
+        // Force string literal decoding errors via manual AST construction.
+        using curlee::parser::Expr;
+        using curlee::parser::Function;
+        using curlee::parser::Program;
+        using curlee::parser::ReturnStmt;
+        using curlee::parser::Stmt;
+        using curlee::parser::StringExpr;
+        using curlee::parser::TypeName;
+
+        auto run_with_lexeme = [](std::string_view lexeme)
+        {
+            Expr lit;
+            lit.node = StringExpr{.lexeme = lexeme};
+
+            Stmt ret_stmt;
+            ret_stmt.node = ReturnStmt{.value = std::move(lit)};
+
+            Function main_fn;
+            main_fn.name = "main";
+            main_fn.return_type = TypeName{.span = {}, .name = "String"};
+            main_fn.body.stmts.push_back(std::move(ret_stmt));
+
+            Program program;
+            program.functions.push_back(std::move(main_fn));
+            return curlee::compiler::emit_bytecode(program);
+        };
+
+        {
+            const auto emitted = run_with_lexeme("\"no_end");
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for malformed string literal");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("malformed string literal") == std::string::npos)
+            {
+                fail("expected malformed string literal diagnostic");
+            }
+        }
+
+    }
+
+    {
+        // Unknown local names should be rejected.
+        const std::string source = "fn main() -> Int { return x; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for unknown name case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for unknown name case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for unknown name case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'x'") == std::string::npos)
+        {
+            fail("expected unknown name diagnostic");
+        }
+    }
+
+    {
+        // Calls should enforce argument counts.
+        const std::string source =
+            "fn id(x: Int) -> Int { return x; } fn main() -> Int { return id(); }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for argcount mismatch call case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for argcount mismatch call case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for argcount mismatch call case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("expects 1 argument") == std::string::npos)
+        {
+            fail("expected call argcount mismatch diagnostic");
+        }
+    }
+
+    {
+        // An if without else should compile and run.
+        const std::string source = "fn main() -> Int { if (true) { return 1; } return 2; }";
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(1)))
+        {
+            fail("expected if-without-else to return 1");
+        }
+    }
+
+    {
+        // Unsafe and nested block statements should be emitted.
+        const std::string source = "fn main() -> Int { unsafe { { let x: Int = 1; } } return 0; }";
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(0)))
+        {
+            fail("expected unsafe and nested blocks to run");
+        }
+    }
+
+    {
+        // Group-expression callees should be rejected (callee must be a name or module-qualified).
+        const std::string source =
+            "fn foo() -> Int { return 1; } fn main() -> Int { return (foo)(); }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for group-callee call case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for group-callee call case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for group-callee call case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("only name calls and module-qualified calls") ==
+                                 std::string::npos)
+        {
+            fail("expected runnable-call restriction diagnostic for group-callee call");
+        }
+    }
+
+    {
+        // Unsupported expression forms should be rejected by the emitter.
+        const std::string source_member = "fn main() -> Int { let a: Int = 0; return a.b; }";
+        const auto lexed = curlee::lexer::lex(source_member);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for member access expr case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for member access expr case");
+        }
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for member access expr case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("member access not supported") == std::string::npos)
+        {
+            fail("expected member access diagnostic");
+        }
+    }
+
+    {
+        const std::string source_scoped = "fn main() -> Int { return a::b; }";
+        const auto lexed = curlee::lexer::lex(source_scoped);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for scoped name expr case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for scoped name expr case");
+        }
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for scoped name expr case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("scoped names (::) not supported") == std::string::npos)
+        {
+            fail("expected scoped name diagnostic");
+        }
+    }
+
+    {
+        // Force unsupported operator/expr diagnostics via manual AST construction.
+        using curlee::lexer::TokenKind;
+        using curlee::parser::BinaryExpr;
+        using curlee::parser::Expr;
+        using curlee::parser::Function;
+        using curlee::parser::IntExpr;
+        using curlee::parser::Program;
+        using curlee::parser::ReturnStmt;
+        using curlee::parser::Stmt;
+        using curlee::parser::StructLiteralExpr;
+        using curlee::parser::TypeName;
+        using curlee::parser::UnaryExpr;
+
+        auto run_with_expr = [](Expr expr)
+        {
+            Stmt ret_stmt;
+            ret_stmt.node = ReturnStmt{.value = std::move(expr)};
+
+            Function main_fn;
+            main_fn.name = "main";
+            main_fn.return_type = TypeName{.span = {}, .name = "Int"};
+            main_fn.body.stmts.push_back(std::move(ret_stmt));
+
+            Program program;
+            program.functions.push_back(std::move(main_fn));
+            return curlee::compiler::emit_bytecode(program);
+        };
+
+        {
+            Expr rhs;
+            rhs.node = IntExpr{.lexeme = "1"};
+
+            Expr root;
+            root.node =
+                UnaryExpr{.op = TokenKind::Plus, .rhs = std::make_unique<Expr>(std::move(rhs))};
+
+            const auto emitted = run_with_expr(std::move(root));
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for unsupported unary op case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("unsupported unary operator") == std::string::npos)
+            {
+                fail("expected unsupported unary operator diagnostic");
+            }
+        }
+
+        {
+            Expr lhs;
+            lhs.node = IntExpr{.lexeme = "1"};
+            Expr rhs;
+            rhs.node = IntExpr{.lexeme = "2"};
+
+            Expr root;
+            root.node = BinaryExpr{.op = TokenKind::Equal,
+                                   .lhs = std::make_unique<Expr>(std::move(lhs)),
+                                   .rhs = std::make_unique<Expr>(std::move(rhs))};
+
+            const auto emitted = run_with_expr(std::move(root));
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for unsupported binary op case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("unsupported binary operator") == std::string::npos)
+            {
+                fail("expected unsupported binary operator diagnostic");
+            }
+        }
+
+        {
+            Expr root;
+            root.node = StructLiteralExpr{.type_name = "T", .fields = {}};
+            const auto emitted = run_with_expr(std::move(root));
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for struct literal expr case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("struct literals not supported") == std::string::npos)
+            {
+                fail("expected struct literal diagnostic");
+            }
+        }
+    }
+
+    {
+        // Return without a value should implicitly return Unit.
+        const std::string source = "fn main() -> Int { return; }";
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::unit_v()))
+        {
+            fail("expected bare return to return unit");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }
