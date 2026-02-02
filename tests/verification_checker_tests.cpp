@@ -507,6 +507,97 @@ int main()
         }
     }
 
+    {
+        // Scalar let refinements: a refinement on an Int let introduces a fact.
+        const std::string source = "fn main() -> Int [ ensures result > 0; ] {\n"
+                                   "  let x: Int where x > 0 = 1;\n"
+                                   "  return x;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "scalar let refinement fact test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification to succeed for scalar let refinement fact test");
+        }
+    }
+
+    {
+        // Predicate lowering failure in requires clauses should surface as a diagnostic.
+        const std::string source = "fn f(x: Int) -> Int [ requires y > 0; ] {\n"
+                                   "  return x;\n"
+                                   "}\n"
+                                   "fn main() -> Int { return f(0); }\n";
+
+        const auto verified = verify_program(source, "unknown name in requires test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for unknown name in requires test");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "unknown predicate name"))
+        {
+            fail("expected unknown name diagnostic for requires predicate lowering");
+        }
+    }
+
+    {
+        // Expression lowering: MemberExpr is not supported by the solver-side expression
+        // language, even if the program type-checks.
+        const std::string source = "struct S { x: Int; }\n"
+                                   "fn f(x: Int) -> Int [ requires x > 0; ] { return x; }\n"
+                                   "fn main() -> Int {\n"
+                                   "  let s: S = S{ x: 1 };\n"
+                                   "  f(s.x);\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "member expr unsupported in call arg test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for member expr unsupported in call arg test");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "unsupported expression in verification"))
+        {
+            fail("expected unsupported expression diagnostic for member expr call arg");
+        }
+    }
+
+    {
+        // Expression lowering: MemberExpr in return position should surface an error.
+        const std::string source = "struct S { x: Int; }\n"
+                                   "fn bad() -> Int [ ensures result > 0; ] {\n"
+                                   "  let s: S = S{ x: 0 };\n"
+                                   "  return s.x;\n"
+                                   "}\n"
+                                   "fn main() -> Int { return bad(); }\n";
+
+        const auto verified = verify_program(source, "member expr unsupported in return test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for member expr unsupported in return test");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "unsupported expression in verification"))
+        {
+            fail("expected unsupported expression diagnostic for member expr return");
+        }
+    }
+
+    {
+        // python_ffi.call(...) should not be treated as a verifier-checked call.
+        const std::string source = "fn main() -> Int {\n"
+                                   "  unsafe { python_ffi.call(); }\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "python_ffi.call skip call-site check");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification to succeed for python_ffi.call skip call-site check");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }
