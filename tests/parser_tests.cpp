@@ -91,6 +91,53 @@ int main()
         }
     }
 
+    // Imports, structs and enums.
+    {
+        const std::string src = R"(import foo.bar as baz;
+
+struct Point {
+  x: Int;
+  y: Int;
+}
+
+enum Option {
+  Some(Int);
+  None;
+}
+
+fn main() -> Unit {
+  return;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on import/struct/enum program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on import/struct/enum program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        if (prog.imports.size() != 1 || prog.structs.size() != 1 || prog.enums.size() != 1 ||
+            prog.functions.size() != 1)
+        {
+            fail("expected exactly one import, struct, enum, and function");
+        }
+        if (prog.structs[0].fields.size() != 2)
+        {
+            fail("expected Point to have two fields");
+        }
+        if (prog.enums[0].variants.size() != 2)
+        {
+            fail("expected Option to have two variants");
+        }
+    }
+
     {
         const std::string src = R"(fn divide(numerator: Int, denominator: Int) -> Int
   [ requires denominator != 0;
@@ -811,14 +858,27 @@ fn main() -> Unit {
     // Import declaration errors.
     expect_parse_error_contains("import ;\n", "expected module name after 'import'");
     expect_parse_error_contains("import foo.;\n", "expected identifier after '.' in import path");
+    expect_parse_error_contains("import foo as ;\n", "expected identifier after 'as' in import declaration");
+    expect_parse_error_contains("import foo\n", "expected ';' after import declaration");
 
     // Struct declaration errors.
     expect_parse_error_contains("struct S { x Int; }\n", "expected ':' after field name");
     expect_parse_error_contains("struct S { x: Int; x: Int; }\n",
                                 "duplicate field name in struct declaration");
+    expect_parse_error_contains("struct S x: Int; }\n", "expected '{' after struct name");
+    expect_parse_error_contains("struct S { x: Int }\n", "expected ';' after struct field");
+    expect_parse_error_contains("struct S { x: Int;\n", "expected '}' after struct declaration");
 
     // Enum declaration errors.
     expect_parse_error_contains("enum E { V(Int; }\n", "expected ')' after enum variant payload");
+    expect_parse_error_contains("enum E { V }\n", "expected ';' after enum variant");
+    expect_parse_error_contains("enum E { V; V; }\n", "duplicate variant name in enum declaration");
+    expect_parse_error_contains("enum E { V;\n", "expected '}' after enum declaration");
+
+    // Function signature errors.
+    expect_parse_error_contains("fn f(: Int) -> Int { return 0; }\n", "expected parameter name");
+    expect_parse_error_contains("fn f(x Int) -> Int { return 0; }\n", "expected ':' after parameter name");
+    expect_parse_error_contains("fn f(x: ) -> Int { return 0; }\n", "expected type name");
 
     std::cout << "OK\n";
     return 0;
