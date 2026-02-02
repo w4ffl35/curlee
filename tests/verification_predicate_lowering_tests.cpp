@@ -391,6 +391,185 @@ int main()
         }
     }
 
+    // "result" name with no bindings should fall through and error.
+    {
+        Solver solver;
+        auto& ctx = solver.context();
+        LoweringContext lower_ctx(ctx);
+
+        auto pred = make_name("result");
+        auto lowered = lower_predicate(pred, lower_ctx);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(lowered))
+        {
+            fail("expected unbound 'result' to be rejected");
+        }
+
+        const auto& d = std::get<curlee::diag::Diagnostic>(lowered);
+        if (d.message != "unknown predicate name 'result'")
+        {
+            fail("unexpected diagnostic for unbound 'result'");
+        }
+    }
+
+    // Diagnostics from lowering children should be propagated through unary.
+    {
+        Solver solver;
+        auto& ctx = solver.context();
+        LoweringContext lower_ctx(ctx);
+
+        auto pred = make_unary(TokenKind::Bang, make_name("missing"));
+        auto lowered = lower_predicate(pred, lower_ctx);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(lowered))
+        {
+            fail("expected unknown predicate name to propagate through unary");
+        }
+    }
+
+    // Diagnostics from lowering children should be propagated through binary.
+    {
+        Solver solver;
+        auto& ctx = solver.context();
+        LoweringContext lower_ctx(ctx);
+
+        auto pred = make_binary(TokenKind::EqualEqual, make_bool(true), make_name("missing"));
+        auto lowered = lower_predicate(pred, lower_ctx);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(lowered))
+        {
+            fail("expected unknown predicate name to propagate through binary");
+        }
+    }
+
+    // '!' expects Bool.
+    {
+        Solver solver;
+        auto& ctx = solver.context();
+        LoweringContext lower_ctx(ctx);
+
+        auto pred = make_unary(TokenKind::Bang, make_int("1"));
+        auto lowered = lower_predicate(pred, lower_ctx);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(lowered))
+        {
+            fail("expected '!' type mismatch to be rejected");
+        }
+        const auto& d = std::get<curlee::diag::Diagnostic>(lowered);
+        if (d.message != "'!' expects Bool predicate")
+        {
+            fail("unexpected diagnostic for '!' type mismatch");
+        }
+    }
+
+    // OrOr should work for Bool.
+    {
+        Solver solver;
+        auto& ctx = solver.context();
+        LoweringContext lower_ctx(ctx);
+        auto flag = ctx.bool_const("flag");
+        lower_ctx.bool_vars.emplace("flag", flag);
+
+        auto pred = make_binary(TokenKind::OrOr, make_name("flag"), make_unary(TokenKind::Bang, make_name("flag")));
+        auto lowered = lower_predicate(pred, lower_ctx);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lowered))
+        {
+            fail("expected OrOr predicate lowering to succeed");
+        }
+
+        solver.add(std::get<z3::expr>(lowered));
+        if (solver.check() != CheckResult::Sat)
+        {
+            fail("expected flag || !flag to be satisfiable");
+        }
+    }
+
+    // Cover additional comparison operator cases (<= and >=).
+    {
+        Solver solver;
+        auto& ctx = solver.context();
+        LoweringContext lower_ctx(ctx);
+        auto x = ctx.int_const("x");
+        lower_ctx.int_vars.emplace("x", x);
+
+        auto pred = make_binary(TokenKind::AndAnd, make_binary(TokenKind::LessEqual, make_name("x"), make_int("0")),
+                                make_binary(TokenKind::GreaterEqual, make_name("x"), make_int("0")));
+        auto lowered = lower_predicate(pred, lower_ctx);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lowered))
+        {
+            fail("expected <= and >= predicate lowering to succeed");
+        }
+
+        solver.add(std::get<z3::expr>(lowered));
+        solver.add(x == 0);
+        if (solver.check() != CheckResult::Sat)
+        {
+            fail("expected x==0 to satisfy x<=0 && x>=0");
+        }
+    }
+
+    // Cover arithmetic '-' lowering in an Int context.
+    {
+        Solver solver;
+        auto& ctx = solver.context();
+        LoweringContext lower_ctx(ctx);
+        auto x = ctx.int_const("x");
+        lower_ctx.int_vars.emplace("x", x);
+
+        auto pred = make_binary(TokenKind::Greater, make_binary(TokenKind::Minus, make_name("x"), make_int("1")),
+                                make_int("0"));
+        auto lowered = lower_predicate(pred, lower_ctx);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lowered))
+        {
+            fail("expected arithmetic '-' lowering to succeed");
+        }
+
+        solver.add(std::get<z3::expr>(lowered));
+        solver.add(x == 2);
+        if (solver.check() != CheckResult::Sat)
+        {
+            fail("expected (x-1)>0 to be satisfiable for x==2");
+        }
+    }
+
+    // '*' expects Int predicates.
+    {
+        Solver solver;
+        auto& ctx = solver.context();
+        LoweringContext lower_ctx(ctx);
+
+        auto pred = make_binary(TokenKind::EqualEqual, make_binary(TokenKind::Star, make_bool(true), make_int("1")),
+                                make_int("0"));
+        auto lowered = lower_predicate(pred, lower_ctx);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(lowered))
+        {
+            fail("expected '*' type mismatch to be rejected");
+        }
+        const auto& d = std::get<curlee::diag::Diagnostic>(lowered);
+        if (d.message != "'*' expects Int predicates")
+        {
+            fail("unexpected diagnostic for '*' type mismatch");
+        }
+    }
+
+    // Literal * literal should be supported and mark multiplication as linear.
+    {
+        Solver solver;
+        auto& ctx = solver.context();
+        LoweringContext lower_ctx(ctx);
+
+        auto pred = make_binary(TokenKind::EqualEqual,
+                                make_binary(TokenKind::Star, make_int("2"), make_int("3")),
+                                make_int("6"));
+        auto lowered = lower_predicate(pred, lower_ctx);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lowered))
+        {
+            fail("expected literal multiplication to lower successfully");
+        }
+
+        solver.add(std::get<z3::expr>(lowered));
+        if (solver.check() != CheckResult::Sat)
+        {
+            fail("expected 2*3 == 6 to be satisfiable");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }
