@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <curlee/lexer/lexer.h>
+#include <curlee/parser/ast.h>
 #include <curlee/parser/parser.h>
 #include <curlee/types/type.h>
 #include <curlee/types/type_check.h>
@@ -67,10 +68,12 @@ int main()
     if (!(!(Type{.kind = TypeKind::Int} == Type{.kind = TypeKind::Bool}) &&
           (Type{.kind = TypeKind::Struct, .name = "S"} ==
            Type{.kind = TypeKind::Struct, .name = "S"}) &&
-                    (Type{.kind = TypeKind::Enum, .name = "E"} == Type{.kind = TypeKind::Enum, .name = "E"}) &&
+          (Type{.kind = TypeKind::Enum, .name = "E"} ==
+           Type{.kind = TypeKind::Enum, .name = "E"}) &&
           !(Type{.kind = TypeKind::Struct, .name = "S"} ==
             Type{.kind = TypeKind::Struct, .name = "T"}) &&
-          !(Type{.kind = TypeKind::Enum, .name = "E"} == Type{.kind = TypeKind::Enum, .name = "F"}) &&
+          !(Type{.kind = TypeKind::Enum, .name = "E"} ==
+            Type{.kind = TypeKind::Enum, .name = "F"}) &&
           !(Type{.kind = TypeKind::Struct, .name = "S"} ==
             Type{.kind = TypeKind::Enum, .name = "S"})))
     {
@@ -729,6 +732,25 @@ int main()
     }
 
     {
+        // Builtins: user programs cannot declare builtin function 'print'.
+        const std::string source = "fn print(x: Int) -> Unit { } fn main() -> Unit { }";
+
+        const auto diags = type_check_should_fail(source, "declaring builtin print should fail");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("cannot declare builtin function 'print'") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected cannot declare builtin function 'print' diagnostic");
+        }
+    }
+
+    {
         // Calls: print arity and argument type should be validated.
         const std::string source_arity = "fn main() -> Unit { print(); }";
         {
@@ -764,6 +786,94 @@ int main()
             {
                 fail("expected print supported-types diagnostic");
             }
+        }
+    }
+
+    {
+        // AST robustness: exercise MemberExpr base==nullptr paths.
+        // This covers both:
+        // - collect_member_chain(MemberExpr{base=null}) returning false (call callee qualification)
+        // - check_expr_node(MemberExpr{base=null}) producing "invalid member access".
+        using curlee::parser::Block;
+        using curlee::parser::CallExpr;
+        using curlee::parser::Expr;
+        using curlee::parser::ExprStmt;
+        using curlee::parser::Function;
+        using curlee::parser::MemberExpr;
+        using curlee::parser::Program;
+        using curlee::parser::ReturnStmt;
+        using curlee::parser::Stmt;
+        using curlee::parser::TypeName;
+        using curlee::source::Span;
+
+        Program program;
+
+        Function main_fn;
+        main_fn.span = Span{.start = 0, .end = 0};
+        main_fn.name = "main";
+        main_fn.return_type = TypeName{.span = Span{.start = 0, .end = 0}, .name = "Int"};
+        main_fn.body = Block{.span = Span{.start = 0, .end = 0}, .stmts = {}};
+
+        // Statement 1: call with invalid member callee (MemberExpr base == nullptr).
+        Expr callee;
+        callee.id = 1;
+        callee.span = Span{.start = 0, .end = 0};
+        callee.node = MemberExpr{.base = nullptr, .member = "f"};
+
+        Expr call;
+        call.id = 2;
+        call.span = Span{.start = 0, .end = 0};
+        call.node = CallExpr{.callee = std::make_unique<Expr>(std::move(callee)), .args = {}};
+
+        Stmt stmt1;
+        stmt1.span = Span{.start = 0, .end = 0};
+        stmt1.node = ExprStmt{.expr = std::move(call)};
+
+        // Statement 2: return invalid member expression directly.
+        Expr bad_member;
+        bad_member.id = 3;
+        bad_member.span = Span{.start = 0, .end = 0};
+        bad_member.node = MemberExpr{.base = nullptr, .member = "x"};
+
+        ReturnStmt ret;
+        ret.value = std::move(bad_member);
+
+        Stmt stmt2;
+        stmt2.span = Span{.start = 0, .end = 0};
+        stmt2.node = std::move(ret);
+
+        main_fn.body.stmts.push_back(std::move(stmt1));
+        main_fn.body.stmts.push_back(std::move(stmt2));
+        program.functions.push_back(std::move(main_fn));
+
+        const auto typed = curlee::types::type_check(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(typed))
+        {
+            fail("expected type checking to fail for invalid MemberExpr AST test");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(typed);
+
+        bool saw_only_direct_calls = false;
+        bool saw_invalid_member_access = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("only direct calls are supported") != std::string::npos)
+            {
+                saw_only_direct_calls = true;
+            }
+            if (d.message.find("invalid member access") != std::string::npos)
+            {
+                saw_invalid_member_access = true;
+            }
+        }
+
+        if (!saw_only_direct_calls)
+        {
+            fail("expected only-direct-calls diagnostic for invalid member callee");
+        }
+        if (!saw_invalid_member_access)
+        {
+            fail("expected invalid member access diagnostic for MemberExpr base==nullptr");
         }
     }
 
@@ -1048,11 +1158,11 @@ int main()
             fail("expected member access non-struct diagnostic");
         }
 
-        const std::string source_unknown_field =
-            "struct Point { x: Int; } fn main() -> Int { let p: Point = Point{ x: 1 }; return p.y; }";
+        const std::string source_unknown_field = "struct Point { x: Int; } fn main() -> Int { let "
+                                                 "p: Point = Point{ x: 1 }; return p.y; }";
         {
             const auto diags = type_check_should_fail(source_unknown_field,
-                                                     "member access unknown field on struct");
+                                                      "member access unknown field on struct");
             bool saw_unknown = false;
             for (const auto& d : diags)
             {
@@ -1069,8 +1179,7 @@ int main()
     }
 
     {
-        const std::string source =
-            "enum E { A; } fn main() -> E { return E::A(1); }";
+        const std::string source = "enum E { A; } fn main() -> E { return E::A(1); }";
         const auto diags = type_check_should_fail(source, "enum no-payload call with args");
         bool saw = false;
         for (const auto& d : diags)
@@ -1103,8 +1212,7 @@ int main()
             fail("expected unknown enum type diagnostic");
         }
 
-        const std::string source_unknown_variant =
-            "enum E { A; } fn main() -> E { return E::B; }";
+        const std::string source_unknown_variant = "enum E { A; } fn main() -> E { return E::B; }";
         {
             const auto diags =
                 type_check_should_fail(source_unknown_variant, "scoped name unknown variant");
@@ -1160,7 +1268,8 @@ int main()
         const std::string source_arg_type =
             "fn f(x: Int) -> Int { return x; } fn main() -> Int { return f(true); }";
         {
-            const auto diags = type_check_should_fail(source_arg_type, "user call arg type mismatch");
+            const auto diags =
+                type_check_should_fail(source_arg_type, "user call arg type mismatch");
             bool saw_type = false;
             for (const auto& d : diags)
             {
