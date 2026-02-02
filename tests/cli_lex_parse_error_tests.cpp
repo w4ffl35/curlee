@@ -120,5 +120,53 @@ int main()
         expect_contains(err, "error:", "stderr");
     }
 
+    // parse: lexer error is surfaced as a diagnostic (parse calls lex internally)
+    {
+        const fs::path path = write_temp_curlee("parse_lex_error", "@\n");
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "parse", path.string()}, out, err);
+        if (rc != 1)
+        {
+            fail("expected error exit code for parse lex error");
+        }
+        expect_empty(out, "stdout");
+        expect_contains(err, "error:", "stderr");
+        expect_contains(err, "invalid character", "stderr");
+    }
+
+    // parse: successful parse dumps AST
+    {
+        const fs::path path = write_temp_curlee("parse_ok", "fn main() -> Int {\n  return 0;\n}\n");
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "parse", path.string()}, out, err);
+        if (rc != 0)
+        {
+            fail("expected success exit code for parse");
+        }
+        expect_empty(err, "stderr");
+        expect_contains(out, "fn main", "stdout");
+        expect_contains(out, "return", "stdout");
+    }
+
+    // shorthand: `curlee file.curlee` behaves like `curlee run file.curlee`
+    {
+        const fs::path path =
+            write_temp_curlee("shorthand_run", "fn main() -> Int {\n  return 0;\n}\n");
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", path.string()}, out, err);
+        if (rc != 0)
+        {
+            fail("expected success exit code for shorthand run");
+        }
+        expect_empty(err, "stderr");
+        expect_contains(out, "curlee run: result 0", "stdout");
+    }
+
     return 0;
 }
