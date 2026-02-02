@@ -1,0 +1,13 @@
+fn ops(x: Int where x == 0) -> Int [
+  requires x == 0;
+  requires true;
+  requires (x == 0) && true;
+  requires false || (x == 0);
+  requires !(x == 0);
+] {
+  return x;
+}
+
+fn main() -> Int {
+  return ops(0);
+}
