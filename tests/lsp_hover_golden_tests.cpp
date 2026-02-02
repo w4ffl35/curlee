@@ -852,6 +852,237 @@ static bool run_definition_call_case(const fs::path& data_dir, const std::string
     return true;
 }
 
+static bool run_initialize_without_id_case(const std::string& lsp_exe)
+{
+    const std::string init =
+        "{\"jsonrpc\":\"2.0\",\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}";
+    const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
+
+    std::string stdin_data;
+    stdin_data += lsp_frame(init);
+    stdin_data += lsp_frame(exit);
+
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+
+    const auto payloads = split_lsp_frames(result.out);
+    bool saw_initialize_response = false;
+    for (const auto& p : payloads)
+    {
+        if (p.find("\"result\"") == std::string::npos)
+        {
+            continue;
+        }
+        if (p.find("\"capabilities\"") == std::string::npos)
+        {
+            continue;
+        }
+
+        saw_initialize_response = true;
+        if (p.find("\"id\"") != std::string::npos)
+        {
+            std::cerr << "LSP stdout:\n" << result.out << "\n";
+            fail("expected initialize response to omit id when request omits id");
+        }
+        break;
+    }
+    if (!saw_initialize_response)
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("expected initialize response even without id");
+    }
+
+    return true;
+}
+
+static bool run_shutdown_without_id_case(const std::string& lsp_exe)
+{
+    const std::string shutdown = "{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\",\"params\":{}}";
+    const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
+
+    std::string stdin_data;
+    stdin_data += lsp_frame(shutdown);
+    stdin_data += lsp_frame(exit);
+
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+
+    const auto payloads = split_lsp_frames(result.out);
+    bool saw_shutdown_response = false;
+    for (const auto& p : payloads)
+    {
+        if (p.find("\"result\":null") == std::string::npos)
+        {
+            continue;
+        }
+        saw_shutdown_response = true;
+        if (p.find("\"id\"") != std::string::npos)
+        {
+            std::cerr << "LSP stdout:\n" << result.out << "\n";
+            fail("expected shutdown response to omit id when request omits id");
+        }
+        break;
+    }
+    if (!saw_shutdown_response)
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("expected shutdown response even without id");
+    }
+
+    return true;
+}
+
+static bool run_lsp_robustness_cases(const std::string& lsp_exe)
+{
+    const fs::path fixture_path = fs::path("tests/fixtures/lsp_hover_call.curlee");
+    const std::string text = slurp(fixture_path);
+    const std::string uri = "file://" + (fs::current_path() / fixture_path).string();
+
+    // Intentionally malformed JSON: parser should reject and the server should continue.
+    const std::string bad_json = "{";
+
+    // Invalid string escape in JSON: parser should reject.
+    const std::string bad_escape = "{\"jsonrpc\":\"2.0\",\"method\":\"initialize\",\"params\":{"
+                                   "\"capabilities\":{\"x\":\"\\q\"}}}";
+
+    // Missing method.
+    const std::string missing_method = "{\"jsonrpc\":\"2.0\",\"id\":1}";
+
+    // Method is not a string.
+    const std::string non_string_method = "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":123}";
+
+    // Unknown method should be ignored.
+    const std::string unknown_method =
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"unknown/method\",\"params\":{}}";
+
+    // didOpen missing text.
+    const std::string did_open_missing_text = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                                              "didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                                              json_escape(uri) +
+                                              "\",\"languageId\":\"curlee\",\"version\":1}}}";
+
+    // didChange empty contentChanges.
+    const std::string did_change_empty = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                                         "didChange\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                                         json_escape(uri) +
+                                         "\",\"version\":2},\"contentChanges\":[]}}";
+
+    // didChange contentChanges[0] is not an object.
+    const std::string did_change_non_object =
+        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+        "didChange\",\"params\":{\"textDocument\":{\"uri\":\"" +
+        json_escape(uri) + "\",\"version\":3},\"contentChanges\":[1]}}";
+
+    // hover with missing params.
+    const std::string hover_missing_params =
+        "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"textDocument/hover\"}";
+
+    // hover with out-of-range position should be ignored.
+    const std::string hover_oob = "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"textDocument/"
+                                  "hover\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                                  json_escape(uri) +
+                                  "\"},\"position\":{\"line\":9999,\"character\":0}}}";
+
+    // Now open the document successfully.
+    const std::string did_open = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                                 "didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                                 json_escape(uri) +
+                                 "\",\"languageId\":\"curlee\",\"version\":1,\"text\":\"" +
+                                 json_escape(text) + "\"}}}";
+
+    // definition at a position that should not resolve to any symbol => result:null.
+    const std::string definition_no_target =
+        "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"textDocument/"
+        "definition\",\"params\":{\"textDocument\":{\"uri\":\"" +
+        json_escape(uri) + "\"},\"position\":{\"line\":0,\"character\":0}}}";
+
+    // hover at a position that should not map to an expression => result:null.
+    const std::string hover_no_expr = "{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"textDocument/"
+                                      "hover\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                                      json_escape(uri) +
+                                      "\"},\"position\":{\"line\":0,\"character\":0}}}";
+
+    // Sanity: send a valid initialize at the end and confirm the server still responds.
+    const std::string init_ok = "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"initialize\","
+                                "\"params\":{\"capabilities\":{}}}";
+    const std::string shutdown =
+        "{\"jsonrpc\":\"2.0\",\"id\":100,\"method\":\"shutdown\",\"params\":{}}";
+    const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
+
+    std::string stdin_data;
+    stdin_data += lsp_frame(bad_json);
+    stdin_data += lsp_frame(bad_escape);
+    stdin_data += lsp_frame(missing_method);
+    stdin_data += lsp_frame(non_string_method);
+    stdin_data += lsp_frame(unknown_method);
+    stdin_data += lsp_frame(did_open_missing_text);
+    stdin_data += lsp_frame(did_change_empty);
+    stdin_data += lsp_frame(did_change_non_object);
+    stdin_data += lsp_frame(hover_missing_params);
+    stdin_data += lsp_frame(hover_oob);
+    stdin_data += lsp_frame(did_open);
+    stdin_data += lsp_frame(definition_no_target);
+    stdin_data += lsp_frame(hover_no_expr);
+    stdin_data += lsp_frame(init_ok);
+    stdin_data += lsp_frame(shutdown);
+    stdin_data += lsp_frame(exit);
+
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+
+    const auto payloads = split_lsp_frames(result.out);
+    bool saw_init_99 = false;
+    bool saw_def_null = false;
+    bool saw_hover_null = false;
+    for (const auto& p : payloads)
+    {
+        if (p.find("\"id\":99") != std::string::npos)
+        {
+            saw_init_99 = true;
+        }
+        if (p.find("\"id\":12") != std::string::npos &&
+            p.find("\"result\":null") != std::string::npos)
+        {
+            saw_def_null = true;
+        }
+        if (p.find("\"id\":13") != std::string::npos &&
+            p.find("\"result\":null") != std::string::npos)
+        {
+            saw_hover_null = true;
+        }
+    }
+
+    if (!saw_def_null)
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("expected definition no-target response with result:null");
+    }
+    if (!saw_hover_null)
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("expected hover no-expr response with result:null");
+    }
+    if (!saw_init_99)
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("expected initialize response after malformed messages");
+    }
+
+    return true;
+}
+
 int main(int argc, char** argv)
 {
     if (argc != 3)
@@ -884,6 +1115,21 @@ int main(int argc, char** argv)
     }
 
     if (!run_hover_without_open_case(lsp_exe))
+    {
+        return 1;
+    }
+
+    if (!run_initialize_without_id_case(lsp_exe))
+    {
+        return 1;
+    }
+
+    if (!run_shutdown_without_id_case(lsp_exe))
+    {
+        return 1;
+    }
+
+    if (!run_lsp_robustness_cases(lsp_exe))
     {
         return 1;
     }
