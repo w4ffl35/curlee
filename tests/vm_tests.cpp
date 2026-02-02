@@ -4,6 +4,7 @@
 #include <curlee/vm/vm.h>
 #include <filesystem>
 #include <iostream>
+#include <sys/resource.h>
 
 static void fail(const std::string& msg)
 {
@@ -194,6 +195,64 @@ int main(int argc, char** argv)
         chunk.emit(OpCode::Ret);
 
         run_twice_deterministic(chunk, Value::int_v(8));
+    }
+
+    // Cover success paths for comparisons and JumpIfFalse (cond=true => no jump).
+    {
+        Chunk chunk;
+
+        // if (1 < 2) { ... } else { return 0 }
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::Less);
+        chunk.emit(OpCode::JumpIfFalse);
+        chunk.emit_u16(57);
+
+        // if (2 <= 2) { ... } else { return 0 }
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::LessEqual);
+        chunk.emit(OpCode::JumpIfFalse);
+        chunk.emit_u16(57);
+
+        // if (3 > 2) { ... } else { return 0 }
+        chunk.emit_constant(Value::int_v(3));
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::Greater);
+        chunk.emit(OpCode::JumpIfFalse);
+        chunk.emit_u16(57);
+
+        // if (3 >= 3) { ... } else { return 0 }
+        chunk.emit_constant(Value::int_v(3));
+        chunk.emit_constant(Value::int_v(3));
+        chunk.emit(OpCode::GreaterEqual);
+        chunk.emit(OpCode::JumpIfFalse);
+        chunk.emit_u16(57);
+
+        // if (1 != 2) { ... } else { return 0 }
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::NotEqual);
+        chunk.emit(OpCode::JumpIfFalse);
+        chunk.emit_u16(57);
+
+        // if (2 == 2) { return (6 / 2) } else { return 0 }
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::Equal);
+        chunk.emit(OpCode::JumpIfFalse);
+        chunk.emit_u16(57);
+
+        chunk.emit_constant(Value::int_v(6));
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::Div);
+        chunk.emit(OpCode::Return);
+
+        // fail_block @ ip=57
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::Return);
+
+        run_twice_deterministic(chunk, Value::int_v(3));
     }
 
     // Call-related error should be span-mapped.
@@ -590,6 +649,21 @@ int main(int argc, char** argv)
         }
     }
 
+    // Missing Return opcode entirely.
+    {
+        Chunk chunk;
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "no return")
+        {
+            fail("expected no return error");
+        }
+        if (res.error_span.has_value())
+        {
+            fail("expected no return error_span to be nullopt");
+        }
+    }
+
     // Truncated and invalid jump/call targets.
     {
         const curlee::source::Span span{.start = 60, .end = 61};
@@ -746,6 +820,44 @@ int main(int argc, char** argv)
             if (res.ok || res.error != "python runner exec failed")
             {
                 fail("expected python runner exec failed error");
+            }
+        }
+
+        // Cover the pipe()-failure branch in run_process_argv deterministically by lowering
+        // RLIMIT_NOFILE so that even a single pipe cannot be created.
+        {
+            struct rlimit old_limit;
+            if (getrlimit(RLIMIT_NOFILE, &old_limit) != 0)
+            {
+                fail("getrlimit(RLIMIT_NOFILE) failed");
+            }
+
+            // Set the soft limit so low that any attempt to create pipes must fail.
+            // This reliably hits the early pipe() failure branch in run_process_argv.
+            const rlim_t new_cur = 3;
+            if (new_cur > old_limit.rlim_max)
+            {
+                fail("unexpected RLIMIT_NOFILE max too small for test");
+            }
+
+            struct rlimit new_limit = old_limit;
+            new_limit.rlim_cur = new_cur;
+            if (setrlimit(RLIMIT_NOFILE, &new_limit) != 0)
+            {
+                fail("setrlimit(RLIMIT_NOFILE) failed");
+            }
+
+            // Ensure the runner path exists in case the limit isn't enforced as expected.
+            (void)setenv("CURLEE_PYTHON_RUNNER", "/bin/true", 1);
+            const auto res = vm.run(chunk, caps);
+
+            // Restore limit immediately.
+            (void)setrlimit(RLIMIT_NOFILE, &old_limit);
+
+            if (res.ok || res.error != "python runner exec failed")
+            {
+                fail("expected python runner exec failed error via pipe failure (got: " +
+                     res.error + ")");
             }
         }
 
