@@ -22,6 +22,37 @@ int main(int argc, char** argv)
 {
     using namespace curlee::vm;
 
+    struct EnvVarGuard
+    {
+        std::string key;
+        bool had_old = false;
+        std::string old;
+
+        explicit EnvVarGuard(const char* k) : key(k)
+        {
+            if (const char* v = std::getenv(k); v != nullptr)
+            {
+                had_old = true;
+                old = v;
+            }
+        }
+
+        void set(const char* v) const { (void)setenv(key.c_str(), v, 1); }
+        void unset() const { (void)unsetenv(key.c_str()); }
+
+        ~EnvVarGuard()
+        {
+            if (had_old)
+            {
+                (void)setenv(key.c_str(), old.c_str(), 1);
+            }
+            else
+            {
+                (void)unsetenv(key.c_str());
+            }
+        }
+    };
+
     // Cover Value equality and stringification for each kind.
     {
         const Value i1 = Value::int_v(7);
@@ -109,6 +140,24 @@ int main(int argc, char** argv)
         }
     };
 
+    auto expect_underflow = [](OpCode op, const char* what)
+    {
+        const curlee::source::Span span{.start = 900, .end = 901};
+        Chunk chunk;
+        chunk.emit(op, span);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail(std::string("expected ") + what + " stack underflow error");
+        }
+        if (!res.error_span.has_value() || res.error_span->start != span.start ||
+            res.error_span->end != span.end)
+        {
+            fail(std::string("expected ") + what + " underflow span mapping");
+        }
+    };
+
     {
         Chunk chunk;
         chunk.emit_constant(Value::int_v(1));
@@ -128,6 +177,20 @@ int main(int argc, char** argv)
 
         run_twice_deterministic(chunk, Value::string_v("ab"));
     }
+
+    // Stack underflow paths for common ops.
+    expect_underflow(OpCode::Add, "add");
+    expect_underflow(OpCode::Sub, "sub");
+    expect_underflow(OpCode::Mul, "mul");
+    expect_underflow(OpCode::Div, "div");
+    expect_underflow(OpCode::Neg, "neg");
+    expect_underflow(OpCode::Not, "not");
+    expect_underflow(OpCode::Equal, "equal");
+    expect_underflow(OpCode::NotEqual, "not-equal");
+    expect_underflow(OpCode::Less, "less");
+    expect_underflow(OpCode::LessEqual, "less-equal");
+    expect_underflow(OpCode::Greater, "greater");
+    expect_underflow(OpCode::GreaterEqual, "greater-equal");
 
     {
         Chunk chunk;
@@ -788,6 +851,55 @@ int main(int argc, char** argv)
         if (res.ok || res.error != "python capability required")
         {
             fail("expected python capability required error");
+        }
+    }
+
+    // Cover run_process_argv env var handling branches in vm.cpp.
+    {
+        EnvVarGuard path("PATH");
+        EnvVarGuard ld_library_path("LD_LIBRARY_PATH");
+        EnvVarGuard asan_options("ASAN_OPTIONS");
+        EnvVarGuard ubsan_options("UBSAN_OPTIONS");
+        EnvVarGuard lsan_options("LSAN_OPTIONS");
+        EnvVarGuard runner("CURLEE_PYTHON_RUNNER");
+
+        const curlee::source::Span span{.start = 94, .end = 95};
+        Chunk chunk;
+        chunk.emit(OpCode::PythonCall, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("python:ffi");
+
+        runner.set("/bin/true");
+
+        // Env vars present.
+        path.set("/usr/bin:/bin");
+        ld_library_path.set("/tmp");
+        asan_options.set("detect_leaks=0");
+        ubsan_options.set("print_stacktrace=1");
+        lsan_options.set("verbosity=1");
+        {
+            const auto res = vm.run(chunk, caps);
+            if (res.ok || res.error != "python runner failed")
+            {
+                fail("expected /bin/true python runner to fail handshake");
+            }
+        }
+
+        // Env vars absent.
+        path.unset();
+        ld_library_path.unset();
+        asan_options.unset();
+        ubsan_options.unset();
+        lsan_options.unset();
+        {
+            const auto res = vm.run(chunk, caps);
+            if (res.ok || res.error != "python runner failed")
+            {
+                fail("expected /bin/true python runner to fail handshake with env vars unset");
+            }
         }
     }
 

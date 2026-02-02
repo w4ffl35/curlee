@@ -36,7 +36,20 @@ int main()
     }
 
     const std::string spam(spam_bytes, 'x');
-    std::cout << spam;
+
+    // Write in chunks so the VM exercises multiple read/limit branches deterministically.
+    const std::size_t first_chunk = 1 * 1024 * 1024;
+    if (spam.size() <= first_chunk)
+    {
+        std::cout << spam;
+        std::cout.flush();
+        return 0;
+    }
+
+    std::cout.write(spam.data(), static_cast<std::streamsize>(first_chunk));
+    std::cout.flush();
+    std::cout.write(spam.data() + first_chunk,
+                    static_cast<std::streamsize>(spam.size() - first_chunk));
     std::cout.flush();
 
     return 0;
