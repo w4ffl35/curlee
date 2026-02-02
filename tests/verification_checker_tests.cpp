@@ -598,6 +598,64 @@ int main()
         }
     }
 
+    {
+        // If/else path-sensitivity: the verifier checks both branches, but it should also
+        // add a condition fact to each branch scope. This makes unreachable branches (under
+        // the added fact) safe even if they contain failing call-site obligations.
+        const std::string source =
+            "fn req_pos(x: Int) -> Int [ requires x > 0; ] { return x; }\n"
+            "fn main() -> Int {\n"
+            "  if (!(true && (false || true))) {\n"
+            "    // Condition is logically false; this branch gets a false fact.\n"
+            "    req_pos(0);\n"
+            "  } else {\n"
+            "    req_pos(1);\n"
+            "  }\n"
+            "  return 0;\n"
+            "}\n";
+
+        const auto verified = verify_program(source, "if/else path-sensitive facts test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification to succeed for if/else path-sensitive facts test");
+        }
+    }
+
+    {
+        // Unsafe statements should introduce a nested scope for facts/vars, but still check calls.
+        const std::string source = "fn req_pos(x: Int) -> Int [ requires x > 0; ] { return x; }\n"
+                                   "fn main() -> Int {\n"
+                                   "  unsafe { req_pos(1); }\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "unsafe scope call checking test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification to succeed for unsafe scope call checking test");
+        }
+    }
+
+    {
+        // While condition lowering: calls are not supported in solver-side expressions, so the
+        // condition fact will be absent; still, call checking should run and not crash.
+        const std::string source = "fn cond() -> Bool { return true; }\n"
+                                   "fn req_pos(x: Int) -> Int [ requires x > 0; ] { return x; }\n"
+                                   "fn main() -> Int {\n"
+                                   "  while (cond()) {\n"
+                                   "    req_pos(1);\n"
+                                   "    return 0;\n"
+                                   "  }\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "while condition call lowering test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification to succeed for while condition call lowering test");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }
