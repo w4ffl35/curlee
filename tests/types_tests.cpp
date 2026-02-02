@@ -871,6 +871,329 @@ int main()
         (void)type_check_should_succeed(source_ok, "module-qualified call with import test");
     }
 
+    {
+        const std::string source =
+            "struct T { x: Int; } enum T { A; } fn main() -> Int { return 0; }";
+        const auto diags = type_check_should_fail(source, "duplicate type name struct/enum test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("duplicate type name") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected duplicate type name diagnostic");
+        }
+    }
+
+    {
+        const std::string source = "fn main() -> Int { let x: Bool = 1; return 0; }";
+        const auto diags = type_check_should_fail(source, "let type mismatch test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("type mismatch in let") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected let type mismatch diagnostic");
+        }
+    }
+
+    {
+        const std::string source = "fn main() -> Int { return true; }";
+        const auto diags = type_check_should_fail(source, "return type mismatch test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("return type mismatch") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected return type mismatch diagnostic");
+        }
+    }
+
+    {
+        const std::string source = "fn main() -> Int { if (1) { return 1; } return 0; }";
+        const auto diags = type_check_should_fail(source, "if condition type mismatch test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("if condition type mismatch") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected if condition type mismatch diagnostic");
+        }
+    }
+
+    {
+        const std::string source = "fn main() -> Int { while (1) { return 1; } return 0; }";
+        const auto diags = type_check_should_fail(source, "while condition type mismatch test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("while condition type mismatch") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected while condition type mismatch diagnostic");
+        }
+    }
+
+    {
+        const std::string source =
+            "fn f(x: Int) -> Int { return x; } fn main() -> Int { let y: Int = f; return 0; }";
+        const auto diags = type_check_should_fail(source, "function name not a value test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("is not a value") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected function name is not a value diagnostic");
+        }
+    }
+
+    {
+        const std::string source_unknown_field =
+            "struct Point { x: Int; } fn main() -> Point { return Point{ x: 1, y: 2 }; }";
+        const auto diags =
+            type_check_should_fail(source_unknown_field, "struct literal unknown field test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("unknown field 'y'") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected struct literal unknown field diagnostic");
+        }
+
+        const std::string source_missing =
+            "struct Point { x: Int; y: Int; } fn main() -> Point { return Point{ x: 1 }; }";
+        {
+            const auto diags =
+                type_check_should_fail(source_missing, "struct literal missing field test");
+            bool saw_missing = false;
+            for (const auto& d : diags)
+            {
+                if (d.message.find("is missing required field") != std::string::npos)
+                {
+                    saw_missing = true;
+                }
+            }
+            if (!saw_missing)
+            {
+                fail("expected struct literal missing required field diagnostic");
+            }
+        }
+
+        const std::string source_mismatch =
+            "struct Point { x: Int; } fn main() -> Point { return Point{ x: true }; }";
+        {
+            const auto diags =
+                type_check_should_fail(source_mismatch, "struct literal field type mismatch test");
+            bool saw_mismatch = false;
+            for (const auto& d : diags)
+            {
+                if (d.message.find("type mismatch") != std::string::npos)
+                {
+                    saw_mismatch = true;
+                }
+            }
+            if (!saw_mismatch)
+            {
+                fail("expected struct literal field type mismatch diagnostic");
+            }
+        }
+    }
+
+    {
+        const std::string source_non_struct = "fn main() -> Int { return 1.x; }";
+        const auto diags = type_check_should_fail(source_non_struct, "member access non-struct");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("cannot access field") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected member access non-struct diagnostic");
+        }
+
+        const std::string source_unknown_field =
+            "struct Point { x: Int; } fn main() -> Int { let p: Point = Point{ x: 1 }; return p.y; }";
+        {
+            const auto diags = type_check_should_fail(source_unknown_field,
+                                                     "member access unknown field on struct");
+            bool saw_unknown = false;
+            for (const auto& d : diags)
+            {
+                if (d.message.find("unknown field 'y'") != std::string::npos)
+                {
+                    saw_unknown = true;
+                }
+            }
+            if (!saw_unknown)
+            {
+                fail("expected unknown field on struct diagnostic");
+            }
+        }
+    }
+
+    {
+        const std::string source =
+            "enum E { A; } fn main() -> E { return E::A(1); }";
+        const auto diags = type_check_should_fail(source, "enum no-payload call with args");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("does not take a payload") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected enum no-payload diagnostic");
+        }
+    }
+
+    {
+        const std::string source_unknown_enum =
+            "fn main() -> Int { let x: Int = 0; return Nope::A; }";
+        const auto diags = type_check_should_fail(source_unknown_enum, "scoped name unknown enum");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("unknown enum type") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected unknown enum type diagnostic");
+        }
+
+        const std::string source_unknown_variant =
+            "enum E { A; } fn main() -> E { return E::B; }";
+        {
+            const auto diags =
+                type_check_should_fail(source_unknown_variant, "scoped name unknown variant");
+            bool saw_unknown = false;
+            for (const auto& d : diags)
+            {
+                if (d.message.find("unknown variant") != std::string::npos)
+                {
+                    saw_unknown = true;
+                }
+            }
+            if (!saw_unknown)
+            {
+                fail("expected unknown enum variant diagnostic");
+            }
+        }
+    }
+
+    {
+        const std::string source_unknown_fn = "fn main() -> Int { return foo(1); }";
+        const auto diags = type_check_should_fail(source_unknown_fn, "unknown function call test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("unknown function") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected unknown function diagnostic");
+        }
+
+        const std::string source_arity =
+            "fn f(x: Int) -> Int { return x; } fn main() -> Int { return f(1, 2); }";
+        {
+            const auto diags = type_check_should_fail(source_arity, "user call arity mismatch");
+            bool saw_arity = false;
+            for (const auto& d : diags)
+            {
+                if (d.message.find("wrong number of arguments") != std::string::npos)
+                {
+                    saw_arity = true;
+                }
+            }
+            if (!saw_arity)
+            {
+                fail("expected user call arity mismatch diagnostic");
+            }
+        }
+
+        const std::string source_arg_type =
+            "fn f(x: Int) -> Int { return x; } fn main() -> Int { return f(true); }";
+        {
+            const auto diags = type_check_should_fail(source_arg_type, "user call arg type mismatch");
+            bool saw_type = false;
+            for (const auto& d : diags)
+            {
+                if (d.message.find("argument type mismatch") != std::string::npos)
+                {
+                    saw_type = true;
+                }
+            }
+            if (!saw_type)
+            {
+                fail("expected user call argument type mismatch diagnostic");
+            }
+        }
+    }
+
+    {
+        const std::string source =
+            "fn f(x: Int) -> Int { return x; } fn main() -> Int { return (1 + 2).f(3); }";
+        const auto diags = type_check_should_fail(source, "non-name callee call rejected test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("only direct calls are supported") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected only direct calls are supported diagnostic");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }
