@@ -735,6 +735,15 @@ add_test(
   COMMAND curlee_python_runner_tests $<TARGET_FILE:curlee_python_runner>
 )
 
+add_executable(curlee_python_runner_json_unit_tests
+  tests/python_runner_json_unit_tests.cpp
+)
+
+add_test(
+  NAME curlee_python_runner_json_unit_tests
+  COMMAND curlee_python_runner_json_unit_tests
+)
+
 add_executable(curlee_e2e_tests
   tests/e2e_tests.cpp
   src/compiler/emitter.cpp

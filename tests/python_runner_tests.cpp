@@ -252,6 +252,27 @@ int main(int argc, char** argv)
         }
     }
 
+    // protocol_version: exponent form with explicit negative sign should parse as integral 1.
+    {
+        const auto res = run_runner(
+            runner, "{\"protocol_version\":1e-0,\"id\":\"t_exp_neg\",\"op\":\"handshake\"}\n");
+        if (res.exit_code != 0)
+        {
+            fail("expected exponent-with-sign protocol_version to exit 0");
+        }
+        const std::string expected =
+            "{\"id\":\"t_exp_neg\",\"ok\":true,\"protocol_version\":1,\"result\":"
+            "{\"type\":\"string\",\"value\":\"ok\"}}\n";
+        if (res.out != expected)
+        {
+            fail("exponent-with-sign protocol_version stdout mismatch");
+        }
+        if (!res.err.empty())
+        {
+            fail("exponent-with-sign protocol_version expected empty stderr");
+        }
+    }
+
     // Extra fields: exercise array/object parsing plus null/true/false and more number forms.
     {
         const auto res =
@@ -321,6 +342,22 @@ int main(int argc, char** argv)
         if (res.out != expected)
         {
             fail("malformed json stdout mismatch");
+        }
+    }
+
+    // Malformed object: non-string key.
+    {
+        const auto res = run_runner(runner, "{1:2}\n");
+        if (res.exit_code != 2)
+        {
+            fail("expected non-string object key to exit 2");
+        }
+        const std::string expected =
+            "{\"error\":{\"kind\":\"invalid_request\",\"message\":\"malformed "
+            "json\",\"retryable\":false},\"id\":\"\",\"ok\":false,\"protocol_version\":1}\n";
+        if (res.out != expected)
+        {
+            fail("non-string object key stdout mismatch");
         }
     }
 
@@ -480,6 +517,25 @@ int main(int argc, char** argv)
         }
     }
 
+    // Negative protocol_version should be rejected (covers '-' number parsing with digits).
+    {
+        const auto res =
+            run_runner(runner, "{\"protocol_version\":-1,\"id\":\"t_neg\",\"op\":\"handshake\"}\n");
+        if (res.exit_code != 2)
+        {
+            fail("expected negative protocol_version to exit 2");
+        }
+        const std::string expected =
+            "{\"error\":{\"kind\":\"protocol_version_unsupported\",\"message\":\"unsupported "
+            "protocol "
+            "version\",\"retryable\":false},\"id\":\"t_neg\",\"ok\":false,\"protocol_version\":1}"
+            "\n";
+        if (res.out != expected)
+        {
+            fail("negative protocol_version stdout mismatch");
+        }
+    }
+
     // Missing op should be rejected.
     {
         const auto res = run_runner(runner, "{\"protocol_version\":1,\"id\":\"t_noop\"}\n");
@@ -493,6 +549,21 @@ int main(int argc, char** argv)
         if (res.out != expected)
         {
             fail("missing op stdout mismatch");
+        }
+    }
+
+    // Handshake without an id should succeed with id:"".
+    {
+        const auto res = run_runner(runner, "{\"protocol_version\":1,\"op\":\"handshake\"}\n");
+        if (res.exit_code != 0)
+        {
+            fail("expected handshake without id to exit 0");
+        }
+        const std::string expected = "{\"id\":\"\",\"ok\":true,\"protocol_version\":1,\"result\":"
+                                     "{\"type\":\"string\",\"value\":\"ok\"}}\n";
+        if (res.out != expected)
+        {
+            fail("handshake without id stdout mismatch");
         }
     }
 

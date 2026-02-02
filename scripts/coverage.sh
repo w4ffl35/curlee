@@ -4,7 +4,7 @@ set -euo pipefail
 preset="linux-debug-coverage"
 # Keep this as an incremental ratchet rather than an aspirational goal.
 # Raise over time as coverage improves.
-fail_under="80"
+fail_under="92"
 out_dir="build/coverage"
 exclude_throw_branches=1
 exclude_unreachable_branches=1

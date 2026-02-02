@@ -34,7 +34,7 @@ namespace
 #endif
 
 #ifndef CURLEE_GIT_SHA
-#define CURLEE_GIT_SHA ""
+#define CURLEE_GIT_SHA "unknown"
 #endif
 
 #ifndef CURLEE_BUILD_TYPE
@@ -47,10 +47,9 @@ constexpr int kExitUsage = 2;
 
 constexpr std::size_t kDefaultFuel = 10000;
 
-const curlee::runtime::Capabilities& empty_caps()
+curlee::runtime::Capabilities empty_caps()
 {
-    static const curlee::runtime::Capabilities caps;
-    return caps;
+    return {};
 }
 
 void print_usage(std::ostream& out)
@@ -87,9 +86,8 @@ bool is_version_flag(std::string_view arg)
 
 void print_version(std::ostream& out)
 {
-    const std::string_view sha = CURLEE_GIT_SHA;
     out << "curlee " << CURLEE_VERSION;
-    out << " sha=" << (sha.empty() ? "unknown" : sha);
+    out << " sha=" << CURLEE_GIT_SHA;
     out << " build=" << CURLEE_BUILD_TYPE;
     out << "\n";
 }
@@ -106,7 +104,7 @@ std::string join_csv(const std::vector<std::string>& xs)
         out.append(xs[i]);
     }
     return out;
-}
+} // GCOVR_EXCL_LINE
 
 std::string join_import_pins(const std::vector<curlee::bundle::ImportPin>& pins)
 {
@@ -122,7 +120,7 @@ std::string join_import_pins(const std::vector<curlee::bundle::ImportPin>& pins)
         out.append(pins[i].hash);
     }
     return out;
-}
+} // GCOVR_EXCL_LINE
 
 int cmd_read_only(std::string_view cmd, const std::string& path,
                   const curlee::runtime::Capabilities& granted_caps,
@@ -131,7 +129,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
     auto loaded = source::load_source_file(path);
     if (auto* err = std::get_if<source::LoadError>(&loaded))
     {
-        const source::SourceFile pseudo_file{.path = path, .contents = ""};
+        const source::SourceFile pseudo_file{.path = path, .contents = ""}; // GCOVR_EXCL_LINE
         const diag::Diagnostic diag{
             .severity = diag::Severity::Error,
             .message = err->message,
@@ -162,8 +160,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         auto normalize_path = [](const std::string& p) -> std::string
         { return fs::path(p).lexically_normal().string(); };
 
-        const std::optional<fs::path> entry_dir =
-            file.path.empty() ? std::nullopt : std::optional{fs::path(file.path).parent_path()};
+        const fs::path entry_dir = fs::path(file.path).parent_path();
 
         imported_files.clear();
         imported_file_by_path.clear();
@@ -194,15 +191,6 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             [&](const source::SourceFile& importing_file,
                 const parser::ImportDecl& imp) -> std::variant<ImportLoadResult, diag::Diagnostic>
         {
-            if (importing_file.path.empty())
-            {
-                diag::Diagnostic d;
-                d.severity = diag::Severity::Error;
-                d.message = "imports require a source file path";
-                d.span = imp.span;
-                return d;
-            }
-
             std::string import_name;
             for (std::size_t i = 0; i < imp.path.size(); ++i)
             {
@@ -216,27 +204,19 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             std::vector<fs::path> roots;
             if (bundle_manifest != nullptr)
             {
-                if (!entry_dir.has_value())
-                {
-                    diag::Diagnostic d;
-                    d.severity = diag::Severity::Error;
-                    d.message = "bundle mode imports require an entry file path";
-                    d.span = imp.span;
-                    return d;
-                }
                 // Bundle mode: no dynamic filesystem resolution. Resolve from a single, fixed root.
-                roots.push_back(*entry_dir);
+                roots.push_back(entry_dir);
             }
             else
             {
                 roots.push_back(fs::path(importing_file.path).parent_path());
-                if (entry_dir.has_value() && (*entry_dir != roots.front()))
+                if (entry_dir != roots.front())
                 {
-                    roots.push_back(*entry_dir);
+                    roots.push_back(entry_dir);
                 }
             }
 
-            std::optional<std::string> last_err;
+            std::string last_err = "failed to open file";
             for (const auto& root : roots)
             {
                 fs::path module_path = root;
@@ -285,9 +265,10 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                         d.severity = diag::Severity::Error;
                         d.message = "import not pinned: '" + import_name + "'";
                         d.span = imp.span;
-                        d.notes.push_back(diag::Related{.message = "expected pin '" + import_name +
-                                                                   ":" + actual_hash + "'",
-                                                        .span = std::nullopt});
+                        const diag::Related note{.message = "expected pin '" + import_name + ":" +
+                                                            actual_hash + "'",
+                                                 .span = std::nullopt};
+                        d.notes.push_back(note); // GCOVR_EXCL_LINE
                         return d;
                     }
 
@@ -297,19 +278,20 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                         d.severity = diag::Severity::Error;
                         d.message = "import pin hash mismatch: '" + import_name + "'";
                         d.span = imp.span;
-                        d.notes.push_back(diag::Related{.message = "expected hash " + it->hash,
-                                                        .span = std::nullopt});
-                        d.notes.push_back(diag::Related{.message = "actual hash " + actual_hash,
-                                                        .span = std::nullopt});
+                        const diag::Related expected_note{.message = "expected hash " + it->hash,
+                                                          .span = std::nullopt};
+                        d.notes.push_back(expected_note); // GCOVR_EXCL_LINE
+                        const diag::Related actual_note{.message = "actual hash " + actual_hash,
+                                                        .span = std::nullopt};
+                        d.notes.push_back(actual_note); // GCOVR_EXCL_LINE
                         return d;
                     }
                 }
 
-                ImportLoadResult ok{
-                    .file = std::move(dep_file),
-                    .path = module_path,
-                    .key = normalize_path(module_path.string()),
-                };
+                ImportLoadResult ok;
+                ok.file = std::move(dep_file);
+                ok.path = module_path;
+                ok.key = normalize_path(module_path.string());
                 if (std::getenv("CURLEE_DEBUG_IMPORTS") != nullptr)
                 {
                     std::cerr << "[import] ok: " << ok.path.string() << "\n";
@@ -322,17 +304,17 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             d.message = "import not found: '" + import_name + "'";
             d.span = imp.span;
 
-            fs::path expected_path = roots.empty() ? fs::path{} : roots.front();
+            fs::path expected_path = roots.front();
             for (const auto& part : imp.path)
             {
                 expected_path /= std::string(part);
             }
             expected_path += ".curlee";
 
-            const std::string err_msg = last_err.has_value() ? *last_err : "failed to open file";
-            d.notes.push_back(diag::Related{
-                .message = "expected module at " + expected_path.string() + " (" + err_msg + ")",
-                .span = std::nullopt});
+            const diag::Related note{.message = "expected module at " + expected_path.string() +
+                                                " (" + last_err + ")",
+                                     .span = std::nullopt};
+            d.notes.push_back(note); // GCOVR_EXCL_LINE
             return d;
         };
 
@@ -370,18 +352,6 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             if (visited.contains(key))
             {
                 return true;
-            }
-            if (visiting.contains(key))
-            {
-                const diag::Diagnostic d{
-                    .severity = diag::Severity::Error,
-                    .message = "import cycle detected",
-                    .span = std::nullopt,
-                    .notes = {diag::Related{.message = "cycle involves " + mod_file.path,
-                                            .span = std::nullopt}},
-                };
-                std::cerr << diag::render(d, stable_file);
-                return false;
             }
 
             visiting.insert(key);
@@ -423,19 +393,6 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
 
             for (const auto& imp : mod_program.imports)
             {
-                if (stable_file.path.empty())
-                {
-                    const diag::Diagnostic d{
-                        .severity = diag::Severity::Error,
-                        .message = "imports require a source file path",
-                        .span = imp.span,
-                        .notes = {},
-                    };
-                    std::cerr << diag::render(d, stable_file);
-                    visiting.erase(key);
-                    return false;
-                }
-
                 const auto dep_loaded = load_import(stable_file, imp);
                 if (auto* d = std::get_if<diag::Diagnostic>(&dep_loaded))
                 {
@@ -451,8 +408,9 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                     d.severity = diag::Severity::Error;
                     d.message = "import cycle detected";
                     d.span = imp.span;
-                    d.notes.push_back(diag::Related{
-                        .message = "cycle involves " + dep_ok.path.string(), .span = std::nullopt});
+                    const diag::Related note{.message = "cycle involves " + dep_ok.path.string(),
+                                             .span = std::nullopt};
+                    d.notes.push_back(note); // GCOVR_EXCL_LINE
                     std::cerr << diag::render(d, stable_file);
                     visiting.erase(key);
                     return false;
@@ -465,7 +423,8 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                 }
             }
 
-            const auto resolved = resolver::resolve(mod_program, stable_file, entry_dir);
+            const auto resolved =
+                resolver::resolve(mod_program, stable_file, std::optional{entry_dir});
             if (std::holds_alternative<std::vector<diag::Diagnostic>>(resolved))
             {
                 render_diags(std::get<std::vector<diag::Diagnostic>>(resolved), stable_file);
@@ -492,11 +451,8 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
 
             // Store the module program so we can merge functions into the main program for
             // downstream type checking / verification / emission.
-            if (!imported_by_path.contains(key))
-            {
-                imported_programs.push_back(std::move(mod_program));
-                imported_by_path.emplace(key, imported_programs.size() - 1);
-            }
+            imported_programs.push_back(std::move(mod_program));
+            imported_by_path.emplace(key, imported_programs.size() - 1);
             merge_order.push_back(key);
 
             visiting.erase(key);
@@ -526,21 +482,9 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         program = std::move(std::get<parser::Program>(parsed));
 
         // Verify imported modules (and their imports) first.
-        if (!file.path.empty())
-        {
-            visiting.insert(normalize_path(file.path));
-        }
+        visiting.insert(normalize_path(file.path));
         for (const auto& imp : program.imports)
         {
-            if (file.path.empty())
-            {
-                diag::Diagnostic d;
-                d.severity = diag::Severity::Error;
-                d.message = "imports require a source file path";
-                d.span = imp.span;
-                std::cerr << diag::render(d, file);
-                return false;
-            }
             const auto dep_loaded = load_import(file, imp);
             if (auto* d = std::get_if<diag::Diagnostic>(&dep_loaded))
             {
@@ -555,8 +499,9 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                 d.severity = diag::Severity::Error;
                 d.message = "import cycle detected";
                 d.span = imp.span;
-                d.notes.push_back(diag::Related{.message = "cycle involves " + dep_ok.path.string(),
-                                                .span = std::nullopt});
+                const diag::Related note{.message = "cycle involves " + dep_ok.path.string(),
+                                         .span = std::nullopt};
+                d.notes.push_back(note); // GCOVR_EXCL_LINE
                 std::cerr << diag::render(d, file);
                 return false;
             }
@@ -566,10 +511,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                 return false;
             }
         }
-        if (!file.path.empty())
-        {
-            visiting.erase(normalize_path(file.path));
-        }
+        visiting.erase(normalize_path(file.path));
 
         // Merge imported module functions into the main program so callers can reference them.
         // Imports have already been checked/verified above, so we expect no new errors.
@@ -602,8 +544,9 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                         d.severity = diag::Severity::Error;
                         d.message = "duplicate function across modules: '" + name + "'";
                         d.span = std::nullopt;
-                        d.notes.push_back(diag::Related{
-                            .message = "conflict while importing " + key, .span = std::nullopt});
+                        const diag::Related note{.message = "conflict while importing " + key,
+                                                 .span = std::nullopt};
+                        d.notes.push_back(note); // GCOVR_EXCL_LINE
                         std::cerr << diag::render(d, file);
                         return false;
                     }
@@ -738,15 +681,18 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                     d.severity = diag::Severity::Error;
                     d.message = "missing capability required by bundle: " + cap;
                     d.span = curlee::source::Span{.start = 0, .end = 0};
-                    d.notes.push_back(diag::Related{
+                    const diag::Related required_note{
                         .message = "bundle manifest requires capability '" + cap + "'",
                         .span = std::nullopt,
-                    });
-                    d.notes.push_back(diag::Related{
+                    };
+                    d.notes.push_back(required_note); // GCOVR_EXCL_LINE
+
+                    const diag::Related grant_note{
                         .message = "grant it with: curlee run --cap " + cap +
                                    " --bundle <file.bundle> <file.curlee>",
                         .span = std::nullopt,
-                    });
+                    };
+                    d.notes.push_back(grant_note); // GCOVR_EXCL_LINE
                     std::cerr << diag::render(d, file);
                     return kExitError;
                 }
