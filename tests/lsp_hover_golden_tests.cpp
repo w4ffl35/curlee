@@ -1656,9 +1656,10 @@ static bool run_lsp_robustness_cases(const std::string& lsp_exe)
                                         "method\",\"params\":{\"x\":\"\\b\\f\\/\"}}";
 
     // Force skip_ws() to consume whitespace and still parse a valid message.
-    const std::string ws_initialize = " \n\t{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"initialize\","
-                                      "\"params\":{\"capabilities\":{\"arr\":[null,true,false,1e0],"
-                                      "\"obj\":{\"k\":\"v\"}}}}";
+    const std::string ws_initialize =
+        " \n\t{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"initialize\","
+        "\"params\":{\"capabilities\":{\"arr\":[null,true,false,1e0],"
+        "\"obj\":{\"k\":\"v\"}}}}";
 
     // Trailing garbage after a valid JSON value => parse_json should fail.
     const std::string trailing_garbage = "{\"jsonrpc\":\"2.0\",\"method\":\"unknown/method\"}x";
