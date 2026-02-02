@@ -94,7 +94,14 @@ if command -v gcovr >/dev/null 2>&1; then
   # Clean up stale test targets that were removed/renamed, but can leave behind
   # CMakeFiles/*_extra_tests.dir artifacts. These can reference non-existent
   # sources and cause GCOV to emit noisy errors.
-  find "$build_dir/CMakeFiles" -maxdepth 2 -type d -name '*_extra_tests.dir' -exec rm -rf {} + 2>/dev/null || true
+  while IFS= read -r -d '' d; do
+    target="$(basename "$d" .dir)"
+    # Only remove truly stale targets. Real ones will have a corresponding
+    # executable in the build directory and should contribute coverage.
+    if [[ ! -f "$build_dir/$target" && ! -f "$build_dir/$target.exe" ]]; then
+      rm -rf "$d" 2>/dev/null || true
+    fi
+  done < <(find "$build_dir/CMakeFiles" -maxdepth 2 -type d -name '*_extra_tests.dir' -print0 2>/dev/null || true)
 
   args=(
     --root "$repo_root"
