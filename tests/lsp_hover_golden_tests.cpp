@@ -1237,6 +1237,97 @@ static bool run_shutdown_without_id_case(const std::string& lsp_exe)
     return true;
 }
 
+static bool run_lsp_missing_content_length_case(const std::string& lsp_exe)
+{
+    // No Content-Length header: read_lsp_message() should return false and the server should exit
+    // cleanly without emitting any responses.
+    const ProcResult result = run_proc(lsp_exe, "{}");
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+    if (!result.out.empty())
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("expected no output when Content-Length header is missing");
+    }
+    return true;
+}
+
+static bool run_lsp_truncated_payload_case(const std::string& lsp_exe)
+{
+    // Content-Length exceeds available payload bytes: read_lsp_message() should fail and the
+    // server should exit cleanly.
+    const std::string stdin_data = "Content-Length: 10\r\n\r\n{}";
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+    if (!result.out.empty())
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("expected no output when payload is truncated");
+    }
+    return true;
+}
+
+static bool run_lsp_uri_percent_decoding_case(const std::string& lsp_exe)
+{
+    const std::string uri = "file:///tmp/curlee%20space.curlee";
+    const std::string text = "fn main() -> Int { return 0; }\n";
+
+    const std::string init =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}";
+
+    const std::string did_open = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                                 "didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                                 json_escape(uri) +
+                                 "\",\"languageId\":\"curlee\",\"version\":1,\"text\":\"" +
+                                 json_escape(text) + "\"}}}";
+
+    const std::string shutdown =
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"shutdown\",\"params\":{}}";
+    const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
+
+    std::string stdin_data;
+    stdin_data += lsp_frame(init);
+    stdin_data += lsp_frame(did_open);
+    stdin_data += lsp_frame(shutdown);
+    stdin_data += lsp_frame(exit);
+
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+
+    const auto payloads = split_lsp_frames(result.out);
+    bool saw_diag_for_uri = false;
+    for (const auto& p : payloads)
+    {
+        if (p.find("\"method\":\"textDocument/publishDiagnostics\"") == std::string::npos)
+        {
+            continue;
+        }
+        if (p.find(json_escape(uri)) != std::string::npos)
+        {
+            saw_diag_for_uri = true;
+        }
+    }
+
+    if (!saw_diag_for_uri)
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("expected publishDiagnostics to include the percent-encoded uri");
+    }
+
+    return true;
+}
+
 static bool run_lsp_robustness_cases(const std::string& lsp_exe)
 {
     const fs::path fixture_path = fs::path("tests/fixtures/lsp_hover_call.curlee");
@@ -1260,6 +1351,18 @@ static bool run_lsp_robustness_cases(const std::string& lsp_exe)
     const std::string unknown_method =
         "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"unknown/method\",\"params\":{}}";
 
+    // Exercise JSON parser value kinds at the top-level (non-object payloads).
+    const std::string json_null = "null";
+    const std::string json_true = "true";
+    const std::string json_false = "false";
+    const std::string json_number_exp = "1e+2";
+    const std::string json_empty_array = "[]";
+    const std::string json_empty_object = "{}";
+
+    // Exercise string escapes handled by JsonParser (\b, \f, \/).
+    const std::string escape_variants =
+        "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"unknown/method\",\"params\":{\"x\":\"\\b\\f\\/\"}}";
+
     // didOpen missing text.
     const std::string did_open_missing_text = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
                                               "didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" +
@@ -1278,6 +1381,12 @@ static bool run_lsp_robustness_cases(const std::string& lsp_exe)
         "didChange\",\"params\":{\"textDocument\":{\"uri\":\"" +
         json_escape(uri) + "\",\"version\":3},\"contentChanges\":[1]}}";
 
+    // didChange contentChanges is not an array.
+    const std::string did_change_not_array =
+        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+        "didChange\",\"params\":{\"textDocument\":{\"uri\":\"" +
+        json_escape(uri) + "\",\"version\":4},\"contentChanges\":{}}}";
+
     // hover with missing params.
     const std::string hover_missing_params =
         "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"textDocument/hover\"}";
@@ -1287,6 +1396,11 @@ static bool run_lsp_robustness_cases(const std::string& lsp_exe)
                                   "hover\",\"params\":{\"textDocument\":{\"uri\":\"" +
                                   json_escape(uri) +
                                   "\"},\"position\":{\"line\":9999,\"character\":0}}}";
+
+    // hover with position types that do not parse as numbers should be ignored.
+    const std::string hover_bad_position_types =
+        "{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"" +
+        json_escape(uri) + "\"},\"position\":{\"line\":\"0\",\"character\":0}}}";
 
     // Now open the document successfully.
     const std::string did_open = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
@@ -1320,14 +1434,23 @@ static bool run_lsp_robustness_cases(const std::string& lsp_exe)
     stdin_data += lsp_frame(missing_method);
     stdin_data += lsp_frame(non_string_method);
     stdin_data += lsp_frame(unknown_method);
+    stdin_data += lsp_frame(json_null);
+    stdin_data += lsp_frame(json_true);
+    stdin_data += lsp_frame(json_false);
+    stdin_data += lsp_frame(json_number_exp);
+    stdin_data += lsp_frame(json_empty_array);
+    stdin_data += lsp_frame(json_empty_object);
+    stdin_data += lsp_frame(escape_variants);
     stdin_data += lsp_frame(did_open_missing_text);
     stdin_data += lsp_frame(did_change_empty);
     stdin_data += lsp_frame(did_change_non_object);
+    stdin_data += lsp_frame(did_change_not_array);
     stdin_data += lsp_frame(hover_missing_params);
     stdin_data += lsp_frame(hover_oob);
     stdin_data += lsp_frame(did_open);
     stdin_data += lsp_frame(definition_no_target);
     stdin_data += lsp_frame(hover_no_expr);
+    stdin_data += lsp_frame(hover_bad_position_types);
     stdin_data += lsp_frame(init_ok);
     stdin_data += lsp_frame(shutdown);
     stdin_data += lsp_frame(exit);
@@ -1343,6 +1466,7 @@ static bool run_lsp_robustness_cases(const std::string& lsp_exe)
     bool saw_init_99 = false;
     bool saw_def_null = false;
     bool saw_hover_null = false;
+    bool saw_hover_14 = false;
     for (const auto& p : payloads)
     {
         if (p.find("\"id\":99") != std::string::npos)
@@ -1358,6 +1482,10 @@ static bool run_lsp_robustness_cases(const std::string& lsp_exe)
             p.find("\"result\":null") != std::string::npos)
         {
             saw_hover_null = true;
+        }
+        if (p.find("\"id\":14") != std::string::npos)
+        {
+            saw_hover_14 = true;
         }
     }
 
@@ -1375,6 +1503,11 @@ static bool run_lsp_robustness_cases(const std::string& lsp_exe)
     {
         std::cerr << "LSP stdout:\n" << result.out << "\n";
         fail("expected initialize response after malformed messages");
+    }
+    if (saw_hover_14)
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("unexpected hover response for bad position types (id=14)");
     }
 
     return true;
@@ -1442,6 +1575,21 @@ int main(int argc, char** argv)
     }
 
     if (!run_shutdown_without_id_case(lsp_exe))
+    {
+        return 1;
+    }
+
+    if (!run_lsp_missing_content_length_case(lsp_exe))
+    {
+        return 1;
+    }
+
+    if (!run_lsp_truncated_payload_case(lsp_exe))
+    {
+        return 1;
+    }
+
+    if (!run_lsp_uri_percent_decoding_case(lsp_exe))
     {
         return 1;
     }
