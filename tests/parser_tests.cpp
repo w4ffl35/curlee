@@ -15,6 +15,37 @@ int main()
 {
     using namespace curlee;
 
+    auto expect_parse_error_contains = [](const std::string& src, const std::string& needle)
+    {
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on invalid program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+        {
+            fail("expected parse to fail");
+        }
+
+        const auto& diags = std::get<std::vector<diag::Diagnostic>>(parsed);
+        bool found = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find(needle) != std::string::npos)
+            {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+        {
+            fail("expected parse error containing: " + needle);
+        }
+    };
+
     {
         const std::string src = R"(fn main() -> Unit {
     let x: Int = 1 + 2;
@@ -772,6 +803,22 @@ fn main() -> Unit {
             fail("expected invalid field access diagnostic");
         }
     }
+
+    // Top-level declaration error.
+    expect_parse_error_contains("let x: Int = 1;\n",
+                                "expected 'import', 'struct', 'enum', or 'fn'");
+
+    // Import declaration errors.
+    expect_parse_error_contains("import ;\n", "expected module name after 'import'");
+    expect_parse_error_contains("import foo.;\n", "expected identifier after '.' in import path");
+
+    // Struct declaration errors.
+    expect_parse_error_contains("struct S { x Int; }\n", "expected ':' after field name");
+    expect_parse_error_contains("struct S { x: Int; x: Int; }\n",
+                                "duplicate field name in struct declaration");
+
+    // Enum declaration errors.
+    expect_parse_error_contains("enum E { V(Int; }\n", "expected ')' after enum variant payload");
 
     std::cout << "OK\n";
     return 0;
