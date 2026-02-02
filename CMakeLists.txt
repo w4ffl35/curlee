@@ -225,10 +225,12 @@ add_executable(curlee_python_runner_fake_error
 add_executable(curlee_python_runner_fake_hang
   tests/python_runner_fake_hang.cpp
 )
+add_test(NAME curlee_python_runner_fake_hang_smoke COMMAND cmake -E env CURLEE_TEST_SHORT_SLEEP=1 $<TARGET_FILE:curlee_python_runner_fake_hang>)
 
 add_executable(curlee_python_runner_fake_spam
   tests/python_runner_fake_spam.cpp
 )
+add_test(NAME curlee_python_runner_fake_spam_smoke COMMAND cmake -E env CURLEE_TEST_SMALL_SPAM=1 $<TARGET_FILE:curlee_python_runner_fake_spam>)
 
 add_executable(curlee_python_runner_fake_env_check
   tests/python_runner_fake_env_check.cpp
@@ -249,6 +251,10 @@ add_executable(curlee_python_runner_fake_error_escapes
 add_executable(curlee_bwrap_fake
   tests/bwrap_fake.cpp
 )
+add_test(NAME curlee_bwrap_fake_smoke COMMAND $<TARGET_FILE:curlee_bwrap_fake>)
+set_tests_properties(curlee_bwrap_fake_smoke PROPERTIES WILL_FAIL TRUE)
+
+add_test(NAME curlee_bwrap_fake_exec COMMAND $<TARGET_FILE:curlee_bwrap_fake> -- /bin/true)
 
 add_executable(curlee_fake_exes_tests
   tests/fake_exes_tests.cpp
@@ -362,6 +368,15 @@ add_executable(curlee_types_tests
 target_include_directories(curlee_types_tests PRIVATE include)
 
 add_test(NAME curlee_types_tests COMMAND curlee_types_tests)
+
+add_executable(curlee_types_extra_tests
+  tests/types_extra_tests.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+  src/types/type_check.cpp
+)
+target_include_directories(curlee_types_extra_tests PRIVATE include)
+add_test(NAME curlee_types_extra_tests COMMAND curlee_types_extra_tests)
 
 add_executable(curlee_training_data_tests
   tests/training_data_tests.cpp
@@ -799,6 +814,14 @@ add_executable(curlee_verification_tests
   tests/verification_solver_tests.cpp
   src/verification/solver.cpp
 )
+
+add_executable(curlee_verification_solver_extra_tests
+  tests/verification_solver_extra_tests.cpp
+  src/verification/solver.cpp
+)
+target_include_directories(curlee_verification_solver_extra_tests PRIVATE include)
+target_link_libraries(curlee_verification_solver_extra_tests PRIVATE Z3::Z3)
+add_test(NAME curlee_verification_solver_extra_tests COMMAND curlee_verification_solver_extra_tests)
 target_include_directories(curlee_verification_tests PRIVATE include)
 target_link_libraries(curlee_verification_tests PRIVATE Z3::Z3)
 
