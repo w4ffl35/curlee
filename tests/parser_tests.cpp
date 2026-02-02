@@ -92,10 +92,66 @@ int main()
         {
             fail("dump missing requires/ensures");
         }
+        if (dumped.find("denominator") == std::string::npos ||
+            dumped.find("bang_equal") == std::string::npos || dumped.find("0") == std::string::npos)
+        {
+            fail("dump missing requires predicate");
+        }
+        if (dumped.find("result") == std::string::npos ||
+            dumped.find("star") == std::string::npos ||
+            dumped.find("denominator") == std::string::npos)
+        {
+            fail("dump missing ensures predicate");
+        }
         if (dumped.find("numerator: Int") == std::string::npos ||
             dumped.find("denominator: Int") == std::string::npos)
         {
             fail("dump missing typed parameters");
+        }
+    }
+
+    {
+        const std::string src = R"(fn pred_ops(a: Int, b: Int) -> Int
+  [ requires ((a < b) && (b <= a + 10)) || !false;
+    ensures (result + 1) >= (a - b); ]
+{
+  return a;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on predicate-ops program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on predicate-ops program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("and_and") == std::string::npos ||
+            dumped.find("or_or") == std::string::npos)
+        {
+            fail("dump missing &&/|| predicate operators");
+        }
+        if (dumped.find("bang false") == std::string::npos)
+        {
+            fail("dump missing unary ! predicate");
+        }
+        if (dumped.find("a plus 10") == std::string::npos ||
+            dumped.find("a minus b") == std::string::npos)
+        {
+            fail("dump missing +/- predicate expressions");
+        }
+        if (dumped.find("less") == std::string::npos ||
+            dumped.find("less_equal") == std::string::npos ||
+            dumped.find("greater_equal") == std::string::npos)
+        {
+            fail("dump missing comparison predicate operators");
         }
     }
 
@@ -536,6 +592,70 @@ fn main() -> Int {
             fail("dump missing field access");
         }
         (void)prog.functions[0];
+    }
+
+    {
+        const std::string src = "fn first() -> Unit {\n"
+                                "  first;\n"
+                                "}\n\n"
+                                "import a;\n\n"
+                                "fn second() -> Unit {\n"
+                                "  second;\n"
+                                "}\n";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on import-ordering program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+        {
+            fail("expected parse to fail on import ordering");
+        }
+
+        const auto& diags = std::get<std::vector<diag::Diagnostic>>(parsed);
+        bool found_import_ordering = false;
+        bool found_note_move_import = false;
+        bool found_note_first_decl = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("import declarations must appear before") == std::string::npos)
+            {
+                continue;
+            }
+            found_import_ordering = true;
+            for (const auto& note : d.notes)
+            {
+                if (note.message.find("move this import above") != std::string::npos)
+                {
+                    found_note_move_import = true;
+                }
+                if (note.message.find("first declaration is here") != std::string::npos)
+                {
+                    found_note_first_decl = true;
+                    if (!note.span.has_value())
+                    {
+                        fail("expected 'first declaration is here' note to have a span");
+                    }
+                }
+            }
+        }
+
+        if (!found_import_ordering)
+        {
+            fail("expected import-ordering diagnostic");
+        }
+        if (!found_note_move_import)
+        {
+            fail("expected note suggesting moving import");
+        }
+        if (!found_note_first_decl)
+        {
+            fail("expected note pointing at first declaration");
+        }
     }
 
     {
