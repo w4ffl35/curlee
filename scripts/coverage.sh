@@ -19,7 +19,7 @@ Builds + runs tests under coverage instrumentation, then prints a coverage summa
 Defaults:
   --preset      linux-debug-coverage
   --out         build/coverage
-  --fail-under  77
+  --fail-under  80
 
 Requires one of:
   - gcovr (recommended), or
@@ -99,9 +99,17 @@ if command -v gcovr >/dev/null 2>&1; then
   args=(
     --root "$repo_root"
     --object-directory "$build_dir"
+    # Focus on production code coverage (tests are just coverage drivers).
+    --filter '^src/'
+    --filter '^include/'
     # Exclude build artifacts (including CMake compiler-id objects that gcovr can
     # fail to resolve back to sources).
-    --exclude ".*${repo_root}/build/.*"
+    --exclude '^build/'
+    --exclude '^tests/'
+    --exclude '^examples/'
+    --exclude '^scripts/'
+    --exclude '^cmake/'
+    --exclude '^wiki/'
     --exclude ".*${build_dir}/CMakeFiles/.*"
     --gcov-ignore-errors no_working_dir_found
     --print-summary
