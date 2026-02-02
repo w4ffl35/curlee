@@ -720,7 +720,11 @@ int main(int argc, char** argv)
     if (argc >= 1)
     {
         const std::string runner_error = sibling_exe(argv[0], "curlee_python_runner_fake_error");
+        const std::string runner_error_escapes =
+            sibling_exe(argv[0], "curlee_python_runner_fake_error_escapes");
         const std::string runner_hang = sibling_exe(argv[0], "curlee_python_runner_fake_hang");
+        const std::string runner_plain_fail =
+            sibling_exe(argv[0], "curlee_python_runner_fake_plain_fail");
         const std::string runner_spam = sibling_exe(argv[0], "curlee_python_runner_fake_spam");
         const std::string runner_sandbox_required =
             sibling_exe(argv[0], "curlee_python_runner_fake_sandbox_required");
@@ -734,6 +738,26 @@ int main(int argc, char** argv)
         VM vm;
         VM::Capabilities caps;
         caps.insert("python:ffi");
+
+        // Non-sandbox exec failure path.
+        (void)setenv("CURLEE_PYTHON_RUNNER", "/no/such/curlee_python_runner_missing", 1);
+        {
+            const auto res = vm.run(chunk, caps);
+            if (res.ok || res.error != "python runner exec failed")
+            {
+                fail("expected python runner exec failed error");
+            }
+        }
+
+        // Non-sandbox default failure (non-JSON, exit_code != 127).
+        (void)setenv("CURLEE_PYTHON_RUNNER", runner_plain_fail.c_str(), 1);
+        {
+            const auto res = vm.run(chunk, caps);
+            if (res.ok || res.error != "python runner failed")
+            {
+                fail("expected python runner failed default error");
+            }
+        }
 
         (void)setenv("CURLEE_PYTHON_RUNNER", runner_hang.c_str(), 1);
         {
@@ -762,6 +786,17 @@ int main(int argc, char** argv)
             }
         }
 
+        // Structured error with common escape sequences should be decoded.
+        (void)setenv("CURLEE_PYTHON_RUNNER", runner_error_escapes.c_str(), 1);
+        {
+            const auto res = vm.run(chunk, caps);
+            const std::string expected = "forced \"runner\nerror\twith\rcarriage\\slash and escape";
+            if (res.ok || res.error != expected)
+            {
+                fail("expected python runner escape decoding in error message");
+            }
+        }
+
         // Sandbox success path (via bwrap_fake).
         (void)setenv("CURLEE_PYTHON_RUNNER", runner_sandbox_required.c_str(), 1);
         (void)setenv("CURLEE_BWRAP", bwrap_fake.c_str(), 1);
@@ -773,6 +808,20 @@ int main(int argc, char** argv)
             if (!res.ok || !(res.value == Value::unit_v()))
             {
                 fail("expected sandboxed python call to succeed");
+            }
+        }
+
+        // Sandbox failure path (exit_code != 127, no structured message).
+        (void)setenv("CURLEE_PYTHON_RUNNER", runner_plain_fail.c_str(), 1);
+        (void)setenv("CURLEE_BWRAP", bwrap_fake.c_str(), 1);
+        {
+            VM::Capabilities sandbox_caps;
+            sandbox_caps.insert("python:ffi");
+            sandbox_caps.insert("python:sandbox");
+            const auto res = vm.run(chunk, sandbox_caps);
+            if (res.ok || res.error != "python sandbox failed")
+            {
+                fail("expected python sandbox failed error");
             }
         }
 

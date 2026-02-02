@@ -238,6 +238,14 @@ add_executable(curlee_python_runner_fake_sandbox_required
   tests/python_runner_fake_sandbox_required.cpp
 )
 
+add_executable(curlee_python_runner_fake_plain_fail
+  tests/python_runner_fake_plain_fail.cpp
+)
+
+add_executable(curlee_python_runner_fake_error_escapes
+  tests/python_runner_fake_error_escapes.cpp
+)
+
 add_executable(curlee_bwrap_fake
   tests/bwrap_fake.cpp
 )
