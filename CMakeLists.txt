@@ -721,6 +721,14 @@ target_include_directories(curlee_vm_tests PRIVATE include)
 
 add_test(NAME curlee_vm_tests COMMAND curlee_vm_tests)
 
+add_executable(curlee_vm_internal_io_unit_tests
+  tests/vm_internal_io_unit_tests.cpp
+)
+
+target_include_directories(curlee_vm_internal_io_unit_tests PRIVATE include)
+
+add_test(NAME curlee_vm_internal_io_unit_tests COMMAND curlee_vm_internal_io_unit_tests)
+
 add_executable(curlee_bundle_tests
   tests/bundle_tests.cpp
   src/bundle/bundle.cpp
