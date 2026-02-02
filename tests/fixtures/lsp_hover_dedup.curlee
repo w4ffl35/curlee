@@ -1,0 +1,9 @@
+fn dup(x: Int where x > 0) -> Int [
+  requires x > 0;
+] {
+  return x;
+}
+
+fn main() -> Int {
+  return dup(1);
+}

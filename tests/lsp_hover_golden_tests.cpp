@@ -438,6 +438,27 @@ static void compute_line_col(const std::string& text, std::size_t offset, std::s
     }
 }
 
+static std::size_t count_substring(std::string_view haystack, std::string_view needle)
+{
+    if (needle.empty())
+    {
+        return 0;
+    }
+    std::size_t count = 0;
+    std::size_t pos = 0;
+    while (true)
+    {
+        pos = haystack.find(needle, pos);
+        if (pos == std::string_view::npos)
+        {
+            break;
+        }
+        ++count;
+        pos += needle.size();
+    }
+    return count;
+}
+
 static bool run_hover_call_case(const fs::path& data_dir, const std::string& lsp_exe)
 {
     const fs::path fixture_path = fs::path("tests/fixtures/lsp_hover_call.curlee");
@@ -724,6 +745,282 @@ static bool run_hover_without_open_case(const std::string& lsp_exe)
             std::cerr << "LSP stdout:\n" << result.out << "\n";
             fail("unexpected hover response for unopened document (id=2)");
         }
+    }
+
+    return true;
+}
+
+static bool run_definition_without_open_case(const std::string& lsp_exe)
+{
+    const std::string uri =
+        "file://" + (fs::current_path() / "tests/fixtures" / "hello.curlee").string();
+
+    const std::string init =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}";
+
+    std::ostringstream def;
+    def << "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/"
+           "definition\",\"params\":{\"textDocument\":{\"uri\":\""
+        << json_escape(uri)
+        << "\"},\"position\":{\"line\":0,\"character\":0}}}";
+
+    const std::string shutdown =
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{}}";
+    const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
+
+    std::string stdin_data;
+    stdin_data += lsp_frame(init);
+    stdin_data += lsp_frame(def.str());
+    stdin_data += lsp_frame(shutdown);
+    stdin_data += lsp_frame(exit);
+
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+
+    const auto payloads = split_lsp_frames(result.out);
+    for (const auto& p : payloads)
+    {
+        if (p.find("\"id\":2") != std::string::npos)
+        {
+            std::cerr << "LSP stdout:\n" << result.out << "\n";
+            fail("unexpected definition response for unopened document (id=2)");
+        }
+    }
+
+    return true;
+}
+
+static bool run_hover_negative_line_case(const std::string& lsp_exe)
+{
+    const fs::path fixture_path = fs::path("tests/fixtures/lsp_hover_call.curlee");
+    const std::string text = slurp(fixture_path);
+    const std::string uri = "file://" + (fs::current_path() / fixture_path).string();
+
+    const std::string init =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}";
+
+    const std::string did_open = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                                 "didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                                 json_escape(uri) +
+                                 "\",\"languageId\":\"curlee\",\"version\":1,\"text\":\"" +
+                                 json_escape(text) + "\"}}}";
+
+    // Negative line number should not produce any response.
+    const std::string hover_neg =
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/"
+        "hover\",\"params\":{\"textDocument\":{\"uri\":\"" +
+        json_escape(uri) + "\"},\"position\":{\"line\":-1,\"character\":0}}}";
+
+    const std::string shutdown =
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{}}";
+    const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
+
+    std::string stdin_data;
+    stdin_data += lsp_frame(init);
+    stdin_data += lsp_frame(did_open);
+    stdin_data += lsp_frame(hover_neg);
+    stdin_data += lsp_frame(shutdown);
+    stdin_data += lsp_frame(exit);
+
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+
+    const auto payloads = split_lsp_frames(result.out);
+    for (const auto& p : payloads)
+    {
+        if (p.find("\"id\":2") != std::string::npos)
+        {
+            std::cerr << "LSP stdout:\n" << result.out << "\n";
+            fail("unexpected hover response for negative line (id=2)");
+        }
+    }
+
+    return true;
+}
+
+static bool run_hover_invalid_document_no_response_case(const std::string& lsp_exe)
+{
+    const std::string bad_text = "fn main() -> Int { let x: Int = ; return 0; }";
+    const std::string uri =
+        "file://" + (fs::current_path() / "tests/fixtures" / "hello.curlee").string();
+
+    const std::string init =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}";
+
+    const std::string did_open = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                                 "didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                                 json_escape(uri) +
+                                 "\",\"languageId\":\"curlee\",\"version\":1,\"text\":\"" +
+                                 json_escape(bad_text) + "\"}}}";
+
+    const std::string hover =
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/"
+        "hover\",\"params\":{\"textDocument\":{\"uri\":\"" +
+        json_escape(uri) + "\"},\"position\":{\"line\":0,\"character\":0}}}";
+
+    const std::string shutdown =
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{}}";
+    const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
+
+    std::string stdin_data;
+    stdin_data += lsp_frame(init);
+    stdin_data += lsp_frame(did_open);
+    stdin_data += lsp_frame(hover);
+    stdin_data += lsp_frame(shutdown);
+    stdin_data += lsp_frame(exit);
+
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+
+    const auto payloads = split_lsp_frames(result.out);
+    for (const auto& p : payloads)
+    {
+        if (p.find("\"id\":2") != std::string::npos)
+        {
+            std::cerr << "LSP stdout:\n" << result.out << "\n";
+            fail("unexpected hover response for invalid document (id=2)");
+        }
+    }
+
+    return true;
+}
+
+static bool run_hover_call_dedup_obligations_case(const std::string& lsp_exe)
+{
+    const fs::path fixture_path = fs::path("tests/fixtures/lsp_hover_dedup.curlee");
+    const std::string text = slurp(fixture_path);
+    const std::string uri = "file://" + (fs::current_path() / fixture_path).string();
+
+    const std::size_t call_pos = text.find("dup(1)");
+    if (call_pos == std::string::npos)
+    {
+        fail("failed to find call site in fixture");
+    }
+
+    const std::size_t callee_start = call_pos;
+    const std::size_t callee_end = call_pos + std::string("dup").size();
+
+    std::size_t expected_start_line = 0;
+    std::size_t expected_start_col = 0;
+    std::size_t expected_end_line = 0;
+    std::size_t expected_end_col = 0;
+    compute_line_col(text, callee_start, expected_start_line, expected_start_col);
+    compute_line_col(text, callee_end, expected_end_line, expected_end_col);
+
+    std::size_t line = 0;
+    std::size_t col = 0;
+    compute_line_col(text, call_pos + 1, line, col);
+
+    const std::string init =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}";
+
+    const std::string did_open = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                                 "didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                                 json_escape(uri) +
+                                 "\",\"languageId\":\"curlee\",\"version\":1,\"text\":\"" +
+                                 json_escape(text) + "\"}}}";
+
+    std::ostringstream hover;
+    hover << "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/"
+             "hover\",\"params\":{\"textDocument\":{\"uri\":\""
+          << json_escape(uri) << "\"},\"position\":{\"line\":" << line
+          << ",\"character\":" << col << "}}}";
+
+    const std::string shutdown =
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{}}";
+    const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
+
+    std::string stdin_data;
+    stdin_data += lsp_frame(init);
+    stdin_data += lsp_frame(did_open);
+    stdin_data += lsp_frame(hover.str());
+    stdin_data += lsp_frame(shutdown);
+    stdin_data += lsp_frame(exit);
+
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+
+    const auto payloads = split_lsp_frames(result.out);
+    std::optional<std::string> got;
+    std::optional<HoverRange> got_range;
+    for (const auto& p : payloads)
+    {
+        if (p.find("\"id\":2") == std::string::npos)
+        {
+            continue;
+        }
+        got = extract_json_string_value(p, "value");
+        got_range = extract_hover_range(p);
+        break;
+    }
+
+    if (!got.has_value())
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("did not find hover response (id=2) with a contents.value");
+    }
+
+    if (!got_range.has_value())
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("did not find hover response (id=2) with a range");
+    }
+
+    if (got_range->start_line != expected_start_line ||
+        got_range->start_character != expected_start_col ||
+        got_range->end_line != expected_end_line || got_range->end_character != expected_end_col)
+    {
+        std::cerr << "RANGE MISMATCH for hover call (dedup fixture)\n";
+        std::cerr << "expected start(" << expected_start_line << "," << expected_start_col
+                  << ") end(" << expected_end_line << "," << expected_end_col << ")\n";
+        std::cerr << "got start(" << got_range->start_line << "," << got_range->start_character
+                  << ") end(" << got_range->end_line << "," << got_range->end_character
+                  << ")\n";
+        return false;
+    }
+
+    if (got->find("fn dup") == std::string::npos)
+    {
+        std::cerr << "LSP hover value:\n" << *got << "\n";
+        fail("expected hover text to include function signature for dup");
+    }
+
+    const auto obligations_pos = got->find("\nobligations: ");
+    if (obligations_pos == std::string::npos)
+    {
+        std::cerr << "LSP hover value:\n" << *got << "\n";
+        fail("expected hover text to include obligations line");
+    }
+
+    const std::size_t line_start = obligations_pos + 1;
+    const std::size_t line_end = got->find('\n', line_start);
+    const std::size_t end = (line_end == std::string::npos) ? got->size() : line_end;
+
+    const std::string_view obligations_line(*got);
+    const std::string_view line_view = obligations_line.substr(line_start, end - line_start);
+
+    // The function requires x > 0 and also refines x with x > 0. These are intentionally
+    // duplicates; the hover's obligations list should deduplicate them.
+    if (count_substring(line_view, "> 0") != 1)
+    {
+        std::cerr << "obligations line:\n" << std::string(line_view) << "\n";
+        fail("expected obligations line to contain exactly one '> 0' occurrence");
     }
 
     return true;
@@ -1115,6 +1412,26 @@ int main(int argc, char** argv)
     }
 
     if (!run_hover_without_open_case(lsp_exe))
+    {
+        return 1;
+    }
+
+    if (!run_definition_without_open_case(lsp_exe))
+    {
+        return 1;
+    }
+
+    if (!run_hover_negative_line_case(lsp_exe))
+    {
+        return 1;
+    }
+
+    if (!run_hover_invalid_document_no_response_case(lsp_exe))
+    {
+        return 1;
+    }
+
+    if (!run_hover_call_dedup_obligations_case(lsp_exe))
     {
         return 1;
     }
