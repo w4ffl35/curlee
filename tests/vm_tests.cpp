@@ -14,6 +14,73 @@ int main()
 {
     using namespace curlee::vm;
 
+    // Cover Value equality and stringification for each kind.
+    {
+        const Value i1 = Value::int_v(7);
+        const Value i2 = Value::int_v(7);
+        const Value i3 = Value::int_v(8);
+        if (!(i1 == i2) || (i1 == i3))
+        {
+            fail("unexpected Int value equality behavior");
+        }
+
+        const Value b1 = Value::bool_v(true);
+        const Value b2 = Value::bool_v(true);
+        const Value b3 = Value::bool_v(false);
+        if (!(b1 == b2) || (b1 == b3))
+        {
+            fail("unexpected Bool value equality behavior");
+        }
+
+        const Value s1 = Value::string_v("hi");
+        const Value s2 = Value::string_v("hi");
+        const Value s3 = Value::string_v("bye");
+        if (!(s1 == s2) || (s1 == s3))
+        {
+            fail("unexpected String value equality behavior");
+        }
+
+        const Value u1 = Value::unit_v();
+        const Value u2 = Value::unit_v();
+        if (!(u1 == u2))
+        {
+            fail("unexpected Unit value equality behavior");
+        }
+
+        if (i1 == b1 || i1 == s1 || i1 == u1)
+        {
+            fail("expected different Value kinds to compare unequal");
+        }
+
+        if (to_string(Value::int_v(42)) != "42")
+        {
+            fail("unexpected Int to_string");
+        }
+        if (to_string(Value::bool_v(true)) != "true" || to_string(Value::bool_v(false)) != "false")
+        {
+            fail("unexpected Bool to_string");
+        }
+        if (to_string(Value::string_v("abc")) != "abc")
+        {
+            fail("unexpected String to_string");
+        }
+        if (to_string(Value::unit_v()) != "()")
+        {
+            fail("unexpected Unit to_string");
+        }
+
+        Value unknown;
+        unknown.kind = static_cast<ValueKind>(999);
+        if (to_string(unknown) != "<unknown>")
+        {
+            fail("expected unknown ValueKind to stringify to '<unknown>'");
+        }
+        if (unknown == unknown)
+        {
+            fail("expected unknown ValueKind to compare unequal (defensive default)");
+        }
+    }
+
     auto run_twice_deterministic = [](const Chunk& chunk, Value expected)
     {
         VM vm;
