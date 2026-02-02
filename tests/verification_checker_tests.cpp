@@ -656,6 +656,63 @@ int main()
         }
     }
 
+    {
+        // Expression lowering: '/' is not supported by the solver-side expression language.
+        const std::string source = "fn bad_div(x: Int) -> Int [ ensures result > 0; ] {\n"
+                                   "  return x / 2;\n"
+                                   "}\n"
+                                   "fn main() -> Int { return bad_div(1); }\n";
+
+        const auto verified = verify_program(source, "division unsupported in verification expr");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for division unsupported in verification expr");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "unsupported binary operator in expression"))
+        {
+            fail("expected unsupported binary operator diagnostic for division");
+        }
+    }
+
+    {
+        // Goal rendering: exercise <=, >=, +, -, * in goal notes.
+        const std::string source = "fn arith(x: Int) -> Int [\n"
+                                   "  requires (x + 1) <= 0;\n"
+                                   "  requires (x - 1) >= 0;\n"
+                                   "  requires (x * 2) >= 0;\n"
+                                   "] {\n"
+                                   "  return x;\n"
+                                   "}\n"
+                                   "fn main() -> Int {\n"
+                                   "  arith(0);\n"
+                                   "  arith(-1);\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "goal <= >= + - * rendering test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for goal <= >= + - * rendering test");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "requires clause not satisfied"))
+        {
+            fail("expected requires failure for goal <= >= + - * rendering test");
+        }
+        if (!any_note_has_prefix(diags, "goal: "))
+        {
+            fail("expected goal note for goal <= >= + - * rendering test");
+        }
+        if (!any_note_has_substr(diags, "<=") || !any_note_has_substr(diags, ">=") ||
+            !any_note_has_substr(diags, "+") || !any_note_has_substr(diags, "-") ||
+            !any_note_has_substr(diags, "*"))
+        {
+            fail("expected goal note to include <=, >=, +, -, * for goal <= >= + - * rendering "
+                 "test");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }
