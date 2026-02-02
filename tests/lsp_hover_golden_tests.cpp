@@ -1103,8 +1103,8 @@ static bool run_hover_call_operator_rendering_case(const std::string& lsp_exe)
     std::ostringstream hover;
     hover << "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/"
              "hover\",\"params\":{\"textDocument\":{\"uri\":\""
-          << json_escape(uri) << "\"},\"position\":{\"line\":" << line
-          << ",\"character\":" << col << "}}}";
+          << json_escape(uri) << "\"},\"position\":{\"line\":" << line << ",\"character\":" << col
+          << "}}}";
 
     const std::string shutdown =
         "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{}}";
@@ -1171,6 +1171,94 @@ static bool run_hover_call_operator_rendering_case(const std::string& lsp_exe)
     {
         std::cerr << "LSP hover value:\n" << *got << "\n";
         fail("expected hover text to include boolean literals");
+    }
+
+    return true;
+}
+
+static bool run_hover_call_more_operator_rendering_case(const std::string& lsp_exe)
+{
+    const fs::path fixture_path = fs::path("tests/fixtures/lsp_hover_ops2.curlee");
+    const std::string text = slurp(fixture_path);
+    const std::string uri = "file://" + (fs::current_path() / fixture_path).string();
+
+    const std::size_t call_pos = text.find("ops2(0)");
+    if (call_pos == std::string::npos)
+    {
+        fail("failed to find call site in fixture");
+    }
+
+    std::size_t line = 0;
+    std::size_t col = 0;
+    compute_line_col(text, call_pos + 1, line, col);
+
+    const std::string init =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}";
+
+    const std::string did_open = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                                 "didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                                 json_escape(uri) +
+                                 "\",\"languageId\":\"curlee\",\"version\":1,\"text\":\"" +
+                                 json_escape(text) + "\"}}}";
+
+    std::ostringstream hover;
+    hover << "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/"
+             "hover\",\"params\":{\"textDocument\":{\"uri\":\""
+          << json_escape(uri) << "\"},\"position\":{\"line\":" << line << ",\"character\":" << col
+          << "}}}";
+
+    const std::string shutdown =
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{}}";
+    const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
+
+    std::string stdin_data;
+    stdin_data += lsp_frame(init);
+    stdin_data += lsp_frame(did_open);
+    stdin_data += lsp_frame(hover.str());
+    stdin_data += lsp_frame(shutdown);
+    stdin_data += lsp_frame(exit);
+
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+
+    const auto payloads = split_lsp_frames(result.out);
+    std::optional<std::string> got;
+    for (const auto& p : payloads)
+    {
+        if (p.find("\"id\":2") == std::string::npos)
+        {
+            continue;
+        }
+        got = extract_json_string_value(p, "value");
+        break;
+    }
+
+    if (!got.has_value())
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("did not find hover response (id=2) with a contents.value");
+    }
+
+    if (got->find("fn ops2") == std::string::npos)
+    {
+        std::cerr << "LSP hover value:\n" << *got << "\n";
+        fail("expected hover text to include function signature for ops2");
+    }
+
+    // Predicate operator rendering coverage.
+    const std::vector<std::string_view> expected_tokens = {
+        "!=", "<", "<=", ">", ">=", "+", "(-0 == 0)", "*", "/", "=="};
+    for (const auto tok : expected_tokens)
+    {
+        if (got->find(std::string(tok)) == std::string::npos)
+        {
+            std::cerr << "LSP hover value:\n" << *got << "\n";
+            fail("expected hover text to include token: " + std::string(tok));
+        }
     }
 
     return true;
@@ -1726,6 +1814,11 @@ int main(int argc, char** argv)
     }
 
     if (!run_hover_call_operator_rendering_case(lsp_exe))
+    {
+        return 1;
+    }
+
+    if (!run_hover_call_more_operator_rendering_case(lsp_exe))
     {
         return 1;
     }
