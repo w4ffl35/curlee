@@ -17,6 +17,23 @@ int main()
     const auto b = p.zeros(Shape{{2, 3}}, DType::I32);
     (void)p.add(a, b);
 
+    // Also validate ops() shape to ensure the builder actually stored ops.
+    {
+        const auto& ops = p.ops();
+        if (ops.size() != 3)
+        {
+            fail("expected 3 ops");
+        }
+        if (ops[0].name != "zeros" || ops[1].name != "zeros" || ops[2].name != "add")
+        {
+            fail("unexpected op names");
+        }
+        if (ops[2].inputs.size() != 2 || ops[2].inputs[0].id != 0 || ops[2].inputs[1].id != 1)
+        {
+            fail("unexpected add inputs");
+        }
+    }
+
     const std::string expected = "%0 = zeros i32[2,3]\n"
                                  "%1 = zeros i32[2,3]\n"
                                  "%2 = add %0 %1 : i32[2,3]\n";
@@ -31,6 +48,13 @@ int main()
     {
         Program p2;
         (void)p2.zeros(Shape{{}}, static_cast<DType>(123));
+
+        // ops() should contain the pushed zero op, even with unknown dtype.
+        const auto& ops2 = p2.ops();
+        if (ops2.size() != 1 || ops2[0].name != "zeros")
+        {
+            fail("expected one zeros op in p2");
+        }
 
         const auto got2 = p2.dump();
         if (got2 != "%0 = zeros <unknown>[]\n")

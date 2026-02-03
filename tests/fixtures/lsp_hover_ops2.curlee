@@ -1,0 +1,16 @@
+fn ops2(x: Int where (x + 1) >= 0) -> Int [
+  requires x != 0;
+  requires x < 10;
+  requires x <= 10;
+  requires x > -10;
+  requires x >= -10;
+  requires (x * 2) == 0;
+  requires (x / 1) == 0;
+  requires -x == 0;
+] {
+  return x;
+}
+
+fn main() -> Int {
+  return ops2(0);
+}

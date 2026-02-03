@@ -6,6 +6,19 @@
 #include <unistd.h>
 #include <vector>
 
+#if defined(__GNUC__)
+extern "C" void __gcov_flush(void) __attribute__((weak));
+static void maybe_gcov_flush()
+{
+    if (__gcov_flush)
+    {
+        __gcov_flush();
+    }
+}
+#else
+static void maybe_gcov_flush() {}
+#endif
+
 int main(int argc, char** argv)
 {
     int sep = -1;
@@ -21,6 +34,7 @@ int main(int argc, char** argv)
     if (sep < 0 || sep + 1 >= argc)
     {
         std::cerr << "bwrap_fake: missing -- COMMAND\n";
+        maybe_gcov_flush();
         return 2;
     }
 
@@ -34,7 +48,10 @@ int main(int argc, char** argv)
     }
     child_argv.push_back(nullptr);
 
+    // `execv` replaces the process image, so flush coverage data before exec.
+    maybe_gcov_flush();
     execv(child_argv[0], child_argv.data());
     std::cerr << "bwrap_fake: execv failed: " << std::strerror(errno) << "\n";
+    maybe_gcov_flush();
     return 127;
 }

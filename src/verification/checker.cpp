@@ -84,6 +84,10 @@ std::string pred_to_string(const curlee::parser::Pred& pred)
             {
                 return std::string(node.lexeme);
             }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PredBool>)
+            {
+                return node.value ? "true" : "false";
+            }
             else if constexpr (std::is_same_v<Node, curlee::parser::PredName>)
             {
                 return std::string(node.name);
@@ -367,6 +371,11 @@ class Verifier
                 {
                     const std::string literal(node.lexeme);
                     return ExprValue{solver_.context().int_val(literal.c_str()), TypeKind::Int,
+                                     true};
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::BoolExpr>)
+                {
+                    return ExprValue{solver_.context().bool_val(node.value), TypeKind::Bool,
                                      true};
                 }
                 else if constexpr (std::is_same_v<Node, curlee::parser::StringExpr>)

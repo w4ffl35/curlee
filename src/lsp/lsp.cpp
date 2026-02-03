@@ -733,6 +733,36 @@ LspRange to_lsp_range(const curlee::source::Span& span, const curlee::source::Li
                     .end = {end_lc.line - 1, end_lc.col - 1}};
 }
 
+std::optional<curlee::source::Span>
+identifier_span_in_definition(const curlee::resolver::Symbol& sym, const std::string& text)
+{
+    if (sym.name.empty())
+    {
+        return std::nullopt;
+    }
+
+    const std::size_t search_start = std::min(sym.span.start, text.size());
+    const std::size_t search_end = std::min(sym.span.end, text.size());
+    if (search_start >= search_end)
+    {
+        return std::nullopt;
+    }
+
+    const std::size_t found = text.find(std::string(sym.name), search_start);
+    if (found == std::string::npos)
+    {
+        return std::nullopt;
+    }
+
+    const std::size_t end = found + sym.name.size();
+    if (found < search_start || end > search_end)
+    {
+        return std::nullopt;
+    }
+
+    return curlee::source::Span{.start = found, .end = end};
+}
+
 std::string lsp_range_to_json(const LspRange& range)
 {
     std::ostringstream oss;
@@ -1301,7 +1331,8 @@ int main()
                         {
                             if (sym.id == use.target)
                             {
-                                target_span = sym.span;
+                                target_span =
+                                    identifier_span_in_definition(sym, doc.text).value_or(sym.span);
                                 break;
                             }
                         }

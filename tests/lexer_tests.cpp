@@ -244,6 +244,141 @@ int main()
         }
     }
 
+    // Unterminated string due to newline.
+    {
+        const std::string src = "\"hi\nthere\"";
+        const auto res = lex(src);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(res))
+        {
+            fail("expected error for newline in string literal");
+        }
+
+        const auto& d = std::get<curlee::diag::Diagnostic>(res);
+        if (d.message != "unterminated string literal")
+        {
+            fail("unexpected diagnostic message for newline in string literal");
+        }
+        if (!d.span.has_value() || d.span->start != 0 || d.span->end != 3)
+        {
+            fail("unexpected span for newline in string literal");
+        }
+    }
+
+    // Unterminated string due to trailing backslash at EOF.
+    {
+        const std::string src = "\"hi\\";
+        const auto res = lex(src);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(res))
+        {
+            fail("expected error for trailing backslash in string literal");
+        }
+
+        const auto& d = std::get<curlee::diag::Diagnostic>(res);
+        if (d.message != "unterminated string literal")
+        {
+            fail("unexpected diagnostic message for trailing backslash");
+        }
+        if (!d.span.has_value() || d.span->start != 0 || d.span->end != 4)
+        {
+            fail("unexpected span for trailing backslash");
+        }
+    }
+
+    // Exercise: underscore identifier start, multi-character identifiers, and multi-digit ints.
+    {
+        const std::string src = "let _abc123 = 12345;";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for underscore identifier and multi-digit int");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::KwLet, "let");
+        expect_token(toks, 1, TokenKind::Identifier, "_abc123");
+        expect_token(toks, 2, TokenKind::Equal, "=");
+        expect_token(toks, 3, TokenKind::IntLiteral, "12345");
+        expect_token(toks, 4, TokenKind::Semicolon, ";");
+        expect_token(toks, 5, TokenKind::Eof, "");
+    }
+
+    // Exercise: keyword cap.
+    {
+        const std::string src = "cap foo;";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for cap keyword");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::KwCap, "cap");
+        expect_token(toks, 1, TokenKind::Identifier, "foo");
+        expect_token(toks, 2, TokenKind::Semicolon, ";");
+        expect_token(toks, 3, TokenKind::Eof, "");
+    }
+
+    // Exercise: two-character operators (<=, >=, ==, !=, &&, ||) and trivia skipping.
+    {
+        const std::string src = " \t// line comment\n"
+                                "/* block */ if x <= 1 && x >= 0 || x == 2 || x != 3 { }";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for operators and comments");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::KwIf, "if");
+        expect_token(toks, 1, TokenKind::Identifier, "x");
+        expect_token(toks, 2, TokenKind::LessEqual, "<=");
+        expect_token(toks, 3, TokenKind::IntLiteral, "1");
+        expect_token(toks, 4, TokenKind::AndAnd, "&&");
+        expect_token(toks, 5, TokenKind::Identifier, "x");
+        expect_token(toks, 6, TokenKind::GreaterEqual, ">=");
+        expect_token(toks, 7, TokenKind::IntLiteral, "0");
+        expect_token(toks, 8, TokenKind::OrOr, "||");
+        expect_token(toks, 9, TokenKind::Identifier, "x");
+        expect_token(toks, 10, TokenKind::EqualEqual, "==");
+        expect_token(toks, 11, TokenKind::IntLiteral, "2");
+        expect_token(toks, 12, TokenKind::OrOr, "||");
+        expect_token(toks, 13, TokenKind::Identifier, "x");
+        expect_token(toks, 14, TokenKind::BangEqual, "!=");
+        expect_token(toks, 15, TokenKind::IntLiteral, "3");
+        expect_token(toks, 16, TokenKind::LBrace, "{");
+        expect_token(toks, 17, TokenKind::RBrace, "}");
+        expect_token(toks, 18, TokenKind::Eof, "");
+    }
+
+    // Exercise: :: token.
+    {
+        const std::string src = "foo::bar";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for :: token");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::Identifier, "foo");
+        expect_token(toks, 1, TokenKind::ColonColon, "::");
+        expect_token(toks, 2, TokenKind::Identifier, "bar");
+        expect_token(toks, 3, TokenKind::Eof, "");
+    }
+
+    // Exercise: line comment that ends at EOF (no trailing newline).
+    {
+        const std::string src = "// comment";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for EOF line comment");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::Eof, "");
+    }
+
     std::cout << "OK\n";
     return 0;
 }

@@ -80,6 +80,107 @@ int main()
     const fs::path fixture =
         find_repo_relative(fs::path("tests") / "fixtures" / "run_success.curlee");
 
+    // top-level: help flag variants
+    {
+        for (const std::string& flag : {std::string("-h"), std::string("help")})
+        {
+            std::string out;
+            std::string err;
+            const int rc = run_cli_capture({"curlee", flag}, out, err);
+            if (rc != 0)
+            {
+                fail("expected help variant to exit 0");
+            }
+            if (out.find("usage:") == std::string::npos)
+            {
+                fail("expected help variant stdout to contain usage");
+            }
+        }
+    }
+
+    // top-level: version flag variant
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "version"}, out, err);
+        if (rc != 0)
+        {
+            fail("expected version to exit 0");
+        }
+        if (!err.empty())
+        {
+            fail("expected version stderr to be empty");
+        }
+        if (out.find("curlee ") == std::string::npos || out.find("sha=") == std::string::npos)
+        {
+            fail("expected version output to contain 'curlee ' and 'sha='");
+        }
+    }
+
+    // top-level: argc==2 non-option that isn't .curlee should not trigger shorthand.
+    {
+        for (const std::string& arg : {std::string("a"), std::string("not_a_curlee_file.txt")})
+        {
+            std::string out;
+            std::string err;
+            const int rc = run_cli_capture({"curlee", arg}, out, err);
+            if (rc != 2)
+            {
+                fail("expected usage exit code for unknown command (no shorthand)");
+            }
+            expect_contains(err, "error: expected <command> <file.curlee>", "stderr");
+        }
+    }
+
+    // top-level: argc==2 token starting with '-' but not a flag still should not trigger shorthand.
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "-x"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for unknown top-level token");
+        }
+        expect_contains(err, "error: expected <command> <file.curlee>", "stderr");
+    }
+
+    // parse: missing <file.curlee> (covers generic <command> <file.curlee> usage error)
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "parse"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for missing parse file");
+        }
+        expect_contains(err, "error: expected <command> <file.curlee>", "stderr");
+    }
+
+    // parse: missing file path is surfaced as an error diagnostic
+    {
+        std::string out;
+        std::string err;
+        const int rc =
+            run_cli_capture({"curlee", "parse", "/tmp/curlee_missing_12345.curlee"}, out, err);
+        if (rc != 1)
+        {
+            fail("expected error exit code for missing file");
+        }
+        expect_contains(err, "error: failed to open file", "stderr");
+    }
+
+    // lex: missing short relative path (helps cover string/SSO branches in error rendering).
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "lex", "x.curlee"}, out, err);
+        if (rc != 1)
+        {
+            fail("expected error exit code for missing file");
+        }
+        expect_contains(err, "error: failed to open file", "stderr");
+    }
+
     // run: missing <file.curlee>
     {
         std::string out;
@@ -141,6 +242,19 @@ int main()
         expect_contains(err, "error: expected capability name after --cap=", "stderr");
     }
 
+    // run: non-empty --cap= is accepted (even if the run itself fails later)
+    {
+        std::string out;
+        std::string err;
+        const int rc =
+            run_cli_capture({"curlee", "run", "--cap=io:stdout", "--fuel", "0"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for missing run file (with --cap=)");
+        }
+        expect_contains(err, "error: expected <file.curlee>", "stderr");
+    }
+
     // run: missing value after --fuel
     {
         std::string out;
@@ -165,6 +279,18 @@ int main()
         expect_contains(err, "error: expected non-negative integer for --fuel", "stderr");
     }
 
+    // run: partially-valid --fuel (covers res.ptr != end parsing failure)
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--fuel", "123abc", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for partially-valid --fuel value");
+        }
+        expect_contains(err, "error: expected non-negative integer for --fuel", "stderr");
+    }
+
     // run: invalid --fuel=
     {
         std::string out;
@@ -175,6 +301,30 @@ int main()
             fail("expected usage exit code for invalid --fuel=");
         }
         expect_contains(err, "error: expected non-negative integer for --fuel=", "stderr");
+    }
+
+    // run: partially-valid --fuel= (covers res.ptr != end parsing failure)
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--fuel=123abc", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for partially-valid --fuel= value");
+        }
+        expect_contains(err, "error: expected non-negative integer for --fuel=", "stderr");
+    }
+
+    // run: valid --fuel= is accepted (even if the run fails later due to missing file).
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--fuel=0"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for missing run file (with --fuel=)");
+        }
+        expect_contains(err, "error: expected <file.curlee>", "stderr");
     }
 
     // run: empty --fuel=
@@ -226,6 +376,19 @@ int main()
         expect_contains(err, "error: expected a single --bundle <file.bundle>", "stderr");
     }
 
+    // run: duplicate --bundle= form
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "run", "--bundle=a.bundle", "--bundle=b.bundle", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for duplicate --bundle=");
+        }
+        expect_contains(err, "error: expected a single --bundle <file.bundle>", "stderr");
+    }
+
     // run: multiple positional <file.curlee>
     {
         std::string out;
@@ -259,6 +422,19 @@ int main()
         if (rc != 2)
         {
             fail("expected usage exit code for fmt missing args");
+        }
+        expect_contains(err, "error: expected curlee fmt", "stderr");
+    }
+
+    // fmt: wrong flag value should not be treated as --check.
+    {
+        const fs::path some_path = temp_path("curlee_cli_fmt_not_check.cpp");
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "fmt", "--wat", some_path.string()}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for fmt wrong flag");
         }
         expect_contains(err, "error: expected curlee fmt", "stderr");
     }

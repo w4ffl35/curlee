@@ -11,19 +11,33 @@ namespace curlee::bundle
 namespace
 {
 
+#if defined(__GNUC__) || defined(__clang__)
+#define CURLEE_NOINLINE __attribute__((noinline))
+#else
+#define CURLEE_NOINLINE
+#endif
+
 constexpr std::string_view kHeader = "CURLEE_BUNDLE";
 constexpr std::string_view kHeaderLegacyV1 = "CURLEE_BUNDLE_V1";
 
-std::optional<int> parse_int(std::string_view input)
+CURLEE_NOINLINE int decode_base64_char(unsigned char c)
+{
+    if (c >= 'A' && c <= 'Z') { return static_cast<int>(c - 'A'); }
+    if (c >= 'a' && c <= 'z') { return static_cast<int>(c - 'a' + 26); }
+    if (c >= '0' && c <= '9') { return static_cast<int>(c - '0' + 52); }
+    if (c == '+') { return 62; }
+    if (c == '/') { return 63; }
+    if (c == '=') { return -2; }
+    return -1;
+}
+
+CURLEE_NOINLINE std::optional<int> parse_int(std::string_view input)
 {
     int value = 0;
     const auto* begin = input.data();
     const auto* end = input.data() + input.size();
-    const auto [ptr, ec] = std::from_chars(begin, end, value);
-    if (ec != std::errc{} || ptr != end)
-    {
-        return std::nullopt;
-    }
+    const auto result = std::from_chars(begin, end, value);
+    if (result.ec != std::errc{} || result.ptr != end) { return std::nullopt; }
     return value;
 }
 
@@ -90,7 +104,8 @@ std::string base64_encode(const std::vector<std::uint8_t>& bytes)
         out.push_back('=');
         out.push_back('=');
     }
-    else if (rem == 2)
+
+    if (rem == 2)
     {
         const std::uint32_t triple = (bytes[i] << 16) | (bytes[i + 1] << 8);
         out.push_back(kTable[(triple >> 18) & 0x3F]);
@@ -104,23 +119,6 @@ std::string base64_encode(const std::vector<std::uint8_t>& bytes)
 
 std::optional<std::vector<std::uint8_t>> base64_decode(std::string_view input)
 {
-    auto decode_char = [](char c) -> int
-    {
-        if (c >= 'A' && c <= 'Z')
-            return c - 'A';
-        if (c >= 'a' && c <= 'z')
-            return c - 'a' + 26;
-        if (c >= '0' && c <= '9')
-            return c - '0' + 52;
-        if (c == '+')
-            return 62;
-        if (c == '/')
-            return 63;
-        if (c == '=')
-            return -2;
-        return -1;
-    };
-
     std::vector<std::uint8_t> out;
     int vals[4];
     std::size_t i = 0;
@@ -133,7 +131,7 @@ std::optional<std::vector<std::uint8_t>> base64_decode(std::string_view input)
             {
                 continue;
             }
-            const int v = decode_char(input[i]);
+            const int v = decode_base64_char(static_cast<unsigned char>(input[i]));
             if (v == -1)
             {
                 return std::nullopt;
@@ -149,10 +147,7 @@ std::optional<std::vector<std::uint8_t>> base64_decode(std::string_view input)
             return std::nullopt;
         }
 
-        if (vals[0] < 0 || vals[1] < 0)
-        {
-            return std::nullopt;
-        }
+        if (vals[0] < 0 || vals[1] < 0) { return std::nullopt; }
 
         const std::uint32_t triple = (static_cast<std::uint32_t>(vals[0]) << 18) |
                                      (static_cast<std::uint32_t>(vals[1]) << 12) |
@@ -228,8 +223,8 @@ BundleError write_bundle(const std::string& path, const Bundle& bundle)
     }
     out << "\n";
     out << "imports=" << join_pairs(bundle_copy.manifest.imports) << "\n";
-    out << "proof=" << (bundle_copy.manifest.proof.has_value() ? *bundle_copy.manifest.proof : "")
-        << "\n";
+    const std::string proof = bundle_copy.manifest.proof.value_or("");
+    out << "proof=" << proof << "\n";
     out << "bytecode=" << base64_encode(bundle_copy.bytecode) << "\n";
 
     return BundleError{""};
@@ -310,8 +305,7 @@ BundleResult read_bundle(const std::string& path)
                 {
                     return BundleError{"invalid import pin"};
                 }
-                manifest.imports.push_back(
-                    ImportPin{.path = entry.substr(0, pos), .hash = entry.substr(pos + 1)});
+                manifest.imports.push_back(ImportPin{.path = entry.substr(0, pos), .hash = entry.substr(pos + 1)});
             }
         }
         else if (key == "proof")
@@ -320,8 +314,7 @@ BundleResult read_bundle(const std::string& path)
             {
                 manifest.proof = value;
             }
-        }
-        else if (key == "bytecode")
+        } else if (key == "bytecode")
         {
             bytecode_b64 = value;
         }

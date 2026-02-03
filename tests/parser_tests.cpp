@@ -15,6 +15,42 @@ int main()
 {
     using namespace curlee;
 
+    auto expect_parse_error_contains = [](const std::string& src, const std::string& needle)
+    {
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on invalid program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+        {
+            fail("expected parse to fail");
+        }
+
+        const auto& diags = std::get<std::vector<diag::Diagnostic>>(parsed);
+        bool found = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find(needle) != std::string::npos)
+            {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+        {
+            std::cerr << "parse diags:\n";
+            for (const auto& d : diags)
+            {
+                std::cerr << "  - " << d.message << "\n";
+            }
+            fail("expected parse error containing: " + needle);
+        }
+    };
+
     {
         const std::string src = R"(fn main() -> Unit {
     let x: Int = 1 + 2;
@@ -60,6 +96,53 @@ int main()
         }
     }
 
+    // Imports, structs and enums.
+    {
+        const std::string src = R"(import foo.bar as baz;
+
+struct Point {
+  x: Int;
+  y: Int;
+}
+
+enum Option {
+  Some(Int);
+  None;
+}
+
+fn main() -> Unit {
+  return;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on import/struct/enum program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on import/struct/enum program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        if (prog.imports.size() != 1 || prog.structs.size() != 1 || prog.enums.size() != 1 ||
+            prog.functions.size() != 1)
+        {
+            fail("expected exactly one import, struct, enum, and function");
+        }
+        if (prog.structs[0].fields.size() != 2)
+        {
+            fail("expected Point to have two fields");
+        }
+        if (prog.enums[0].variants.size() != 2)
+        {
+            fail("expected Option to have two variants");
+        }
+    }
+
     {
         const std::string src = R"(fn divide(numerator: Int, denominator: Int) -> Int
   [ requires denominator != 0;
@@ -92,10 +175,66 @@ int main()
         {
             fail("dump missing requires/ensures");
         }
+        if (dumped.find("denominator") == std::string::npos ||
+            dumped.find("bang_equal") == std::string::npos || dumped.find("0") == std::string::npos)
+        {
+            fail("dump missing requires predicate");
+        }
+        if (dumped.find("result") == std::string::npos ||
+            dumped.find("star") == std::string::npos ||
+            dumped.find("denominator") == std::string::npos)
+        {
+            fail("dump missing ensures predicate");
+        }
         if (dumped.find("numerator: Int") == std::string::npos ||
             dumped.find("denominator: Int") == std::string::npos)
         {
             fail("dump missing typed parameters");
+        }
+    }
+
+    {
+        const std::string src = R"(fn pred_ops(a: Int, b: Int) -> Int
+  [ requires ((a < b) && (b <= a + 10)) || !false;
+    ensures (result + 1) >= (a - b); ]
+{
+  return a;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on predicate-ops program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on predicate-ops program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("and_and") == std::string::npos ||
+            dumped.find("or_or") == std::string::npos)
+        {
+            fail("dump missing &&/|| predicate operators");
+        }
+        if (dumped.find("bang false") == std::string::npos)
+        {
+            fail("dump missing unary ! predicate");
+        }
+        if (dumped.find("a plus 10") == std::string::npos ||
+            dumped.find("a minus b") == std::string::npos)
+        {
+            fail("dump missing +/- predicate expressions");
+        }
+        if (dumped.find("less") == std::string::npos ||
+            dumped.find("less_equal") == std::string::npos ||
+            dumped.find("greater_equal") == std::string::npos)
+        {
+            fail("dump missing comparison predicate operators");
         }
     }
 
@@ -539,6 +678,70 @@ fn main() -> Int {
     }
 
     {
+        const std::string src = "fn first() -> Unit {\n"
+                                "  first;\n"
+                                "}\n\n"
+                                "import a;\n\n"
+                                "fn second() -> Unit {\n"
+                                "  second;\n"
+                                "}\n";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on import-ordering program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+        {
+            fail("expected parse to fail on import ordering");
+        }
+
+        const auto& diags = std::get<std::vector<diag::Diagnostic>>(parsed);
+        bool found_import_ordering = false;
+        bool found_note_move_import = false;
+        bool found_note_first_decl = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("import declarations must appear before") == std::string::npos)
+            {
+                continue;
+            }
+            found_import_ordering = true;
+            for (const auto& note : d.notes)
+            {
+                if (note.message.find("move this import above") != std::string::npos)
+                {
+                    found_note_move_import = true;
+                }
+                if (note.message.find("first declaration is here") != std::string::npos)
+                {
+                    found_note_first_decl = true;
+                    if (!note.span.has_value())
+                    {
+                        fail("expected 'first declaration is here' note to have a span");
+                    }
+                }
+            }
+        }
+
+        if (!found_import_ordering)
+        {
+            fail("expected import-ordering diagnostic");
+        }
+        if (!found_note_move_import)
+        {
+            fail("expected note suggesting moving import");
+        }
+        if (!found_note_first_decl)
+        {
+            fail("expected note pointing at first declaration");
+        }
+    }
+
+    {
         const std::string src = R"(struct Point {
   x: Int;
   y: Int;
@@ -652,6 +855,228 @@ fn main() -> Unit {
             fail("expected invalid field access diagnostic");
         }
     }
+
+    {
+        // Import ordering: imports must come before any other top-level declarations.
+        const std::string src = "fn main() -> Unit { return; }\n"
+                                "import foo.bar;\n"
+                                "fn other() -> Unit { return; }\n";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on import-order program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+        {
+            fail("expected parse to fail on import-order violation");
+        }
+
+        const auto& diags = std::get<std::vector<diag::Diagnostic>>(parsed);
+        bool found_message = false;
+        bool found_first_decl_note = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("import declarations must appear before") != std::string::npos)
+            {
+                found_message = true;
+                for (const auto& n : d.notes)
+                {
+                    if (n.message.find("first declaration is here") != std::string::npos)
+                    {
+                        found_first_decl_note = true;
+                    }
+                }
+            }
+        }
+        if (!found_message)
+        {
+            fail("expected import-order diagnostic");
+        }
+        if (!found_first_decl_note)
+        {
+            fail("expected import-order diagnostic to include first declaration note");
+        }
+    }
+
+    {
+        // Struct literals: allow trailing commas.
+        const std::string src = R"(struct Point {
+  x: Int;
+  y: Int;
+}
+
+fn main() -> Unit {
+  let p: Point = Point{ x: 1, y: 2, };
+  p;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on trailing-comma struct literal program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on trailing-comma struct literal program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("Point{") == std::string::npos || dumped.find("y:") == std::string::npos)
+        {
+            fail("dump missing struct literal with fields");
+        }
+    }
+
+    {
+        // Struct literals: duplicate field should be rejected and note previous initializer.
+        const std::string src = R"(struct Point { x: Int; }
+fn main() -> Unit {
+  let p: Point = Point{ x: 1, x: 2 };
+  p;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on duplicate-field struct literal program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+        {
+            fail("expected parse to fail on duplicate-field struct literal program");
+        }
+
+        const auto& diags = std::get<std::vector<diag::Diagnostic>>(parsed);
+        bool found_message = false;
+        bool found_note = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("duplicate field in struct literal") != std::string::npos)
+            {
+                found_message = true;
+                for (const auto& n : d.notes)
+                {
+                    if (n.message.find("previous field initializer") != std::string::npos)
+                    {
+                        found_note = true;
+                    }
+                }
+            }
+        }
+        if (!found_message)
+        {
+            fail("expected duplicate field in struct literal diagnostic");
+        }
+        if (!found_note)
+        {
+            fail("expected duplicate field diagnostic to include previous initializer note");
+        }
+    }
+
+    {
+        // Dump coverage: scoped names, member expressions, if/else, while, unsafe, and return;
+        const std::string src = R"(struct S { x: Int; }
+fn main() -> Unit {
+  unsafe { S{ x: 1, }.x; }
+  if (true) { return; } else { return; }
+  while (false) { return; }
+  Foo::Bar;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on dump-coverage program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on dump-coverage program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("unsafe") == std::string::npos ||
+            dumped.find("if (") == std::string::npos ||
+            dumped.find("while (") == std::string::npos ||
+            dumped.find("Foo::Bar") == std::string::npos ||
+            dumped.find(".x") == std::string::npos || dumped.find("return;") == std::string::npos)
+        {
+            fail("dump missing expected constructs");
+        }
+    }
+
+    // Top-level declaration error.
+    expect_parse_error_contains("let x: Int = 1;\n",
+                                "expected 'import', 'struct', 'enum', or 'fn'");
+
+    // Import declaration errors.
+    expect_parse_error_contains("import ;\n", "expected module name after 'import'");
+    expect_parse_error_contains("import foo.;\n", "expected identifier after '.' in import path");
+    expect_parse_error_contains("import foo as ;\n",
+                                "expected identifier after 'as' in import declaration");
+    expect_parse_error_contains("import foo\n", "expected ';' after import declaration");
+
+    // Struct declaration errors.
+    expect_parse_error_contains("struct S { x Int; }\n", "expected ':' after field name");
+    expect_parse_error_contains("struct S { x: Int; x: Int; }\n",
+                                "duplicate field name in struct declaration");
+    expect_parse_error_contains("struct S x: Int; }\n", "expected '{' after struct name");
+    expect_parse_error_contains("struct S { x: Int }\n", "expected ';' after struct field");
+    expect_parse_error_contains("struct S { x: Int;\n", "expected '}' after struct declaration");
+
+    // Enum declaration errors.
+    expect_parse_error_contains("enum E { V(Int; }\n", "expected ')' after enum variant payload");
+    expect_parse_error_contains("enum E { V }\n", "expected ';' after enum variant");
+    expect_parse_error_contains("enum E { V; V; }\n", "duplicate variant name in enum declaration");
+    expect_parse_error_contains("enum E { V;\n", "expected '}' after enum declaration");
+
+    // Function signature errors.
+    expect_parse_error_contains("fn f(: Int) -> Int { return 0; }\n", "expected parameter name");
+    expect_parse_error_contains("fn f(x Int) -> Int { return 0; }\n",
+                                "expected ':' after parameter name");
+    expect_parse_error_contains("fn f(x: ) -> Int { return 0; }\n", "expected type name");
+
+    // Contract block errors.
+    expect_parse_error_contains("fn f() -> Int [ foo; ] { return 0; }\n",
+                                "expected 'requires' or 'ensures' in contract block");
+    expect_parse_error_contains("fn f() -> Int [ requires true ] { return 0; }\n",
+                                "expected ';' after contract clause");
+    expect_parse_error_contains("fn f() -> Int [ requires true; ",
+                                "expected ']' to end contract block");
+
+    // Refinement/predicate errors.
+    expect_parse_error_contains("fn f(x: Int where ) -> Int { return 0; }\n", "expected predicate");
+    expect_parse_error_contains("fn f(x: Int) -> Int [ requires (true; ] { return 0; }\n",
+                                "expected ')' after predicate");
+
+    // Statement syntax errors.
+    expect_parse_error_contains("fn main() -> Unit { let : Int = 1; }\n",
+                                "expected identifier after 'let'");
+    expect_parse_error_contains("fn main() -> Unit { unsafe 1; }\n", "expected '{' after 'unsafe'");
+    expect_parse_error_contains("fn main() -> Unit { if true { return; } }\n",
+                                "expected '(' after 'if'");
+    expect_parse_error_contains("fn main() -> Unit { if (true { return; } }\n",
+                                "expected ')' after if condition");
+    expect_parse_error_contains("fn main() -> Unit { if (true) { return; } else return; }\n",
+                                "expected '{' to start block");
+    expect_parse_error_contains("fn main() -> Unit { while true { return; } }\n",
+                                "expected '(' after 'while'");
+    expect_parse_error_contains("fn main() -> Unit { return 1 }\n",
+                                "expected ';' after return statement");
+    expect_parse_error_contains("fn main() -> Unit { 1 }\n", "expected ';' after expression");
 
     std::cout << "OK\n";
     return 0;

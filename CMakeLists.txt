@@ -240,6 +240,14 @@ add_executable(curlee_python_runner_fake_sandbox_required
   tests/python_runner_fake_sandbox_required.cpp
 )
 
+add_executable(curlee_python_runner_fake_plain_fail
+  tests/python_runner_fake_plain_fail.cpp
+)
+
+add_executable(curlee_python_runner_fake_error_escapes
+  tests/python_runner_fake_error_escapes.cpp
+)
+
 add_executable(curlee_bwrap_fake
   tests/bwrap_fake.cpp
 )
@@ -247,6 +255,15 @@ add_test(NAME curlee_bwrap_fake_smoke COMMAND $<TARGET_FILE:curlee_bwrap_fake>)
 set_tests_properties(curlee_bwrap_fake_smoke PROPERTIES WILL_FAIL TRUE)
 
 add_test(NAME curlee_bwrap_fake_exec COMMAND $<TARGET_FILE:curlee_bwrap_fake> -- /bin/true)
+
+add_executable(curlee_fake_exes_tests
+  tests/fake_exes_tests.cpp
+)
+
+add_test(
+  NAME curlee_fake_exes_tests
+  COMMAND curlee_fake_exes_tests $<TARGET_FILE:curlee_bwrap_fake> $<TARGET_FILE:curlee_python_runner_fake_hang> $<TARGET_FILE:curlee_python_runner_fake_spam>
+)
 
 add_test(
   NAME curlee_cli_diagnostics_golden_tests
@@ -704,6 +721,14 @@ target_include_directories(curlee_vm_tests PRIVATE include)
 
 add_test(NAME curlee_vm_tests COMMAND curlee_vm_tests)
 
+add_executable(curlee_vm_internal_io_unit_tests
+  tests/vm_internal_io_unit_tests.cpp
+)
+
+target_include_directories(curlee_vm_internal_io_unit_tests PRIVATE include)
+
+add_test(NAME curlee_vm_internal_io_unit_tests COMMAND curlee_vm_internal_io_unit_tests)
+
 add_executable(curlee_bundle_tests
   tests/bundle_tests.cpp
   src/bundle/bundle.cpp
@@ -731,6 +756,15 @@ add_executable(curlee_python_runner_tests
 add_test(
   NAME curlee_python_runner_tests
   COMMAND curlee_python_runner_tests $<TARGET_FILE:curlee_python_runner>
+)
+
+add_executable(curlee_python_runner_json_unit_tests
+  tests/python_runner_json_unit_tests.cpp
+)
+
+add_test(
+  NAME curlee_python_runner_json_unit_tests
+  COMMAND curlee_python_runner_json_unit_tests
 )
 
 add_executable(curlee_e2e_tests
@@ -813,3 +847,17 @@ add_test(
   NAME curlee_verification_predicate_lowering_tests
   COMMAND curlee_verification_predicate_lowering_tests
 )
+
+add_executable(curlee_verification_checker_tests
+  tests/verification_checker_tests.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+  src/types/type_check.cpp
+  src/verification/checker.cpp
+  src/verification/predicate_lowering.cpp
+  src/verification/solver.cpp
+)
+target_include_directories(curlee_verification_checker_tests PRIVATE include)
+target_link_libraries(curlee_verification_checker_tests PRIVATE Z3::Z3)
+
+add_test(NAME curlee_verification_checker_tests COMMAND curlee_verification_checker_tests)

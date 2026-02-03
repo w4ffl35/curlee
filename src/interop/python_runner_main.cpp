@@ -177,7 +177,8 @@ struct JsonParser
     {
         skip_ws();
         std::size_t start = pos;
-        if (!eof() && input[pos] == '-')
+        const bool has_leading_minus = !eof() && input[pos] == '-';
+        if (has_leading_minus)
         {
             ++pos;
         }
@@ -196,7 +197,8 @@ struct JsonParser
         if (!eof() && (input[pos] == 'e' || input[pos] == 'E'))
         {
             ++pos;
-            if (!eof() && (input[pos] == '+' || input[pos] == '-'))
+            const bool has_exp_sign = !eof() && (input[pos] == '+' || input[pos] == '-');
+            if (has_exp_sign)
             {
                 ++pos;
             }
@@ -263,7 +265,11 @@ struct JsonParser
         while (true)
         {
             auto key_val = parse_string();
-            if (!key_val.has_value() || !key_val->is_string())
+            if (!key_val.has_value())
+            {
+                return std::nullopt;
+            }
+            if (!key_val->is_string())
             {
                 return std::nullopt;
             }
@@ -477,7 +483,8 @@ int main()
     const auto& obj = *parsed->as_object();
 
     std::string id;
-    if (auto id_val = json_get_string(obj, "id"); id_val.has_value())
+    const auto id_val = json_get_string(obj, "id");
+    if (id_val.has_value())
     {
         id = *id_val;
     }
@@ -509,7 +516,8 @@ int main()
     if (*op == "echo")
     {
         const auto echo_obj = json_get_object(obj, "echo");
-        if (!echo_obj.has_value() || !echo_obj->is_object())
+        const bool echo_obj_ok = echo_obj.has_value() && echo_obj->is_object();
+        if (!echo_obj_ok)
         {
             const auto resp = make_error_response(id, "invalid_request", "missing echo payload");
             std::cout << json_serialize(resp) << "\n";

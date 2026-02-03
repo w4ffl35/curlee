@@ -79,6 +79,28 @@ int main()
         }
     }
 
+    // EOF-only path: stream is not good(), but eof() is true, so this is not a read error.
+    {
+        std::istringstream in("");
+        // Ensure eofbit is set.
+        (void)in.get();
+
+        const auto res = load_source_stream(in, "empty.curlee");
+        if (!std::holds_alternative<SourceFile>(res))
+        {
+            fail("expected SourceFile for EOF-only stream");
+        }
+        const auto& sf = std::get<SourceFile>(res);
+        if (sf.path != "empty.curlee")
+        {
+            fail("unexpected path");
+        }
+        if (sf.contents != "")
+        {
+            fail("expected empty contents for EOF-only stream");
+        }
+    }
+
     (void)fs::remove(tmp);
     std::cout << "OK\n";
     return 0;

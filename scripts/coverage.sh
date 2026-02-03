@@ -4,7 +4,7 @@ set -euo pipefail
 preset="linux-debug-coverage"
 # Keep this as an incremental ratchet rather than an aspirational goal.
 # Raise over time as coverage improves.
-fail_under="77"
+fail_under="94"
 out_dir="build/coverage"
 exclude_throw_branches=1
 exclude_unreachable_branches=1
@@ -19,7 +19,7 @@ Builds + runs tests under coverage instrumentation, then prints a coverage summa
 Defaults:
   --preset      linux-debug-coverage
   --out         build/coverage
-  --fail-under  77
+  --fail-under  94
 
 Requires one of:
   - gcovr (recommended), or
@@ -64,6 +64,14 @@ cd "$repo_root"
 
 cmake --preset "$preset"
 cmake --build --preset "$preset"
+
+# Ensure we don't pick up stale profiling data from previous builds/tests.
+# This avoids gcov/gcovr failures on old .gcda files for targets that no longer exist
+# or whose sources moved.
+build_dir="$repo_root/build/${preset}"
+find "$build_dir" -name '*.gcda' -delete 2>/dev/null || true
+find "$build_dir" -name '*.gcov' -delete 2>/dev/null || true
+
 ctest --preset "$preset" --output-on-failure
 
 mkdir -p "$out_dir"
@@ -77,18 +85,38 @@ if command -v gcovr >/dev/null 2>&1; then
   # - root = repo root
   # - object-directory = preset build dir
   # - exclude build/ and any third_party-style dirs (none currently)
-  build_dir="$repo_root/build/${preset}"
+  # build_dir defined above
 
   # CMake compiler-id objects can emit .gcno/.gcda files that don't map back to
   # stable sources, which causes noisy gcovr warnings/errors.
   find "$build_dir/CMakeFiles" -path '*/CompilerIdCXX/*' \( -name '*.gcno' -o -name '*.gcda' \) -delete 2>/dev/null || true
 
+  # Clean up stale test targets that were removed/renamed, but can leave behind
+  # CMakeFiles/*_extra_tests.dir artifacts. These can reference non-existent
+  # sources and cause GCOV to emit noisy errors.
+  while IFS= read -r -d '' d; do
+    target="$(basename "$d" .dir)"
+    # Only remove truly stale targets. Real ones will have a corresponding
+    # executable in the build directory and should contribute coverage.
+    if [[ ! -f "$build_dir/$target" && ! -f "$build_dir/$target.exe" ]]; then
+      rm -rf "$d" 2>/dev/null || true
+    fi
+  done < <(find "$build_dir/CMakeFiles" -maxdepth 2 -type d -name '*_extra_tests.dir' -print0 2>/dev/null || true)
+
   args=(
     --root "$repo_root"
     --object-directory "$build_dir"
+    # Focus on production code coverage (tests are just coverage drivers).
+    --filter '^src/'
+    --filter '^include/'
     # Exclude build artifacts (including CMake compiler-id objects that gcovr can
     # fail to resolve back to sources).
-    --exclude ".*${repo_root}/build/.*"
+    --exclude '^build/'
+    --exclude '^tests/'
+    --exclude '^examples/'
+    --exclude '^scripts/'
+    --exclude '^cmake/'
+    --exclude '^wiki/'
     --exclude ".*${build_dir}/CMakeFiles/.*"
     --gcov-ignore-errors no_working_dir_found
     --print-summary

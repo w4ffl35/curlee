@@ -2,7 +2,9 @@
 #include <curlee/source/span.h>
 #include <curlee/vm/bytecode.h>
 #include <curlee/vm/vm.h>
+#include <filesystem>
 #include <iostream>
+#include <sys/resource.h>
 
 static void fail(const std::string& msg)
 {
@@ -10,9 +12,46 @@ static void fail(const std::string& msg)
     std::exit(1);
 }
 
-int main()
+static std::string sibling_exe(const char* argv0, const char* name)
+{
+    const std::filesystem::path bin = std::filesystem::path(argv0);
+    return (bin.parent_path() / name).string();
+}
+
+int main(int argc, char** argv)
 {
     using namespace curlee::vm;
+
+    struct EnvVarGuard
+    {
+        std::string key;
+        bool had_old = false;
+        std::string old;
+
+        explicit EnvVarGuard(const char* k) : key(k)
+        {
+            if (const char* v = std::getenv(k); v != nullptr)
+            {
+                had_old = true;
+                old = v;
+            }
+        }
+
+        void set(const char* v) const { (void)setenv(key.c_str(), v, 1); }
+        void unset() const { (void)unsetenv(key.c_str()); }
+
+        ~EnvVarGuard()
+        {
+            if (had_old)
+            {
+                (void)setenv(key.c_str(), old.c_str(), 1);
+            }
+            else
+            {
+                (void)unsetenv(key.c_str());
+            }
+        }
+    };
 
     // Cover Value equality and stringification for each kind.
     {
@@ -101,6 +140,24 @@ int main()
         }
     };
 
+    auto expect_underflow = [](OpCode op, const char* what)
+    {
+        const curlee::source::Span span{.start = 900, .end = 901};
+        Chunk chunk;
+        chunk.emit(op, span);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail(std::string("expected ") + what + " stack underflow error");
+        }
+        if (!res.error_span.has_value() || res.error_span->start != span.start ||
+            res.error_span->end != span.end)
+        {
+            fail(std::string("expected ") + what + " underflow span mapping");
+        }
+    };
+
     {
         Chunk chunk;
         chunk.emit_constant(Value::int_v(1));
@@ -120,6 +177,20 @@ int main()
 
         run_twice_deterministic(chunk, Value::string_v("ab"));
     }
+
+    // Stack underflow paths for common ops.
+    expect_underflow(OpCode::Add, "add");
+    expect_underflow(OpCode::Sub, "sub");
+    expect_underflow(OpCode::Mul, "mul");
+    expect_underflow(OpCode::Div, "div");
+    expect_underflow(OpCode::Neg, "neg");
+    expect_underflow(OpCode::Not, "not");
+    expect_underflow(OpCode::Equal, "equal");
+    expect_underflow(OpCode::NotEqual, "not-equal");
+    expect_underflow(OpCode::Less, "less");
+    expect_underflow(OpCode::LessEqual, "less-equal");
+    expect_underflow(OpCode::Greater, "greater");
+    expect_underflow(OpCode::GreaterEqual, "greater-equal");
 
     {
         Chunk chunk;
@@ -187,6 +258,64 @@ int main()
         chunk.emit(OpCode::Ret);
 
         run_twice_deterministic(chunk, Value::int_v(8));
+    }
+
+    // Cover success paths for comparisons and JumpIfFalse (cond=true => no jump).
+    {
+        Chunk chunk;
+
+        // if (1 < 2) { ... } else { return 0 }
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::Less);
+        chunk.emit(OpCode::JumpIfFalse);
+        chunk.emit_u16(57);
+
+        // if (2 <= 2) { ... } else { return 0 }
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::LessEqual);
+        chunk.emit(OpCode::JumpIfFalse);
+        chunk.emit_u16(57);
+
+        // if (3 > 2) { ... } else { return 0 }
+        chunk.emit_constant(Value::int_v(3));
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::Greater);
+        chunk.emit(OpCode::JumpIfFalse);
+        chunk.emit_u16(57);
+
+        // if (3 >= 3) { ... } else { return 0 }
+        chunk.emit_constant(Value::int_v(3));
+        chunk.emit_constant(Value::int_v(3));
+        chunk.emit(OpCode::GreaterEqual);
+        chunk.emit(OpCode::JumpIfFalse);
+        chunk.emit_u16(57);
+
+        // if (1 != 2) { ... } else { return 0 }
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::NotEqual);
+        chunk.emit(OpCode::JumpIfFalse);
+        chunk.emit_u16(57);
+
+        // if (2 == 2) { return (6 / 2) } else { return 0 }
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::Equal);
+        chunk.emit(OpCode::JumpIfFalse);
+        chunk.emit_u16(57);
+
+        chunk.emit_constant(Value::int_v(6));
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::Div);
+        chunk.emit(OpCode::Return);
+
+        // fail_block @ ip=57
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::Return);
+
+        run_twice_deterministic(chunk, Value::int_v(3));
     }
 
     // Call-related error should be span-mapped.
@@ -295,6 +424,647 @@ int main()
         {
             fail("expected runtime error span to map to add opcode span");
         }
+    }
+
+    // Truncated operands and bounds errors.
+    {
+        const curlee::source::Span span{.start = 1, .end = 2};
+        Chunk chunk;
+        chunk.emit(OpCode::Constant, span);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "truncated constant")
+        {
+            fail("expected truncated constant error");
+        }
+        if (!res.error_span.has_value() || res.error_span->start != span.start ||
+            res.error_span->end != span.end)
+        {
+            fail("expected truncated constant error span mapping");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 3, .end = 4};
+        Chunk chunk;
+        chunk.emit(OpCode::Constant, span);
+        chunk.emit_u16(0, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "constant index out of range")
+        {
+            fail("expected constant index out of range error");
+        }
+        if (!res.error_span.has_value() || res.error_span->start != span.start ||
+            res.error_span->end != span.end)
+        {
+            fail("expected constant index error span mapping");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 5, .end = 6};
+        Chunk chunk;
+        chunk.max_locals = 1;
+        chunk.emit(OpCode::LoadLocal, span);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "truncated local index")
+        {
+            fail("expected truncated local index error");
+        }
+        if (!res.error_span.has_value() || res.error_span->start != span.start ||
+            res.error_span->end != span.end)
+        {
+            fail("expected truncated local index span mapping");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 7, .end = 8};
+        Chunk chunk;
+        chunk.max_locals = 1;
+        chunk.emit(OpCode::LoadLocal, span);
+        chunk.emit_u16(9, span);
+        chunk.emit(OpCode::Return, span);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "local index out of range")
+        {
+            fail("expected local index out of range error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 9, .end = 10};
+        Chunk chunk;
+        chunk.max_locals = 1;
+        chunk.emit(OpCode::StoreLocal, span);
+        chunk.emit_u16(0, span);
+        chunk.emit(OpCode::Return, span);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected store-local stack underflow error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 11, .end = 12};
+        Chunk chunk;
+        chunk.max_locals = 1;
+        chunk.emit_constant(Value::int_v(1), span);
+        chunk.emit(OpCode::StoreLocal, span);
+        chunk.emit_u16(9, span);
+        chunk.emit(OpCode::Return, span);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "local index out of range")
+        {
+            fail("expected store-local local index out of range error");
+        }
+    }
+
+    // Arithmetic and boolean op errors.
+    {
+        const curlee::source::Span span{.start = 20, .end = 21};
+        Chunk chunk;
+        chunk.emit_constant(Value::bool_v(true), span);
+        chunk.emit_constant(Value::int_v(1), span);
+        chunk.emit(OpCode::Sub, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "sub expects Int")
+        {
+            fail("expected sub type error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 22, .end = 23};
+        Chunk chunk;
+        chunk.emit_constant(Value::bool_v(true), span);
+        chunk.emit_constant(Value::int_v(2), span);
+        chunk.emit(OpCode::Mul, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "mul expects Int")
+        {
+            fail("expected mul type error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 24, .end = 25};
+        Chunk chunk;
+        chunk.emit_constant(Value::bool_v(true), span);
+        chunk.emit_constant(Value::int_v(2), span);
+        chunk.emit(OpCode::Div, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "div expects Int")
+        {
+            fail("expected div type error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 26, .end = 27};
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1), span);
+        chunk.emit_constant(Value::int_v(0), span);
+        chunk.emit(OpCode::Div, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "divide by zero")
+        {
+            fail("expected divide by zero error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 28, .end = 29};
+        Chunk chunk;
+        chunk.emit_constant(Value::bool_v(true), span);
+        chunk.emit(OpCode::Neg, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "neg expects Int")
+        {
+            fail("expected neg type error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 30, .end = 31};
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1), span);
+        chunk.emit(OpCode::Not, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "not expects Bool")
+        {
+            fail("expected not type error");
+        }
+    }
+
+    // Comparison ops and stack underflow.
+    {
+        const curlee::source::Span span{.start = 40, .end = 41};
+        Chunk chunk;
+        chunk.emit_constant(Value::bool_v(true), span);
+        chunk.emit_constant(Value::int_v(1), span);
+        chunk.emit(OpCode::Less, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "lt expects Int")
+        {
+            fail("expected lt type error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 42, .end = 43};
+        Chunk chunk;
+        chunk.emit_constant(Value::bool_v(true), span);
+        chunk.emit_constant(Value::int_v(1), span);
+        chunk.emit(OpCode::LessEqual, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "le expects Int")
+        {
+            fail("expected le type error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 44, .end = 45};
+        Chunk chunk;
+        chunk.emit_constant(Value::bool_v(true), span);
+        chunk.emit_constant(Value::int_v(1), span);
+        chunk.emit(OpCode::Greater, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "gt expects Int")
+        {
+            fail("expected gt type error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 46, .end = 47};
+        Chunk chunk;
+        chunk.emit_constant(Value::bool_v(true), span);
+        chunk.emit_constant(Value::int_v(1), span);
+        chunk.emit(OpCode::GreaterEqual, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "ge expects Int")
+        {
+            fail("expected ge type error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 48, .end = 49};
+        Chunk chunk;
+        chunk.emit(OpCode::Pop, span);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected pop stack underflow error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 50, .end = 51};
+        Chunk chunk;
+        chunk.emit(OpCode::Return, span);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "missing return")
+        {
+            fail("expected missing return error");
+        }
+    }
+
+    // Missing Return opcode entirely.
+    {
+        Chunk chunk;
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "no return")
+        {
+            fail("expected no return error");
+        }
+        if (res.error_span.has_value())
+        {
+            fail("expected no return error_span to be nullopt");
+        }
+    }
+
+    // Truncated and invalid jump/call targets.
+    {
+        const curlee::source::Span span{.start = 60, .end = 61};
+        Chunk chunk;
+        chunk.emit(OpCode::Jump, span);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "truncated jump target")
+        {
+            fail("expected truncated jump target error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 62, .end = 63};
+        Chunk chunk;
+        chunk.emit(OpCode::JumpIfFalse, span);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "truncated jump target")
+        {
+            fail("expected truncated jump-if-false target error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 64, .end = 65};
+        Chunk chunk;
+        chunk.emit(OpCode::JumpIfFalse, span);
+        chunk.emit_u16(0, span);
+        chunk.emit(OpCode::Return, span);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected jump-if-false stack underflow error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 66, .end = 67};
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1), span);
+        chunk.emit(OpCode::JumpIfFalse, span);
+        chunk.emit_u16(0, span);
+        chunk.emit_constant(Value::int_v(2), span);
+        chunk.emit(OpCode::Return, span);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "jump-if-false expects Bool")
+        {
+            fail("expected jump-if-false type error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 68, .end = 69};
+        Chunk chunk;
+        chunk.emit_constant(Value::bool_v(false), span);
+        chunk.emit(OpCode::JumpIfFalse, span);
+        chunk.emit_u16(999, span);
+        chunk.emit_constant(Value::int_v(1), span);
+        chunk.emit(OpCode::Return, span);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "jump target out of range")
+        {
+            fail("expected jump-if-false out-of-range error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 70, .end = 71};
+        Chunk chunk;
+        chunk.emit(OpCode::Call, span);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "truncated call target")
+        {
+            fail("expected truncated call target error");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 72, .end = 73};
+        Chunk chunk;
+        chunk.emit(OpCode::Call, span);
+        chunk.emit_u16(999, span);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "call target out of range")
+        {
+            fail("expected call target out of range error");
+        }
+    }
+
+    // Print underflow when capability is present.
+    {
+        const curlee::source::Span span{.start = 80, .end = 81};
+        Chunk chunk;
+        chunk.emit(OpCode::Print, span);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("io:stdout");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected print stack underflow error");
+        }
+    }
+
+    // PythonCall capability checks and runner failures.
+    {
+        const curlee::source::Span span{.start = 90, .end = 91};
+        Chunk chunk;
+        chunk.emit(OpCode::PythonCall, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "python capability required")
+        {
+            fail("expected python capability required error");
+        }
+    }
+
+    // Cover run_process_argv env var handling branches in vm.cpp.
+    {
+        EnvVarGuard path("PATH");
+        EnvVarGuard ld_library_path("LD_LIBRARY_PATH");
+        EnvVarGuard asan_options("ASAN_OPTIONS");
+        EnvVarGuard ubsan_options("UBSAN_OPTIONS");
+        EnvVarGuard lsan_options("LSAN_OPTIONS");
+        EnvVarGuard runner("CURLEE_PYTHON_RUNNER");
+
+        const curlee::source::Span span{.start = 94, .end = 95};
+        Chunk chunk;
+        chunk.emit(OpCode::PythonCall, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("python:ffi");
+
+        runner.set("/bin/true");
+
+        // Env vars present.
+        path.set("/usr/bin:/bin");
+        ld_library_path.set("/tmp");
+        asan_options.set("detect_leaks=0");
+        ubsan_options.set("print_stacktrace=1");
+        lsan_options.set("verbosity=1");
+        {
+            const auto res = vm.run(chunk, caps);
+            if (res.ok || res.error != "python runner failed")
+            {
+                fail("expected /bin/true python runner to fail handshake");
+            }
+        }
+
+        // Env vars absent.
+        path.unset();
+        ld_library_path.unset();
+        asan_options.unset();
+        ubsan_options.unset();
+        lsan_options.unset();
+        {
+            const auto res = vm.run(chunk, caps);
+            if (res.ok || res.error != "python runner failed")
+            {
+                fail("expected /bin/true python runner to fail handshake with env vars unset");
+            }
+        }
+    }
+
+    if (argc >= 1)
+    {
+        const std::string runner_error = sibling_exe(argv[0], "curlee_python_runner_fake_error");
+        const std::string runner_error_escapes =
+            sibling_exe(argv[0], "curlee_python_runner_fake_error_escapes");
+        const std::string runner_hang = sibling_exe(argv[0], "curlee_python_runner_fake_hang");
+        const std::string runner_plain_fail =
+            sibling_exe(argv[0], "curlee_python_runner_fake_plain_fail");
+        const std::string runner_spam = sibling_exe(argv[0], "curlee_python_runner_fake_spam");
+        const std::string runner_sandbox_required =
+            sibling_exe(argv[0], "curlee_python_runner_fake_sandbox_required");
+        const std::string bwrap_fake = sibling_exe(argv[0], "curlee_bwrap_fake");
+
+        const curlee::source::Span span{.start = 92, .end = 93};
+        Chunk chunk;
+        chunk.emit(OpCode::PythonCall, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("python:ffi");
+
+        // Non-sandbox exec failure path.
+        (void)setenv("CURLEE_PYTHON_RUNNER", "/no/such/curlee_python_runner_missing", 1);
+        {
+            const auto res = vm.run(chunk, caps);
+            if (res.ok || res.error != "python runner exec failed")
+            {
+                fail("expected python runner exec failed error");
+            }
+        }
+
+        // Cover the pipe()-failure branch in run_process_argv deterministically by lowering
+        // RLIMIT_NOFILE so that even a single pipe cannot be created.
+        {
+            struct rlimit old_limit;
+            if (getrlimit(RLIMIT_NOFILE, &old_limit) != 0)
+            {
+                fail("getrlimit(RLIMIT_NOFILE) failed");
+            }
+
+            // Set the soft limit so low that any attempt to create pipes must fail.
+            // This reliably hits the early pipe() failure branch in run_process_argv.
+            const rlim_t new_cur = 3;
+            if (new_cur > old_limit.rlim_max)
+            {
+                fail("unexpected RLIMIT_NOFILE max too small for test");
+            }
+
+            struct rlimit new_limit = old_limit;
+            new_limit.rlim_cur = new_cur;
+            if (setrlimit(RLIMIT_NOFILE, &new_limit) != 0)
+            {
+                fail("setrlimit(RLIMIT_NOFILE) failed");
+            }
+
+            // Ensure the runner path exists in case the limit isn't enforced as expected.
+            (void)setenv("CURLEE_PYTHON_RUNNER", "/bin/true", 1);
+            const auto res = vm.run(chunk, caps);
+
+            // Restore limit immediately.
+            (void)setrlimit(RLIMIT_NOFILE, &old_limit);
+
+            if (res.ok || res.error != "python runner exec failed")
+            {
+                fail("expected python runner exec failed error via pipe failure (got: " +
+                     res.error + ")");
+            }
+        }
+
+        // Non-sandbox default failure (non-JSON, exit_code != 127).
+        (void)setenv("CURLEE_PYTHON_RUNNER", runner_plain_fail.c_str(), 1);
+        {
+            const auto res = vm.run(chunk, caps);
+            if (res.ok || res.error != "python runner failed")
+            {
+                fail("expected python runner failed default error");
+            }
+        }
+
+        (void)setenv("CURLEE_PYTHON_RUNNER", runner_hang.c_str(), 1);
+        {
+            const auto res = vm.run(chunk, caps);
+            if (res.ok || res.error != "python runner timed out")
+            {
+                fail("expected python runner timed out error");
+            }
+        }
+
+        (void)setenv("CURLEE_PYTHON_RUNNER", runner_spam.c_str(), 1);
+        {
+            const auto res = vm.run(chunk, caps);
+            if (res.ok || res.error != "python runner output too large")
+            {
+                fail("expected python runner output too large error");
+            }
+        }
+
+        (void)setenv("CURLEE_PYTHON_RUNNER", runner_error.c_str(), 1);
+        {
+            const auto res = vm.run(chunk, caps);
+            if (res.ok || res.error != "forced runner error")
+            {
+                fail("expected python runner structured error message");
+            }
+        }
+
+        // Structured error with common escape sequences should be decoded.
+        (void)setenv("CURLEE_PYTHON_RUNNER", runner_error_escapes.c_str(), 1);
+        {
+            const auto res = vm.run(chunk, caps);
+            const std::string expected = "forced \"runner\nerror\twith\rcarriage\\slash and escape";
+            if (res.ok || res.error != expected)
+            {
+                fail("expected python runner escape decoding in error message");
+            }
+        }
+
+        // Sandbox success path (via bwrap_fake).
+        (void)setenv("CURLEE_PYTHON_RUNNER", runner_sandbox_required.c_str(), 1);
+        (void)setenv("CURLEE_BWRAP", bwrap_fake.c_str(), 1);
+        {
+            VM::Capabilities sandbox_caps;
+            sandbox_caps.insert("python:ffi");
+            sandbox_caps.insert("python:sandbox");
+            const auto res = vm.run(chunk, sandbox_caps);
+            if (!res.ok || !(res.value == Value::unit_v()))
+            {
+                fail("expected sandboxed python call to succeed");
+            }
+        }
+
+        // Sandbox failure path (exit_code != 127, no structured message).
+        (void)setenv("CURLEE_PYTHON_RUNNER", runner_plain_fail.c_str(), 1);
+        (void)setenv("CURLEE_BWRAP", bwrap_fake.c_str(), 1);
+        {
+            VM::Capabilities sandbox_caps;
+            sandbox_caps.insert("python:ffi");
+            sandbox_caps.insert("python:sandbox");
+            const auto res = vm.run(chunk, sandbox_caps);
+            if (res.ok || res.error != "python sandbox failed")
+            {
+                fail("expected python sandbox failed error");
+            }
+        }
+
+        // Sandbox exec failure path.
+        (void)setenv("CURLEE_PYTHON_RUNNER", runner_sandbox_required.c_str(), 1);
+        (void)setenv("CURLEE_BWRAP", "/no/such/bwrap", 1);
+        {
+            VM::Capabilities sandbox_caps;
+            sandbox_caps.insert("python:ffi");
+            sandbox_caps.insert("python:sandbox");
+            const auto res = vm.run(chunk, sandbox_caps);
+            if (res.ok || res.error != "python sandbox exec failed")
+            {
+                fail("expected python sandbox exec failed error");
+            }
+        }
+
+        (void)unsetenv("CURLEE_PYTHON_RUNNER");
+        (void)unsetenv("CURLEE_BWRAP");
     }
 
     std::cout << "OK\n";
