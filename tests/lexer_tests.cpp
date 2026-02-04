@@ -379,6 +379,125 @@ int main()
         expect_token(toks, 0, TokenKind::Eof, "");
     }
 
+    // Cover: whitespace skipping for '\r'.
+    {
+        const std::string src = "\rlet x=1;";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for leading carriage return whitespace");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::KwLet, "let");
+        expect_token(toks, 1, TokenKind::Identifier, "x");
+        expect_token(toks, 2, TokenKind::Equal, "=");
+        expect_token(toks, 3, TokenKind::IntLiteral, "1");
+        expect_token(toks, 4, TokenKind::Semicolon, ";");
+        expect_token(toks, 5, TokenKind::Eof, "");
+    }
+
+    // Cover: lone '&' and '|' should error (exercises &&/|| partial-match branches).
+    {
+        const auto res = lex("&");
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(res))
+        {
+            fail("expected error for lone '&'");
+        }
+    }
+    {
+        const auto res = lex("|");
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(res))
+        {
+            fail("expected error for lone '|'");
+        }
+    }
+
+    // Cover: '/' as a token (not a comment) and line-comment lookahead at EOF.
+    {
+        const auto res = lex("/");
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for '/' token");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::Slash, "/");
+        expect_token(toks, 1, TokenKind::Eof, "");
+    }
+    {
+        const auto res = lex("/a");
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for '/'+identifier");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::Slash, "/");
+        expect_token(toks, 1, TokenKind::Identifier, "a");
+        expect_token(toks, 2, TokenKind::Eof, "");
+    }
+
+    // Cover: single-digit number at EOF (digit loop reaches is_at_end()).
+    {
+        const auto res = lex("7");
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for single-digit int at EOF");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::IntLiteral, "7");
+        expect_token(toks, 1, TokenKind::Eof, "");
+    }
+
+    // Cover: unterminated string due to '\r'.
+    {
+        const auto res = lex("\"hi\rthere\"");
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(res))
+        {
+            fail("expected error for carriage return in string literal");
+        }
+        const auto& d = std::get<curlee::diag::Diagnostic>(res);
+        if (d.message != "unterminated string literal")
+        {
+            fail("unexpected diagnostic message for carriage return in string literal");
+        }
+    }
+
+    // Cover: block comment contains '*' not followed by '/' before the terminator.
+    {
+        const auto res = lex("/* *x */ let y=1;");
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for block comment with internal '*'");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::KwLet, "let");
+        expect_token(toks, 1, TokenKind::Identifier, "y");
+        expect_token(toks, 2, TokenKind::Equal, "=");
+        expect_token(toks, 3, TokenKind::IntLiteral, "1");
+        expect_token(toks, 4, TokenKind::Semicolon, ";");
+        expect_token(toks, 5, TokenKind::Eof, "");
+    }
+
+    // Unterminated block comment where the final character is '*'
+    // (covers the (pos_+1)<size branch in the terminator check).
+    {
+        const auto res = lex("/* *");
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(res))
+        {
+            fail("expected error for unterminated block comment ending with '*'");
+        }
+
+        const auto& d = std::get<curlee::diag::Diagnostic>(res);
+        if (d.message != "unterminated block comment")
+        {
+            fail("unexpected diagnostic message for unterminated block comment ending with '*'");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

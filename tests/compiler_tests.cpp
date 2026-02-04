@@ -660,6 +660,36 @@ int main()
         }
     }
 
+    {
+        // python_ffi.<member>(...) should NOT be treated as PythonCall.
+        const std::string source = "fn main() -> Int { return python_ffi.nope(); }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for python_ffi non-call member case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for python_ffi non-call member case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for python_ffi non-call member case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown module qualifier") == std::string::npos)
+        {
+            fail("expected unknown module qualifier diagnostic for python_ffi.nope()");
+        }
+    }
+
     // main cannot take parameters in runnable code.
     {
         const std::string source = "fn main(x: Int) -> Int { return x; }";
@@ -806,7 +836,6 @@ int main()
                 fail("expected malformed string literal diagnostic");
             }
         }
-
     }
 
     {
@@ -867,6 +896,298 @@ int main()
         if (diags.empty() || diags[0].message.find("expects 1 argument") == std::string::npos)
         {
             fail("expected call argcount mismatch diagnostic");
+        }
+    }
+
+    {
+        // Expression statements should propagate expression-emission errors.
+        const std::string source = "fn main() -> Int { x; return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for expr-stmt unknown name case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for expr-stmt unknown name case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for expr-stmt unknown name case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'x'") == std::string::npos)
+        {
+            fail("expected unknown name diagnostic for expr statement");
+        }
+    }
+
+    {
+        // Nested blocks should stop emission when a nested stmt fails.
+        const std::string source = "fn main() -> Int { { x; } return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for block nested error case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for block nested error case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for block nested error case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'x'") == std::string::npos)
+        {
+            fail("expected unknown name diagnostic for nested block");
+        }
+    }
+
+    {
+        // Unsafe blocks should stop emission when a nested stmt fails.
+        const std::string source = "fn main() -> Int { unsafe { x; } return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for unsafe nested error case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for unsafe nested error case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for unsafe nested error case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'x'") == std::string::npos)
+        {
+            fail("expected unknown name diagnostic for unsafe block");
+        }
+    }
+
+    {
+        // If condition emission failures should stop statement emission.
+        const std::string source = "fn main() -> Int { if (x) { return 0; } return 1; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for if-cond error case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for if-cond error case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for if-cond error case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'x'") == std::string::npos)
+        {
+            fail("expected unknown name diagnostic for if condition");
+        }
+    }
+
+    {
+        // If then-block emission failures should stop statement emission.
+        const std::string source = "fn main() -> Int { if (true) { x; } return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for if-then error case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for if-then error case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for if-then error case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'x'") == std::string::npos)
+        {
+            fail("expected unknown name diagnostic for if then-block");
+        }
+    }
+
+    {
+        // If else-block emission failures should stop statement emission.
+        const std::string source =
+            "fn main() -> Int { if (false) { return 0; } else { x; } return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for if-else error case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for if-else error case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for if-else error case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'x'") == std::string::npos)
+        {
+            fail("expected unknown name diagnostic for if else-block");
+        }
+    }
+
+    {
+        // While body emission failures should stop statement emission.
+        const std::string source = "fn main() -> Int { while (true) { x; } return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for while-body error case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for while-body error case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for while-body error case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'x'") == std::string::npos)
+        {
+            fail("expected unknown name diagnostic for while body");
+        }
+    }
+
+    {
+        // While condition emission failures should stop statement emission.
+        const std::string source = "fn main() -> Int { while (x) { return 0; } return 1; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for while-cond error case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for while-cond error case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for while-cond error case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'x'") == std::string::npos)
+        {
+            fail("expected unknown name diagnostic for while condition");
+        }
+    }
+
+    {
+        // Builtin print should stop if argument expression emission fails.
+        const std::string source = "fn main() -> Int { print(x); return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for print-arg emission failure case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for print-arg emission failure case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for print-arg emission failure case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'x'") == std::string::npos)
+        {
+            fail("expected unknown name diagnostic for print arg");
+        }
+    }
+
+    {
+        // Calls should stop if argument expression emission fails.
+        const std::string source =
+            "fn id(x: Int) -> Int { return x; } fn main() -> Int { return id(y); }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for call-arg emission failure case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for call-arg emission failure case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for call-arg emission failure case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'y'") == std::string::npos)
+        {
+            fail("expected unknown name diagnostic for call arg");
         }
     }
 
@@ -983,24 +1304,27 @@ int main()
         // Force unsupported operator/expr diagnostics via manual AST construction.
         using curlee::lexer::TokenKind;
         using curlee::parser::BinaryExpr;
+        using curlee::parser::BoolExpr;
         using curlee::parser::Expr;
         using curlee::parser::Function;
         using curlee::parser::IntExpr;
+        using curlee::parser::NameExpr;
         using curlee::parser::Program;
         using curlee::parser::ReturnStmt;
         using curlee::parser::Stmt;
+        using curlee::parser::StringExpr;
         using curlee::parser::StructLiteralExpr;
         using curlee::parser::TypeName;
         using curlee::parser::UnaryExpr;
 
-        auto run_with_expr = [](Expr expr)
+        auto run_with_expr = [](Expr expr, std::string_view return_type = "Int")
         {
             Stmt ret_stmt;
             ret_stmt.node = ReturnStmt{.value = std::move(expr)};
 
             Function main_fn;
             main_fn.name = "main";
-            main_fn.return_type = TypeName{.span = {}, .name = "Int"};
+            main_fn.return_type = TypeName{.span = {}, .name = return_type};
             main_fn.body.stmts.push_back(std::move(ret_stmt));
 
             Program program;
@@ -1066,6 +1390,282 @@ int main()
                 diags[0].message.find("struct literals not supported") == std::string::npos)
             {
                 fail("expected struct literal diagnostic");
+            }
+        }
+
+        {
+            // String literal decoding failures should be diagnosed.
+            Expr root;
+            root.node = StringExpr{.lexeme = "abc"};
+            const auto emitted = run_with_expr(std::move(root), "String");
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for malformed string literal case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("malformed string literal") == std::string::npos)
+            {
+                fail("expected malformed string literal diagnostic");
+            }
+        }
+
+        {
+            Expr root;
+            root.node = StringExpr{.lexeme = ""};
+            const auto emitted = run_with_expr(std::move(root), "String");
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for empty string literal case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("malformed string literal") == std::string::npos)
+            {
+                fail("expected malformed string literal diagnostic for empty lexeme");
+            }
+        }
+
+        {
+            std::string lexeme = "\"\\\"";
+
+            Expr root;
+            root.node = StringExpr{.lexeme = lexeme};
+            const auto emitted = run_with_expr(std::move(root), "String");
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for unterminated escape case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unterminated escape") == std::string::npos)
+            {
+                fail("expected unterminated escape diagnostic");
+            }
+        }
+
+        {
+            // Unary emission should early-return if its operand emits diagnostics.
+            Expr rhs;
+            rhs.node = NameExpr{.name = "x"};
+
+            Expr root;
+            root.node =
+                UnaryExpr{.op = TokenKind::Minus, .rhs = std::make_unique<Expr>(std::move(rhs))};
+
+            const auto emitted = run_with_expr(std::move(root));
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for unary operand emission failure case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unknown name 'x'") == std::string::npos)
+            {
+                fail("expected unknown name diagnostic for unary operand emission failure");
+            }
+        }
+
+        {
+            // Short-circuit binary emission should early-return if rhs emits diagnostics.
+            Expr lhs;
+            lhs.node = BoolExpr{.value = true};
+            Expr rhs;
+            rhs.node = NameExpr{.name = "x"};
+
+            Expr root;
+            root.node = BinaryExpr{.op = TokenKind::AndAnd,
+                                   .lhs = std::make_unique<Expr>(std::move(lhs)),
+                                   .rhs = std::make_unique<Expr>(std::move(rhs))};
+
+            const auto emitted = run_with_expr(std::move(root), "Bool");
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for && rhs emission failure case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unknown name 'x'") == std::string::npos)
+            {
+                fail("expected unknown name diagnostic for && rhs emission failure");
+            }
+        }
+
+        {
+            // Short-circuit binary emission should early-return if lhs emits diagnostics.
+            Expr lhs;
+            lhs.node = NameExpr{.name = "x"};
+            Expr rhs;
+            rhs.node = BoolExpr{.value = true};
+
+            Expr root;
+            root.node = BinaryExpr{.op = TokenKind::AndAnd,
+                                   .lhs = std::make_unique<Expr>(std::move(lhs)),
+                                   .rhs = std::make_unique<Expr>(std::move(rhs))};
+
+            const auto emitted = run_with_expr(std::move(root), "Bool");
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for && lhs emission failure case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unknown name 'x'") == std::string::npos)
+            {
+                fail("expected unknown name diagnostic for && lhs emission failure");
+            }
+        }
+
+        {
+            // Short-circuit binary emission should early-return if lhs emits diagnostics (||).
+            Expr lhs;
+            lhs.node = NameExpr{.name = "x"};
+            Expr rhs;
+            rhs.node = BoolExpr{.value = false};
+
+            Expr root;
+            root.node = BinaryExpr{.op = TokenKind::OrOr,
+                                   .lhs = std::make_unique<Expr>(std::move(lhs)),
+                                   .rhs = std::make_unique<Expr>(std::move(rhs))};
+
+            const auto emitted = run_with_expr(std::move(root), "Bool");
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for || lhs emission failure case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unknown name 'x'") == std::string::npos)
+            {
+                fail("expected unknown name diagnostic for || lhs emission failure");
+            }
+        }
+
+        {
+            // Short-circuit binary emission should early-return if rhs emits diagnostics (||).
+            Expr lhs;
+            lhs.node = BoolExpr{.value = true};
+            Expr rhs;
+            rhs.node = NameExpr{.name = "x"};
+
+            Expr root;
+            root.node = BinaryExpr{.op = TokenKind::OrOr,
+                                   .lhs = std::make_unique<Expr>(std::move(lhs)),
+                                   .rhs = std::make_unique<Expr>(std::move(rhs))};
+
+            const auto emitted = run_with_expr(std::move(root), "Bool");
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for || rhs emission failure case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unknown name 'x'") == std::string::npos)
+            {
+                fail("expected unknown name diagnostic for || rhs emission failure");
+            }
+        }
+
+        {
+            // Non-short-circuit binary emission should early-return if rhs emits diagnostics.
+            Expr lhs;
+            lhs.node = IntExpr{.lexeme = "1"};
+            Expr rhs;
+            rhs.node = NameExpr{.name = "x"};
+
+            Expr root;
+            root.node = BinaryExpr{.op = TokenKind::Plus,
+                                   .lhs = std::make_unique<Expr>(std::move(lhs)),
+                                   .rhs = std::make_unique<Expr>(std::move(rhs))};
+
+            const auto emitted = run_with_expr(std::move(root));
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for binary rhs emission failure case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unknown name 'x'") == std::string::npos)
+            {
+                fail("expected unknown name diagnostic for binary rhs emission failure");
+            }
+        }
+
+        {
+            // A callee that is a member expr with null base should be rejected.
+            using curlee::parser::CallExpr;
+            using curlee::parser::MemberExpr;
+
+            Expr callee;
+            callee.node = MemberExpr{.base = nullptr, .member = "f"};
+
+            CallExpr call;
+            call.callee = std::make_unique<Expr>(std::move(callee));
+
+            Expr root;
+            root.node = std::move(call);
+
+            const auto emitted = run_with_expr(std::move(root));
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for member-callee null base case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("only name calls and module-qualified") == std::string::npos)
+            {
+                fail("expected runnable-call restriction diagnostic for member-callee null base");
+            }
+        }
+
+        {
+            // Cover every supported binary-op switch case (non-short-circuit), plus default.
+            auto emit_binary_ok = [&](TokenKind op, std::string_view return_type)
+            {
+                Expr lhs;
+                lhs.node = IntExpr{.lexeme = "1"};
+                Expr rhs;
+                rhs.node = IntExpr{.lexeme = "2"};
+
+                Expr root;
+                root.node = BinaryExpr{.op = op,
+                                       .lhs = std::make_unique<Expr>(std::move(lhs)),
+                                       .rhs = std::make_unique<Expr>(std::move(rhs))};
+
+                const auto emitted = run_with_expr(std::move(root), return_type);
+                if (!std::holds_alternative<curlee::vm::Chunk>(emitted))
+                {
+                    fail("expected emission to succeed for supported binary op case");
+                }
+            };
+
+            emit_binary_ok(TokenKind::Plus, "Int");
+            emit_binary_ok(TokenKind::Minus, "Int");
+            emit_binary_ok(TokenKind::Star, "Int");
+            emit_binary_ok(TokenKind::Slash, "Int");
+
+            emit_binary_ok(TokenKind::EqualEqual, "Bool");
+            emit_binary_ok(TokenKind::BangEqual, "Bool");
+            emit_binary_ok(TokenKind::Less, "Bool");
+            emit_binary_ok(TokenKind::LessEqual, "Bool");
+            emit_binary_ok(TokenKind::Greater, "Bool");
+            emit_binary_ok(TokenKind::GreaterEqual, "Bool");
+
+            {
+                Expr lhs;
+                lhs.node = IntExpr{.lexeme = "1"};
+                Expr rhs;
+                rhs.node = IntExpr{.lexeme = "2"};
+
+                Expr root;
+                root.node = BinaryExpr{.op = TokenKind::Comma,
+                                       .lhs = std::make_unique<Expr>(std::move(lhs)),
+                                       .rhs = std::make_unique<Expr>(std::move(rhs))};
+
+                const auto emitted = run_with_expr(std::move(root));
+                if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+                {
+                    fail("expected emission to fail for unsupported binary op default case");
+                }
+                const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+                if (diags.empty() ||
+                    diags[0].message.find("unsupported binary operator") == std::string::npos)
+                {
+                    fail("expected unsupported binary operator diagnostic for default case");
+                }
             }
         }
     }

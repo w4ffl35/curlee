@@ -28,7 +28,8 @@ static void read_into_should_report_limit_when_already_full()
     }
 
     const char data[] = "hello";
-    (void)write(fds[1], data, sizeof(data));
+    const auto ignored = write(fds[1], data, sizeof(data));
+    (void)ignored;
     close(fds[1]);
 
     std::string out;

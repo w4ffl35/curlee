@@ -51,6 +51,48 @@ int main()
         }
     };
 
+    // Import ordering: imports must be before other top-level decls.
+    {
+        const std::string src = R"(fn f() -> Unit { return; }
+import foo;
+)";
+        expect_parse_error_contains(
+            src, "import declarations must appear before any other top-level declarations");
+    }
+
+    // Struct declaration: duplicate field name.
+    {
+        const std::string src = R"(struct S {
+  x: Int;
+  x: Int;
+}
+fn main() -> Unit { return; }
+)";
+        expect_parse_error_contains(src, "duplicate field name in struct declaration");
+    }
+
+    // Enum declaration: duplicate variant name.
+    {
+        const std::string src = R"(enum E {
+  A;
+  A;
+}
+fn main() -> Unit { return; }
+)";
+        expect_parse_error_contains(src, "duplicate variant name in enum declaration");
+    }
+
+    // Struct literal: duplicate field initializer.
+    {
+        const std::string src = R"(struct Point { x: Int; }
+fn main() -> Unit {
+  let p: Point = Point { x: 1, x: 2 };
+  return;
+}
+)";
+        expect_parse_error_contains(src, "duplicate field in struct literal");
+    }
+
     {
         const std::string src = R"(fn main() -> Unit {
     let x: Int = 1 + 2;
@@ -93,6 +135,30 @@ int main()
         if (dumped.find("let x: Int") == std::string::npos)
         {
             fail("dump missing typed let binding");
+        }
+    }
+
+    // Binary operator parsing coverage: exercise all precedence levels.
+    {
+        const std::string src = R"(fn main() -> Unit {
+  let a: Int = 1 + 2 * 3 - 4 / 5;
+  let b: Bool = (1 < 2) && (3 <= 4) && (5 > 6) && (7 >= 8);
+  let c: Bool = (1 == 2) || (3 != 4);
+  let d: Bool = true || false && true;
+  return;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on operator coverage program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on operator coverage program");
         }
     }
 
@@ -141,6 +207,348 @@ fn main() -> Unit {
         {
             fail("expected Option to have two variants");
         }
+    }
+
+    // Dumper: group/unary expr + multi-arg call formatting.
+    {
+        const std::string src = R"(fn main() -> Unit {
+  let x: Int = -(1);
+  foo(1, 2);
+  return;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on dumper group/unary/call program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on dumper group/unary/call program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("minus (1)") == std::string::npos)
+        {
+            fail("dump missing unary/group expression");
+        }
+        if (dumped.find("foo(1, 2)") == std::string::npos)
+        {
+            fail("dump missing multi-arg call formatting");
+        }
+    }
+
+    // Dumper: dump_program newline insertion between multiple blocks.
+    {
+        const std::string src = R"(import foo;
+import bar as baz;
+
+struct A { x: Int; }
+struct B { y: Int; }
+
+enum E1 { V1; }
+enum E2 { V2; }
+
+fn f() -> Unit { return; }
+fn g() -> Unit { return; }
+)";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on dumper multi-block program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on dumper multi-block program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("import foo") == std::string::npos ||
+            dumped.find("import bar") == std::string::npos)
+        {
+            fail("dump missing imports");
+        }
+        if (dumped.find("struct A") == std::string::npos ||
+            dumped.find("struct B") == std::string::npos ||
+            dumped.find("enum E1") == std::string::npos ||
+            dumped.find("enum E2") == std::string::npos ||
+            dumped.find("fn f") == std::string::npos || dumped.find("fn g") == std::string::npos)
+        {
+            fail("dump missing multi-block decls");
+        }
+    }
+
+    // Expressions: cover all operator tiers (||, &&, ==/!=, comparisons, +/-, */).
+    {
+        const std::string src = R"(fn expr_ops() -> Unit {
+  (true || false) && true;
+  1 == 2;
+  1 != 2;
+  1 < 2;
+  1 <= 2;
+  1 > 2;
+  1 >= 2;
+  1 + 2;
+  1 - 2;
+  1 * 2;
+  1 / 2;
+  return;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on expr-ops program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on expr-ops program");
+        }
+
+        const std::string dumped = parser::dump(std::get<parser::Program>(parsed));
+        if (dumped.find("or_or") == std::string::npos ||
+            dumped.find("and_and") == std::string::npos ||
+            dumped.find("equal_equal") == std::string::npos ||
+            dumped.find("bang_equal") == std::string::npos ||
+            dumped.find("less") == std::string::npos ||
+            dumped.find("less_equal") == std::string::npos ||
+            dumped.find("greater") == std::string::npos ||
+            dumped.find("greater_equal") == std::string::npos ||
+            dumped.find("plus") == std::string::npos || dumped.find("minus") == std::string::npos ||
+            dumped.find("star") == std::string::npos || dumped.find("slash") == std::string::npos)
+        {
+            fail("dump missing expression operator(s)");
+        }
+    }
+
+    // Predicates: cover equality/comparisons/arithmetic in the predicate grammar (incl. true
+    // literal).
+    {
+        const std::string src = R"(fn pred_all_ops(a: Int, b: Int) -> Unit
+  [ requires true;
+    requires a == b;
+    requires a != b;
+    requires a < b;
+    requires a <= b;
+    requires a > b;
+    requires a >= b;
+    requires (a + b) > (a - b);
+    requires (a * b) > (a / b);
+  ]
+{
+  return;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on pred-all-ops program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on pred-all-ops program");
+        }
+
+        const std::string dumped = parser::dump(std::get<parser::Program>(parsed));
+        if (dumped.find("true") == std::string::npos ||
+            dumped.find("equal_equal") == std::string::npos ||
+            dumped.find("bang_equal") == std::string::npos ||
+            dumped.find("greater") == std::string::npos ||
+            dumped.find("slash") == std::string::npos)
+        {
+            fail("dump missing predicate operator(s)");
+        }
+    }
+
+    // Struct literals: cover empty and non-empty dumping + expr-id assignment traversal.
+    {
+        const std::string src = R"(fn struct_lit() -> Unit {
+  T{};
+  T{ x: 1, y: 2 };
+  return;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on struct-literal program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on struct-literal program");
+        }
+        const std::string dumped = parser::dump(std::get<parser::Program>(parsed));
+        if (dumped.find("T{}") == std::string::npos ||
+            dumped.find("T{ x: 1, y: 2 }") == std::string::npos)
+        {
+            fail("dump missing struct literal formatting");
+        }
+    }
+
+    // Dumper: if/else branch.
+    {
+        const std::string src = R"(fn if_else() -> Unit {
+  if (true) { return; } else { return; }
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on if/else program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on if/else program");
+        }
+        const std::string dumped = parser::dump(std::get<parser::Program>(parsed));
+        if (dumped.find(" else ") == std::string::npos)
+        {
+            fail("dump missing else block");
+        }
+    }
+
+    // Dumper: if without else (covers else_block == nullptr branch).
+    {
+        const std::string src = R"(fn if_no_else() -> Unit {
+  if (true) { return; }
+  return;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on if-without-else program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on if-without-else program");
+        }
+        (void)parser::dump(std::get<parser::Program>(parsed));
+    }
+
+    // Dumper: contract printing when requires is empty but ensures is non-empty.
+    {
+        const std::string src = R"(fn ensures_only() -> Unit
+  [ ensures true; ]
+{
+  return;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on ensures-only program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on ensures-only program");
+        }
+        const std::string dumped = parser::dump(std::get<parser::Program>(parsed));
+        if (dumped.find("ensures true") == std::string::npos)
+        {
+            fail("dump missing ensures-only contract");
+        }
+    }
+
+    // Dumper: cover has_types short-circuit cases and optional return type.
+    {
+        // Imports only: no extra newline after imports.
+        const std::string src_imports_only = R"(import foo;
+import bar;
+)";
+        const auto lexed = lexer::lex(src_imports_only);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on imports-only program");
+        }
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on imports-only program");
+        }
+        (void)parser::dump(std::get<parser::Program>(parsed));
+    }
+
+    {
+        // Imports + functions (no types): newline after imports uses !functions.empty(),
+        // and dump_function covers the "no return type" branch.
+        const std::string src_imports_fn_only = R"(import foo;
+
+fn main() { return; }
+)";
+        const auto lexed = lexer::lex(src_imports_fn_only);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on imports+fn-only program");
+        }
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on imports+fn-only program");
+        }
+        const std::string dumped = parser::dump(std::get<parser::Program>(parsed));
+        if (dumped.find("fn main()") == std::string::npos)
+        {
+            fail("dump missing function without return type");
+        }
+    }
+
+    {
+        // Enums only: has_types is true via enums when structs are empty.
+        const std::string src_enums_only = R"(import foo;
+
+enum E { V; }
+)";
+        const auto lexed = lexer::lex(src_enums_only);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on enums-only program");
+        }
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on enums-only program");
+        }
+        (void)parser::dump(std::get<parser::Program>(parsed));
+    }
+
+    {
+        // Types only (no functions): covers has_types && !functions.empty() false branch.
+        const std::string src_types_only = R"(struct A { x: Int; }
+enum E { V; }
+)";
+        const auto lexed = lexer::lex(src_types_only);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on types-only program");
+        }
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on types-only program");
+        }
+        (void)parser::dump(std::get<parser::Program>(parsed));
     }
 
     {
@@ -1077,6 +1485,70 @@ fn main() -> Unit {
     expect_parse_error_contains("fn main() -> Unit { return 1 }\n",
                                 "expected ';' after return statement");
     expect_parse_error_contains("fn main() -> Unit { 1 }\n", "expected ';' after expression");
+
+    {
+        // Dump coverage: group + unary expressions.
+        const std::string src = R"(fn main() -> Unit {
+  !((1));
+  ("hello");
+  return;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on group/unary dump program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on group/unary dump program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        const std::string bang = std::string(lexer::to_string(lexer::TokenKind::Bang));
+        if (dumped.find(bang) == std::string::npos)
+        {
+            fail("dump missing unary operator");
+        }
+        if (dumped.find('(') == std::string::npos || dumped.find(')') == std::string::npos)
+        {
+            fail("dump missing parentheses/grouping");
+        }
+    }
+
+    {
+        // Parser recovery coverage: multiple top-level errors in a single parse.
+        // This is intentionally malformed but should produce multiple diagnostics.
+        const std::string src = R"(
+import foo.
+struct S x: Int; }
+enum E { V(Int; W; V; }
+fn f(x Int) -> { return 0; }
+)";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on multi-error program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+        {
+            fail("expected parse errors for multi-error program");
+        }
+
+        const auto& diags = std::get<std::vector<diag::Diagnostic>>(parsed);
+        if (diags.size() < 3)
+        {
+            fail("expected multiple diagnostics for multi-error program");
+        }
+    }
 
     std::cout << "OK\n";
     return 0;

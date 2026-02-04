@@ -98,6 +98,17 @@ int main()
         fail("expected '-' to be malformed json number");
     }
 
+    // parse_number: call parse_number() directly at EOF to exercise the
+    // has_leading_minus = !eof() && ... short-circuit branch when eof() is true.
+    {
+        JsonParser p{""};
+        const auto v = p.parse_number();
+        if (v.has_value())
+        {
+            fail("expected parse_number to fail on empty input");
+        }
+    }
+
     // parse_number: exercise sign, decimal, exponent branches via direct parse_number().
     {
         JsonParser p{"-12.34e+5"};
@@ -121,6 +132,19 @@ int main()
         if (!v.has_value() || !v->is_number())
         {
             fail("expected parse_number to parse 1E-2");
+        }
+    }
+
+    // parse_number: force the has_exp_sign = !eof() && (...) branch where eof() is true
+    // immediately after consuming 'e'. This is not reachable via strict JSON input, so we
+    // mutate parser state directly (white-box test).
+    {
+        JsonParser p{"0e"};
+        p.pos = 1; // point at 'e' so parse_number() enters exponent-handling with eof() after ++pos
+        const auto v = p.parse_number();
+        if (v.has_value())
+        {
+            fail("expected parse_number to fail when starting at an exponent marker");
         }
     }
 

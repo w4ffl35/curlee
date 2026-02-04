@@ -241,9 +241,11 @@ class Verifier
 
     void push_scope()
     {
-        scopes_.push_back(ScopeState{.int_vars = lower_ctx_.int_vars,
-                                     .bool_vars = lower_ctx_.bool_vars,
-                                     .facts_size = facts_.size()});
+        scopes_.emplace_back();
+        auto& state = scopes_.back();
+        state.int_vars = lower_ctx_.int_vars;
+        state.bool_vars = lower_ctx_.bool_vars;
+        state.facts_size = facts_.size();
     }
 
     void pop_scope()
@@ -375,8 +377,7 @@ class Verifier
                 }
                 else if constexpr (std::is_same_v<Node, curlee::parser::BoolExpr>)
                 {
-                    return ExprValue{solver_.context().bool_val(node.value), TypeKind::Bool,
-                                     true};
+                    return ExprValue{solver_.context().bool_val(node.value), TypeKind::Bool, true};
                 }
                 else if constexpr (std::is_same_v<Node, curlee::parser::StringExpr>)
                 {
@@ -473,24 +474,26 @@ class Verifier
                     case TokenKind::LessEqual:
                     case TokenKind::Greater:
                     case TokenKind::GreaterEqual:
+                    {
                         if (lhs.kind != TypeKind::Int || rhs.kind != TypeKind::Int)
                         {
                             return error_at(e.span, "comparison expects Int expressions");
                         }
-                        switch (node.op)
+                        z3::expr cmp = lhs.expr < rhs.expr;
+                        if (node.op == TokenKind::LessEqual)
                         {
-                        case TokenKind::Less:
-                            return ExprValue{lhs.expr < rhs.expr, TypeKind::Bool, false};
-                        case TokenKind::LessEqual:
-                            return ExprValue{lhs.expr <= rhs.expr, TypeKind::Bool, false};
-                        case TokenKind::Greater:
-                            return ExprValue{lhs.expr > rhs.expr, TypeKind::Bool, false};
-                        case TokenKind::GreaterEqual:
-                            return ExprValue{lhs.expr >= rhs.expr, TypeKind::Bool, false};
-                        default:
-                            break;
+                            cmp = lhs.expr <= rhs.expr;
                         }
-                        break;
+                        if (node.op == TokenKind::Greater)
+                        {
+                            cmp = lhs.expr > rhs.expr;
+                        }
+                        if (node.op == TokenKind::GreaterEqual)
+                        {
+                            cmp = lhs.expr >= rhs.expr;
+                        }
+                        return ExprValue{cmp, TypeKind::Bool, false};
+                    }
 
                     case TokenKind::AndAnd:
                     case TokenKind::OrOr:
@@ -640,7 +643,7 @@ class Verifier
                 call_ctx.int_vars.emplace(param.name, sym);
                 call_facts.push_back(sym == arg_exprs[i]);
             }
-            else if (sig.params[i] == TypeKind::Bool)
+            if (sig.params[i] == TypeKind::Bool)
             {
                 auto sym = solver_.context().bool_const(sym_name.c_str());
                 call_ctx.bool_vars.emplace(param.name, sym);
@@ -770,7 +773,7 @@ class Verifier
             ensure_ctx.result_int = result;
             ensure_facts.push_back(result == value.expr);
         }
-        else if (expected_return == TypeKind::Bool)
+        if (expected_return == TypeKind::Bool)
         {
             auto result = solver_.context().bool_const(result_symbol.c_str());
             ensure_ctx.result_bool = result;

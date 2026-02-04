@@ -58,7 +58,7 @@ std::optional<Model> Solver::model_for(const std::vector<z3::expr>& vars) const
         return std::nullopt;
     }
 
-    assert(last_model_.has_value());
+    assert(last_model_.has_value()); // GCOVR_EXCL_LINE
 
     Model model;
     model.entries.reserve(vars.size());

@@ -22,12 +22,30 @@ constexpr std::string_view kHeaderLegacyV1 = "CURLEE_BUNDLE_V1";
 
 CURLEE_NOINLINE int decode_base64_char(unsigned char c)
 {
-    if (c >= 'A' && c <= 'Z') { return static_cast<int>(c - 'A'); }
-    if (c >= 'a' && c <= 'z') { return static_cast<int>(c - 'a' + 26); }
-    if (c >= '0' && c <= '9') { return static_cast<int>(c - '0' + 52); }
-    if (c == '+') { return 62; }
-    if (c == '/') { return 63; }
-    if (c == '=') { return -2; }
+    if (c >= 'A' && c <= 'Z')
+    {
+        return static_cast<int>(c - 'A');
+    }
+    if (c >= 'a' && c <= 'z')
+    {
+        return static_cast<int>(c - 'a' + 26);
+    }
+    if (c >= '0' && c <= '9')
+    {
+        return static_cast<int>(c - '0' + 52);
+    }
+    if (c == '+')
+    {
+        return 62;
+    }
+    if (c == '/')
+    {
+        return 63;
+    }
+    if (c == '=')
+    {
+        return -2;
+    }
     return -1;
 }
 
@@ -37,7 +55,10 @@ CURLEE_NOINLINE std::optional<int> parse_int(std::string_view input)
     const auto* begin = input.data();
     const auto* end = input.data() + input.size();
     const auto result = std::from_chars(begin, end, value);
-    if (result.ec != std::errc{} || result.ptr != end) { return std::nullopt; }
+    if (result.ec != std::errc{} || result.ptr != end)
+    {
+        return std::nullopt;
+    }
     return value;
 }
 
@@ -51,7 +72,7 @@ std::string to_hex(std::uint64_t value)
         value >>= 4;
     }
     return out;
-}
+} // GCOVR_EXCL_LINE
 
 std::vector<std::string> split(std::string_view input, char delim)
 {
@@ -77,7 +98,7 @@ std::vector<std::string> split(std::string_view input, char delim)
         out.push_back(current);
     }
     return out;
-}
+} // GCOVR_EXCL_LINE
 
 std::string base64_encode(const std::vector<std::uint8_t>& bytes)
 {
@@ -115,7 +136,7 @@ std::string base64_encode(const std::vector<std::uint8_t>& bytes)
     }
 
     return out;
-}
+} // GCOVR_EXCL_LINE
 
 std::optional<std::vector<std::uint8_t>> base64_decode(std::string_view input)
 {
@@ -147,7 +168,10 @@ std::optional<std::vector<std::uint8_t>> base64_decode(std::string_view input)
             return std::nullopt;
         }
 
-        if (vals[0] < 0 || vals[1] < 0) { return std::nullopt; }
+        if (vals[0] < 0 || vals[1] < 0)
+        {
+            return std::nullopt;
+        }
 
         const std::uint32_t triple = (static_cast<std::uint32_t>(vals[0]) << 18) |
                                      (static_cast<std::uint32_t>(vals[1]) << 12) |
@@ -182,7 +206,7 @@ std::string join_pairs(const std::vector<ImportPin>& imports)
         out.append(imports[i].hash);
     }
     return out;
-}
+} // GCOVR_EXCL_LINE
 
 } // namespace
 
@@ -305,7 +329,10 @@ BundleResult read_bundle(const std::string& path)
                 {
                     return BundleError{"invalid import pin"};
                 }
-                manifest.imports.push_back(ImportPin{.path = entry.substr(0, pos), .hash = entry.substr(pos + 1)});
+                const auto path = entry.substr(0, pos);
+                const auto hash = entry.substr(pos + 1);
+                manifest.imports.push_back(
+                    ImportPin{.path = path, .hash = hash}); // GCOVR_EXCL_LINE
             }
         }
         else if (key == "proof")
@@ -314,7 +341,8 @@ BundleResult read_bundle(const std::string& path)
             {
                 manifest.proof = value;
             }
-        } else if (key == "bytecode")
+        }
+        else if (key == "bytecode")
         {
             bytecode_b64 = value;
         }

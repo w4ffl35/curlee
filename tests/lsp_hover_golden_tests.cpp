@@ -782,6 +782,166 @@ static bool run_publish_diagnostics_nonempty_case(const std::string& lsp_exe)
     return true;
 }
 
+static bool run_publish_diagnostics_escape_uri_and_multi_diags_case(const std::string& lsp_exe)
+{
+    // Intentionally produce multiple parse diagnostics so the server must serialize
+    // multiple entries (commas in the diagnostics array), and use a URI containing
+    // characters that must be escaped in JSON output.
+    const std::string bad_text = "fn a() -> Int { let x: Int = ; return 0; }\n"
+                                 "fn b() -> Int { let y: Int = ; return 0; }\n";
+
+    const std::string uri = std::string("file:///tmp/a\tb\nc\rd\"\\\\e.curlee");
+
+    const std::string init =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}";
+
+    const std::string did_open = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                                 "didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                                 json_escape(uri) +
+                                 "\",\"languageId\":\"curlee\",\"version\":1,\"text\":\"" +
+                                 json_escape(bad_text) + "\"}}}";
+
+    const std::string shutdown =
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"shutdown\",\"params\":{}}";
+    const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
+
+    std::string stdin_data;
+    stdin_data += lsp_frame(init);
+    stdin_data += lsp_frame(did_open);
+    stdin_data += lsp_frame(shutdown);
+    stdin_data += lsp_frame(exit);
+
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+
+    const auto payloads = split_lsp_frames(result.out);
+    bool saw_diag_multi = false;
+    bool saw_uri_escapes = false;
+    for (const auto& p : payloads)
+    {
+        if (p.find("\"method\":\"textDocument/publishDiagnostics\"") == std::string::npos)
+        {
+            continue;
+        }
+        if (p.find("\"diagnostics\":[{") != std::string::npos && p.find("},{") != std::string::npos)
+        {
+            saw_diag_multi = true;
+        }
+        if (p.find("\\t") != std::string::npos && p.find("\\n") != std::string::npos &&
+            p.find("\\r") != std::string::npos && p.find("\\\"") != std::string::npos &&
+            p.find("\\\\") != std::string::npos)
+        {
+            saw_uri_escapes = true;
+        }
+    }
+
+    if (!saw_diag_multi)
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("expected publishDiagnostics to include multiple diagnostics");
+    }
+    if (!saw_uri_escapes)
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("expected publishDiagnostics to include escaped URI characters");
+    }
+
+    return true;
+}
+
+static bool run_hover_call_pred_bool_unary_and_missing_refinement_case(const std::string& lsp_exe)
+{
+    const std::string text =
+        "fn g(x: Int where true, y: Int) -> Int [ requires !false; ] { return 0; }\n"
+        "fn main() -> Int { return g(0, 0); }\n";
+
+    const std::string uri =
+        "file://" + (fs::current_path() / "tests" / "fixtures" / "pred_bool_unary.curlee").string();
+
+    const std::size_t call_pos = text.find("g(0, 0)");
+    if (call_pos == std::string::npos)
+    {
+        fail("failed to find call site in inline text");
+    }
+
+    std::size_t line = 0;
+    std::size_t col = 0;
+    compute_line_col(text, call_pos + 1, line, col);
+
+    const std::string init =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}";
+
+    const std::string did_open = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                                 "didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                                 json_escape(uri) +
+                                 "\",\"languageId\":\"curlee\",\"version\":1,\"text\":\"" +
+                                 json_escape(text) + "\"}}}";
+
+    std::ostringstream hover;
+    hover << "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{"
+             "\"textDocument\":{\"uri\":\""
+          << json_escape(uri) << "\"},\"position\":{\"line\":" << line << ",\"character\":" << col
+          << "}}}";
+
+    const std::string shutdown =
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{}}";
+    const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
+
+    std::string stdin_data;
+    stdin_data += lsp_frame(init);
+    stdin_data += lsp_frame(did_open);
+    stdin_data += lsp_frame(hover.str());
+    stdin_data += lsp_frame(shutdown);
+    stdin_data += lsp_frame(exit);
+
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+
+    const auto payloads = split_lsp_frames(result.out);
+    std::optional<std::string> got;
+    for (const auto& p : payloads)
+    {
+        if (p.find("\"id\":2") == std::string::npos)
+        {
+            continue;
+        }
+        got = extract_json_string_value(p, "value");
+        break;
+    }
+
+    if (!got.has_value())
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("did not find hover response (id=2) with a contents.value");
+    }
+
+    if (got->find("fn g") == std::string::npos || got->find("obligations:") == std::string::npos)
+    {
+        std::cerr << "LSP hover value:\n" << *got << "\n";
+        fail("expected hover to include function signature and obligations");
+    }
+    if (got->find("true") == std::string::npos || got->find("!false") == std::string::npos)
+    {
+        std::cerr << "LSP hover value:\n" << *got << "\n";
+        fail("expected hover obligations to include true and !false");
+    }
+    if (got->find("x: Int") == std::string::npos || got->find("y: Int") == std::string::npos)
+    {
+        std::cerr << "LSP hover value:\n" << *got << "\n";
+        fail("expected hover signature to include both parameters");
+    }
+
+    return true;
+}
+
 static bool run_hover_without_open_case(const std::string& lsp_exe)
 {
     const std::string uri =
@@ -1722,7 +1882,12 @@ static bool run_lsp_robustness_cases(const std::string& lsp_exe)
     const std::string json_null = "null";
     const std::string json_true = "true";
     const std::string json_false = "false";
+    // Near-misses should fail (parse_value should return nullopt).
+    const std::string json_nul = "nul";
+    const std::string json_tru = "tru";
+    const std::string json_fals = "fals";
     const std::string json_number_exp = "1e+2";
+    const std::string json_number_decimal = "1.25";
     const std::string json_empty_array = "[]";
     const std::string json_empty_object = "{}";
 
@@ -1747,7 +1912,14 @@ static bool run_lsp_robustness_cases(const std::string& lsp_exe)
 
     // Malformed array/object => parse_array/parse_object should fail.
     const std::string bad_array_missing_comma = "[1 2]";
+    const std::string bad_array_trailing_comma = "[1,]";
     const std::string bad_object_missing_colon = "{\"a\" 1}";
+    const std::string bad_object_missing_comma = "{\"a\":1 \"b\":2}";
+
+    // Exercise common string escapes in JsonParser (\" \\ \r \t \n).
+    const std::string string_escape_variants =
+        "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"unknown/method\","
+        "\"params\":{\"s\":\"\\\"\\\\\\r\\t\\n\"}}";
 
     // didOpen missing text.
     const std::string did_open_missing_text = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
@@ -1768,6 +1940,12 @@ static bool run_lsp_robustness_cases(const std::string& lsp_exe)
         json_escape(uri) + "\",\"version\":3},\"contentChanges\":[1]}}";
 
     // didChange contentChanges is not an array.
+    // didChange contentChanges[0] is an object but missing the required text field.
+    const std::string did_change_missing_text =
+        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+        "didChange\",\"params\":{\"textDocument\":{\"uri\":\"" +
+        json_escape(uri) + "\",\"version\":5},\"contentChanges\":[{\"range\":null}]}}";
+
     const std::string did_change_not_array =
         "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
         "didChange\",\"params\":{\"textDocument\":{\"uri\":\"" +
@@ -1824,20 +2002,28 @@ static bool run_lsp_robustness_cases(const std::string& lsp_exe)
     stdin_data += lsp_frame(json_null);
     stdin_data += lsp_frame(json_true);
     stdin_data += lsp_frame(json_false);
+    stdin_data += lsp_frame(json_nul);
+    stdin_data += lsp_frame(json_tru);
+    stdin_data += lsp_frame(json_fals);
     stdin_data += lsp_frame(json_number_exp);
+    stdin_data += lsp_frame(json_number_decimal);
     stdin_data += lsp_frame(json_empty_array);
     stdin_data += lsp_frame(json_empty_object);
     stdin_data += lsp_frame(escape_variants);
+    stdin_data += lsp_frame(string_escape_variants);
     stdin_data += lsp_frame(ws_initialize);
     stdin_data += lsp_frame(trailing_garbage);
     stdin_data += lsp_frame(string_trailing_backslash);
     stdin_data += lsp_frame(number_minus_only);
     stdin_data += lsp_frame(bad_array_missing_comma);
+    stdin_data += lsp_frame(bad_array_trailing_comma);
     stdin_data += lsp_frame(bad_object_missing_colon);
+    stdin_data += lsp_frame(bad_object_missing_comma);
     stdin_data += lsp_frame(did_open_missing_text);
     stdin_data += lsp_frame(did_change_empty);
     stdin_data += lsp_frame(did_change_non_object);
     stdin_data += lsp_frame(did_change_not_array);
+    stdin_data += lsp_frame(did_change_missing_text);
     stdin_data += lsp_frame(hover_missing_params);
     stdin_data += lsp_frame(hover_oob);
     stdin_data += lsp_frame(did_open);
@@ -1952,6 +2138,11 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    if (!run_publish_diagnostics_escape_uri_and_multi_diags_case(lsp_exe))
+    {
+        return 1;
+    }
+
     if (!run_hover_without_open_case(lsp_exe))
     {
         return 1;
@@ -1978,6 +2169,11 @@ int main(int argc, char** argv)
     }
 
     if (!run_hover_call_dedup_obligations_case(lsp_exe))
+    {
+        return 1;
+    }
+
+    if (!run_hover_call_pred_bool_unary_and_missing_refinement_case(lsp_exe))
     {
         return 1;
     }

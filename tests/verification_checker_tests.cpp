@@ -713,6 +713,78 @@ int main()
         }
     }
 
+    {
+        // Expression lowering: unknown name errors should point at the name.
+        const std::string source = "fn f(x: Int) -> Int [\n"
+                                   "  ensures x > y;\n"
+                                   "] {\n"
+                                   "  return x;\n"
+                                   "}\n"
+                                   "fn main() -> Int { return f(0); }\n";
+
+        const auto verified = verify_program(source, "unknown name in ensures expr lowering");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for unknown name in ensures expr lowering");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "unknown predicate name") &&
+            !has_message_substr(diags, "unknown name 'y'"))
+        {
+            fail("expected unknown name diagnostic for y");
+        }
+    }
+
+    {
+        // Bool var lookup: ensure NameExpr lowering finds bool vars.
+        const std::string source = "fn f(b: Bool) -> Int [ ensures b; ] { return 0; }\n"
+                                   "fn main() -> Int { return f(false); }\n";
+
+        const auto verified = verify_program(source, "bool NameExpr lowering");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for bool NameExpr lowering");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "ensures clause not satisfied"))
+        {
+            fail("expected ensures failure for bool NameExpr lowering");
+        }
+        if (!any_note_has_prefix(diags, "goal: ") || !any_note_has_substr(diags, "b"))
+        {
+            fail("expected goal note to mention b for bool NameExpr lowering");
+        }
+    }
+
+    {
+        // BlockStmt: explicit blocks should introduce a verifier scope.
+        const std::string source = "fn main() -> Int {\n"
+                                   "  { let x: Int = 0; }\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "BlockStmt scope push/pop");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification to succeed for BlockStmt scope push/pop");
+        }
+    }
+
+    {
+        // Ensure verifier call-scanning visits ScopedNameExpr nodes.
+        const std::string source = "enum E { A; }\n"
+                                   "fn main() -> Int [ ensures result == 0; ] {\n"
+                                   "  let e: E = E::A;\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "ScopedNameExpr visited in verifier");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification to succeed for ScopedNameExpr visitor coverage");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

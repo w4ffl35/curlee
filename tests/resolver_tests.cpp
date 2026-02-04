@@ -69,6 +69,30 @@ int main()
     using namespace curlee;
 
     {
+        // Cover resolve(program) overload (no SourceFile).
+        const std::string src = R"(fn main() -> Unit { return 0; })";
+        const auto program = parse_ok(src);
+        const auto res = resolver::resolve(program);
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for resolve(program) overload");
+        }
+    }
+
+    {
+        // Imports require a source file path: cover the base_path_==null diagnostic.
+        const std::string src = R"(import foo.bar;
+
+fn main() -> Unit { return 0; })";
+        const auto program = parse_ok(src);
+        const auto res = resolver::resolve(program);
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
+        {
+            fail("expected resolver error when imports are present without a source path");
+        }
+    }
+
+    {
         const std::string src = R"(fn print(x: Int) -> Unit {
   return 0;
 }
@@ -178,13 +202,62 @@ fn main() -> Unit {
         const fs::path module_dir = base / "foo";
         fs::create_directories(module_dir);
         const fs::path module_path = module_dir / "bar.curlee";
-        write_file(module_path, "fn helper() -> Unit { return 0; }");
+        write_file(module_path,
+                   R"(struct S {
+    x: Int;
+}
+
+enum E {
+    V;
+}
+
+fn helper() -> Unit { return 0; })");
 
         const fs::path main_path = base / "main.curlee";
         const auto res = resolve_with_source(src, main_path.string());
         if (!std::holds_alternative<resolver::Resolution>(res))
         {
             fail("expected resolver success when import exists");
+        }
+    }
+
+    {
+        // Imported module lex failure.
+        const std::string src = R"(import foo.bad;
+
+fn main() -> Unit { return 0; })";
+
+        namespace fs = std::filesystem;
+        const fs::path base = fs::temp_directory_path() / "curlee_resolver_tests_import_lex_fail";
+        const fs::path module_dir = base / "foo";
+        fs::create_directories(module_dir);
+        write_file(module_dir / "bad.curlee", "@");
+
+        const fs::path main_path = base / "main.curlee";
+        const auto res = resolve_with_source(src, main_path.string());
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
+        {
+            fail("expected resolver error when imported module fails to lex");
+        }
+    }
+
+    {
+        // Imported module parse failure.
+        const std::string src = R"(import foo.bad;
+
+fn main() -> Unit { return 0; })";
+
+        namespace fs = std::filesystem;
+        const fs::path base = fs::temp_directory_path() / "curlee_resolver_tests_import_parse_fail";
+        const fs::path module_dir = base / "foo";
+        fs::create_directories(module_dir);
+        write_file(module_dir / "bad.curlee", "fn");
+
+        const fs::path main_path = base / "main.curlee";
+        const auto res = resolve_with_source(src, main_path.string());
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
+        {
+            fail("expected resolver error when imported module fails to parse");
         }
     }
 
@@ -233,6 +306,66 @@ fn main() -> Unit {
         if (!std::holds_alternative<resolver::Resolution>(res))
         {
             fail("expected resolver success for path-qualified call");
+        }
+    }
+
+    {
+        // Grouped base expression should *not* be treated as module-qualified; this hits
+        // collect_member_chain(false) in MemberExpr resolution.
+        const std::string src = R"(fn main() -> Unit {
+  let x: Int = 0;
+  (x).field;
+  return 0;
+})";
+
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_group_member.curlee");
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for grouped member access");
+        }
+    }
+
+    {
+        // python_ffi.call requires an unsafe context.
+        const std::string src = R"(fn main() -> Unit {
+  python_ffi.call();
+  return 0;
+})";
+
+        const auto res =
+            resolve_with_source(src, "tests/fixtures/resolve_ffi_unsafe_required.curlee");
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
+        {
+            fail("expected resolver error for python_ffi.call outside unsafe");
+        }
+    }
+
+    {
+        // python_ffi.call inside unsafe should not emit the unsafe-context diagnostic.
+        const std::string src = R"(fn main() -> Unit {
+  unsafe { python_ffi.call(); }
+  return 0;
+})";
+
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_ffi_unsafe_ok.curlee");
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for python_ffi.call inside unsafe");
+        }
+    }
+
+    {
+        // python_ffi.<not-call> is treated as a builtin module reference but should not trip the
+        // unsafe-context check.
+        const std::string src = R"(fn main() -> Unit {
+  python_ffi.other();
+  return 0;
+})";
+
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_ffi_other.curlee");
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for python_ffi.other()");
         }
     }
 
@@ -356,6 +489,75 @@ fn main() -> Unit {
         if (!has_expected_path_note)
         {
             fail("expected 'expected module at' note for missing import");
+        }
+    }
+
+    {
+        // Cover resolve(program, source) empty-path branch.
+        const std::string src = R"(fn main() -> Unit { return 0; })";
+        const auto program = parse_ok(src);
+        const curlee::source::SourceFile file{.path = "", .contents = src};
+        const auto res = resolver::resolve(program, file);
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for empty source.path");
+        }
+    }
+
+    {
+        // Cover resolve(program, source, entry_dir) empty-path branch.
+        const std::string src = R"(fn main() -> Unit { return 0; })";
+        const auto program = parse_ok(src);
+        const curlee::source::SourceFile file{.path = "", .contents = src};
+        const auto res = resolver::resolve(program, file, std::filesystem::path("/tmp"));
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for empty source.path with entry_dir");
+        }
+    }
+
+    {
+        // Cover StringExpr resolution (and corresponding visitor instantiation).
+        const std::string src = R"(fn main() -> Unit {
+  let s: String = "hi";
+  s;
+  return 0;
+})";
+
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_string_expr.curlee");
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for StringExpr");
+        }
+    }
+
+    {
+        // Cover predicate resolution visitor cases: PredBool, PredGroup, PredUnary.
+        const std::string src = R"(fn main() -> Int [
+  requires !(true);
+] {
+  return 0;
+})";
+
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_predicates.curlee");
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for predicate forms");
+        }
+    }
+
+    {
+        // Cover ensures predicate resolution when the name is not `result`.
+        const std::string src = R"(fn main(x: Int) -> Int [
+  ensures x == x;
+] {
+  return x;
+})";
+
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_ensures_name.curlee");
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for ensures name use");
         }
     }
 

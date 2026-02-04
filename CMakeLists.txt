@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.23)
 
-project(curlee VERSION 0.2.0 LANGUAGES CXX)
+project(curlee VERSION 0.2.1 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
@@ -248,6 +248,26 @@ add_executable(curlee_python_runner_fake_error_escapes
   tests/python_runner_fake_error_escapes.cpp
 )
 
+add_executable(curlee_python_runner_fake_error_unterminated
+  tests/python_runner_fake_error_unterminated.cpp
+)
+
+add_executable(curlee_python_runner_fake_close_stdout
+  tests/python_runner_fake_close_stdout.cpp
+)
+
+add_executable(curlee_python_runner_fake_close_stderr
+  tests/python_runner_fake_close_stderr.cpp
+)
+
+add_executable(curlee_python_runner_fake_close_stdin
+  tests/python_runner_fake_close_stdin.cpp
+)
+
+add_executable(curlee_python_runner_fake_error_trailing_backslash
+  tests/python_runner_fake_error_trailing_backslash.cpp
+)
+
 add_executable(curlee_bwrap_fake
   tests/bwrap_fake.cpp
 )
@@ -336,6 +356,19 @@ add_test(
 )
 set_tests_properties(curlee_lsp_hover_golden_tests PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(curlee_lsp_internal_tests
+  tests/lsp_internal_tests.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+  src/resolver/resolver.cpp
+  src/source/line_map.cpp
+  src/source/source_file.cpp
+  src/types/type_check.cpp
+)
+target_include_directories(curlee_lsp_internal_tests PRIVATE include)
+
+add_test(NAME curlee_lsp_internal_tests COMMAND curlee_lsp_internal_tests)
+
 add_executable(curlee_fuzz_regression_tests
   tests/fuzz_regression_tests.cpp
   src/lexer/lexer.cpp
@@ -367,6 +400,12 @@ add_executable(curlee_types_tests
 )
 target_include_directories(curlee_types_tests PRIVATE include)
 
+
+add_executable(curlee_parser_internal_tests
+  tests/parser_internal_tests.cpp
+)
+target_include_directories(curlee_parser_internal_tests PRIVATE include)
+add_test(NAME curlee_parser_internal_tests COMMAND curlee_parser_internal_tests)
 add_test(NAME curlee_types_tests COMMAND curlee_types_tests)
 
 add_executable(curlee_types_extra_tests
@@ -861,3 +900,18 @@ target_include_directories(curlee_verification_checker_tests PRIVATE include)
 target_link_libraries(curlee_verification_checker_tests PRIVATE Z3::Z3)
 
 add_test(NAME curlee_verification_checker_tests COMMAND curlee_verification_checker_tests)
+
+add_executable(curlee_verification_checker_internal_tests
+  tests/verification_checker_internal_tests.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+  src/types/type_check.cpp
+  src/verification/predicate_lowering.cpp
+  src/verification/solver.cpp
+)
+target_include_directories(curlee_verification_checker_internal_tests PRIVATE include)
+target_link_libraries(curlee_verification_checker_internal_tests PRIVATE Z3::Z3)
+
+add_test(NAME curlee_verification_checker_internal_tests
+  COMMAND curlee_verification_checker_internal_tests
+)

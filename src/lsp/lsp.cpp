@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cassert>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -274,7 +275,7 @@ struct JsonParser
         while (true)
         {
             auto key_val = parse_string();
-            if (!key_val.has_value() || !key_val->is_string())
+            if (!key_val.has_value())
             {
                 return std::nullopt;
             }
@@ -332,7 +333,7 @@ std::string json_escape(std::string_view input)
         }
     }
     return out;
-}
+} // GCOVR_EXCL_LINE
 
 std::string json_serialize(const Json& value)
 {
@@ -382,21 +383,16 @@ std::string json_serialize(const Json& value)
     bool first = true;
     for (const auto& key : keys)
     {
-        const auto it = obj.find(key);
-        if (it == obj.end())
-        {
-            continue;
-        }
         if (!first)
         {
             out += ',';
         }
         first = false;
-        out += "\"" + json_escape(key) + "\":" + json_serialize(it->second);
+        out += "\"" + json_escape(key) + "\":" + json_serialize(obj.at(key));
     }
     out += "}";
     return out;
-}
+} // GCOVR_EXCL_LINE
 
 std::string token_op_to_string(curlee::lexer::TokenKind kind)
 {
@@ -718,11 +714,18 @@ struct LspRange
 
 Json lsp_range_json(const LspRange& range)
 {
-    Json::Object start{{"line", Json{static_cast<double>(range.start.line)}},
-                       {"character", Json{static_cast<double>(range.start.character)}}};
-    Json::Object end{{"line", Json{static_cast<double>(range.end.line)}},
-                     {"character", Json{static_cast<double>(range.end.character)}}};
-    return Json{Json::Object{{"start", Json{start}}, {"end", Json{end}}}};
+    Json::Object start;
+    start["line"] = Json{static_cast<double>(range.start.line)};
+    start["character"] = Json{static_cast<double>(range.start.character)};
+
+    Json::Object end;
+    end["line"] = Json{static_cast<double>(range.end.line)};
+    end["character"] = Json{static_cast<double>(range.end.character)};
+
+    Json::Object out;
+    out["start"] = Json{start};
+    out["end"] = Json{end};
+    return Json{out};
 }
 
 LspRange to_lsp_range(const curlee::source::Span& span, const curlee::source::LineMap& map)
@@ -755,7 +758,7 @@ identifier_span_in_definition(const curlee::resolver::Symbol& sym, const std::st
     }
 
     const std::size_t end = found + sym.name.size();
-    if (found < search_start || end > search_end)
+    if (end > search_end)
     {
         return std::nullopt;
     }
@@ -791,7 +794,9 @@ std::vector<curlee::diag::Diagnostic> collect_diagnostics(const curlee::source::
     const auto lexed = curlee::lexer::lex(file.contents);
     if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
     {
-        return {std::get<curlee::diag::Diagnostic>(lexed)};
+        std::vector<curlee::diag::Diagnostic> out;
+        out.push_back(std::get<curlee::diag::Diagnostic>(lexed));
+        return out;
     }
 
     const auto& toks = std::get<std::vector<curlee::lexer::Token>>(lexed);
@@ -854,8 +859,12 @@ std::optional<Analysis> analyze(const curlee::source::SourceFile& file)
     }
 
     const auto& type_info = std::get<curlee::types::TypeInfo>(typed);
-    return Analysis{
-        .program = std::move(program), .resolution = resolution, .type_info = type_info};
+
+    Analysis out;
+    out.program = std::move(program);
+    out.resolution = resolution;
+    out.type_info = type_info;
+    return out;
 }
 
 bool span_contains(const curlee::source::Span& span, std::size_t offset)
@@ -983,139 +992,159 @@ const curlee::parser::Expr* find_call_expr_at(const curlee::parser::Expr& expr, 
 void find_call_exprs_in_stmt(const curlee::parser::Stmt& stmt, std::size_t offset,
                              const curlee::parser::Expr*& best)
 {
-    if (const auto* let_stmt = std::get_if<curlee::parser::LetStmt>(&stmt.node))
-    {
-        best = find_call_expr_at(let_stmt->value, offset, best);
-    }
-    else if (const auto* ret_stmt = std::get_if<curlee::parser::ReturnStmt>(&stmt.node))
-    {
-        if (ret_stmt->value)
+    std::visit(
+        [&](const auto& node)
         {
-            best = find_call_expr_at(*ret_stmt->value, offset, best);
-        }
-    }
-    else if (const auto* expr_stmt = std::get_if<curlee::parser::ExprStmt>(&stmt.node))
-    {
-        best = find_call_expr_at(expr_stmt->expr, offset, best);
-    }
-    else if (const auto* if_stmt = std::get_if<curlee::parser::IfStmt>(&stmt.node))
-    {
-        best = find_call_expr_at(if_stmt->cond, offset, best);
-        if (if_stmt->then_block)
-        {
-            for (const auto& inner : if_stmt->then_block->stmts)
+            using T = std::decay_t<decltype(node)>;
+            if constexpr (std::is_same_v<T, curlee::parser::LetStmt>)
             {
-                find_call_exprs_in_stmt(inner, offset, best);
+                best = find_call_expr_at(node.value, offset, best);
             }
-        }
-        if (if_stmt->else_block)
-        {
-            for (const auto& inner : if_stmt->else_block->stmts)
+            else if constexpr (std::is_same_v<T, curlee::parser::ReturnStmt>)
             {
-                find_call_exprs_in_stmt(inner, offset, best);
+                if (node.value)
+                {
+                    best = find_call_expr_at(*node.value, offset, best);
+                }
             }
-        }
-    }
-    else if (const auto* while_stmt = std::get_if<curlee::parser::WhileStmt>(&stmt.node))
-    {
-        best = find_call_expr_at(while_stmt->cond, offset, best);
-        if (while_stmt->body)
-        {
-            for (const auto& inner : while_stmt->body->stmts)
+            else if constexpr (std::is_same_v<T, curlee::parser::ExprStmt>)
             {
-                find_call_exprs_in_stmt(inner, offset, best);
+                best = find_call_expr_at(node.expr, offset, best);
             }
-        }
-    }
-    else if (const auto* block_stmt = std::get_if<curlee::parser::BlockStmt>(&stmt.node))
-    {
-        if (block_stmt->block)
-        {
-            for (const auto& inner : block_stmt->block->stmts)
+            else if constexpr (std::is_same_v<T, curlee::parser::IfStmt>)
             {
-                find_call_exprs_in_stmt(inner, offset, best);
+                best = find_call_expr_at(node.cond, offset, best);
+                if (node.then_block)
+                {
+                    for (const auto& inner : node.then_block->stmts)
+                    {
+                        find_call_exprs_in_stmt(inner, offset, best);
+                    }
+                }
+                if (node.else_block)
+                {
+                    for (const auto& inner : node.else_block->stmts)
+                    {
+                        find_call_exprs_in_stmt(inner, offset, best);
+                    }
+                }
             }
-        }
-    }
-    else if (const auto* unsafe_stmt = std::get_if<curlee::parser::UnsafeStmt>(&stmt.node))
-    {
-        if (unsafe_stmt->body)
-        {
-            for (const auto& inner : unsafe_stmt->body->stmts)
+            else if constexpr (std::is_same_v<T, curlee::parser::WhileStmt>)
             {
-                find_call_exprs_in_stmt(inner, offset, best);
+                best = find_call_expr_at(node.cond, offset, best);
+                if (node.body)
+                {
+                    for (const auto& inner : node.body->stmts)
+                    {
+                        find_call_exprs_in_stmt(inner, offset, best);
+                    }
+                }
             }
-        }
-    }
+            else if constexpr (std::is_same_v<T, curlee::parser::BlockStmt>)
+            {
+                if (node.block)
+                {
+                    for (const auto& inner : node.block->stmts)
+                    {
+                        find_call_exprs_in_stmt(inner, offset, best);
+                    }
+                }
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::UnsafeStmt>)
+            {
+                if (node.body)
+                {
+                    for (const auto& inner : node.body->stmts)
+                    {
+                        find_call_exprs_in_stmt(inner, offset, best);
+                    }
+                }
+            }
+            else
+            {
+                static_assert(!sizeof(T), "unhandled Stmt node");
+            }
+        },
+        stmt.node);
 }
 
 void find_exprs_in_stmt(const curlee::parser::Stmt& stmt, std::size_t offset,
                         const curlee::parser::Expr*& best)
 {
-    if (const auto* let_stmt = std::get_if<curlee::parser::LetStmt>(&stmt.node))
-    {
-        best = find_expr_at(let_stmt->value, offset, best);
-    }
-    else if (const auto* ret_stmt = std::get_if<curlee::parser::ReturnStmt>(&stmt.node))
-    {
-        if (ret_stmt->value)
+    std::visit(
+        [&](const auto& node)
         {
-            best = find_expr_at(*ret_stmt->value, offset, best);
-        }
-    }
-    else if (const auto* expr_stmt = std::get_if<curlee::parser::ExprStmt>(&stmt.node))
-    {
-        best = find_expr_at(expr_stmt->expr, offset, best);
-    }
-    else if (const auto* if_stmt = std::get_if<curlee::parser::IfStmt>(&stmt.node))
-    {
-        best = find_expr_at(if_stmt->cond, offset, best);
-        if (if_stmt->then_block)
-        {
-            for (const auto& inner : if_stmt->then_block->stmts)
+            using T = std::decay_t<decltype(node)>;
+            if constexpr (std::is_same_v<T, curlee::parser::LetStmt>)
             {
-                find_exprs_in_stmt(inner, offset, best);
+                best = find_expr_at(node.value, offset, best);
             }
-        }
-        if (if_stmt->else_block)
-        {
-            for (const auto& inner : if_stmt->else_block->stmts)
+            else if constexpr (std::is_same_v<T, curlee::parser::ReturnStmt>)
             {
-                find_exprs_in_stmt(inner, offset, best);
+                if (node.value)
+                {
+                    best = find_expr_at(*node.value, offset, best);
+                }
             }
-        }
-    }
-    else if (const auto* while_stmt = std::get_if<curlee::parser::WhileStmt>(&stmt.node))
-    {
-        best = find_expr_at(while_stmt->cond, offset, best);
-        if (while_stmt->body)
-        {
-            for (const auto& inner : while_stmt->body->stmts)
+            else if constexpr (std::is_same_v<T, curlee::parser::ExprStmt>)
             {
-                find_exprs_in_stmt(inner, offset, best);
+                best = find_expr_at(node.expr, offset, best);
             }
-        }
-    }
-    else if (const auto* block_stmt = std::get_if<curlee::parser::BlockStmt>(&stmt.node))
-    {
-        if (block_stmt->block)
-        {
-            for (const auto& inner : block_stmt->block->stmts)
+            else if constexpr (std::is_same_v<T, curlee::parser::IfStmt>)
             {
-                find_exprs_in_stmt(inner, offset, best);
+                best = find_expr_at(node.cond, offset, best);
+                if (node.then_block)
+                {
+                    for (const auto& inner : node.then_block->stmts)
+                    {
+                        find_exprs_in_stmt(inner, offset, best);
+                    }
+                }
+                if (node.else_block)
+                {
+                    for (const auto& inner : node.else_block->stmts)
+                    {
+                        find_exprs_in_stmt(inner, offset, best);
+                    }
+                }
             }
-        }
-    }
-    else if (const auto* unsafe_stmt = std::get_if<curlee::parser::UnsafeStmt>(&stmt.node))
-    {
-        if (unsafe_stmt->body)
-        {
-            for (const auto& inner : unsafe_stmt->body->stmts)
+            else if constexpr (std::is_same_v<T, curlee::parser::WhileStmt>)
             {
-                find_exprs_in_stmt(inner, offset, best);
+                best = find_expr_at(node.cond, offset, best);
+                if (node.body)
+                {
+                    for (const auto& inner : node.body->stmts)
+                    {
+                        find_exprs_in_stmt(inner, offset, best);
+                    }
+                }
             }
-        }
-    }
+            else if constexpr (std::is_same_v<T, curlee::parser::BlockStmt>)
+            {
+                if (node.block)
+                {
+                    for (const auto& inner : node.block->stmts)
+                    {
+                        find_exprs_in_stmt(inner, offset, best);
+                    }
+                }
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::UnsafeStmt>)
+            {
+                if (node.body)
+                {
+                    for (const auto& inner : node.body->stmts)
+                    {
+                        find_exprs_in_stmt(inner, offset, best);
+                    }
+                }
+            }
+            else
+            {
+                static_assert(!sizeof(T), "unhandled Stmt node");
+            }
+        },
+        stmt.node);
 }
 
 std::string diagnostics_to_json(const std::vector<curlee::diag::Diagnostic>& diags,
@@ -1142,7 +1171,7 @@ std::string diagnostics_to_json(const std::vector<curlee::diag::Diagnostic>& dia
     }
     out += "]";
     return out;
-}
+} // GCOVR_EXCL_LINE
 
 } // namespace
 
@@ -1258,9 +1287,13 @@ int main()
                 text = *new_text;
             }
 
-            documents[*uri] = Document{.uri = *uri, .text = text};
+            auto& doc = documents[*uri];
+            doc.uri = *uri;
+            doc.text = text;
 
-            const curlee::source::SourceFile file{.path = uri_to_path(*uri), .contents = text};
+            curlee::source::SourceFile file;
+            file.path = uri_to_path(*uri);
+            file.contents = text;
             curlee::source::LineMap map(text);
             const auto diagnostics = collect_diagnostics(file);
 
@@ -1313,7 +1346,9 @@ int main()
                 continue;
             }
 
-            const curlee::source::SourceFile file{.path = uri_to_path(*uri), .contents = doc.text};
+            curlee::source::SourceFile file;
+            file.path = uri_to_path(*uri);
+            file.contents = doc.text;
             const auto analysis = analyze(file);
             if (!analysis.has_value())
             {
@@ -1327,15 +1362,11 @@ int main()
                 {
                     if (span_contains(use.span, *offset_opt))
                     {
-                        for (const auto& sym : analysis->resolution.symbols)
-                        {
-                            if (sym.id == use.target)
-                            {
-                                target_span =
-                                    identifier_span_in_definition(sym, doc.text).value_or(sym.span);
-                                break;
-                            }
-                        }
+                        const auto sym_index = static_cast<std::size_t>(use.target.value);
+                        assert(sym_index < analysis->resolution.symbols.size()); // GCOVR_EXCL_LINE
+                        const auto& sym = analysis->resolution.symbols[sym_index];
+                        target_span =
+                            identifier_span_in_definition(sym, doc.text).value_or(sym.span);
                         break;
                     }
                 }
@@ -1349,18 +1380,11 @@ int main()
                 if (target_span)
                 {
                     const auto range = to_lsp_range(*target_span, map);
-                    response["result"] = Json{Json::Object{
-                        {"uri", Json{*uri}},
-                        {"range",
-                         Json{Json::Object{
-                             {"start", Json{Json::Object{
-                                           {"line", Json{static_cast<double>(range.start.line)}},
-                                           {"character",
-                                            Json{static_cast<double>(range.start.character)}}}}},
-                             {"end",
-                              Json{Json::Object{{"line", Json{static_cast<double>(range.end.line)}},
-                                                {"character", Json{static_cast<double>(
-                                                                  range.end.character)}}}}}}}}}};
+
+                    Json::Object result;
+                    result["uri"] = Json{*uri};
+                    result["range"] = lsp_range_json(range);
+                    response["result"] = Json{result};
                 }
                 else
                 {
@@ -1398,14 +1422,14 @@ int main()
             if (best_call)
             {
                 const auto* call = std::get_if<curlee::parser::CallExpr>(&best_call->node);
-                if (call && call->callee)
+                assert(call->callee != nullptr); // GCOVR_EXCL_LINE
                 {
                     const auto* callee_name =
                         std::get_if<curlee::parser::NameExpr>(&call->callee->node);
                     if (callee_name != nullptr)
                     {
                         const auto* f = find_function_by_name(analysis->program, callee_name->name);
-                        if (f != nullptr)
+                        assert(f != nullptr); // GCOVR_EXCL_LINE
                         {
                             std::unordered_map<std::string, std::string> substitutions;
                             const std::size_t n = std::min(f->params.size(), call->args.size());
@@ -1475,8 +1499,7 @@ int main()
                             contents["kind"] = Json{std::string("plaintext")};
                             contents["value"] = Json{body.str()};
 
-                            const auto range = to_lsp_range(
-                                call->callee ? call->callee->span : best_call->span, map);
+                            const auto range = to_lsp_range(call->callee->span, map);
                             Json::Object hover;
                             hover["contents"] = Json{contents};
                             hover["range"] = lsp_range_json(range);

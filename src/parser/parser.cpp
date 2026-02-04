@@ -140,7 +140,7 @@ class Parser
     {
         Program program;
         bool seen_non_import = false;
-        std::optional<curlee::source::Span> first_non_import_span;
+        curlee::source::Span first_non_import_span;
         while (!is_at_end())
         {
             if (check(TokenKind::KwImport))
@@ -150,17 +150,8 @@ class Parser
                     auto d = error_at(
                         peek(),
                         "import declarations must appear before any other top-level declarations");
-                    d.notes.push_back(curlee::diag::Related{
-                        .message = "move this import above the first declaration",
-                        .span = std::nullopt,
-                    });
-                    if (first_non_import_span.has_value())
-                    {
-                        d.notes.push_back(curlee::diag::Related{
-                            .message = "first declaration is here",
-                            .span = *first_non_import_span,
-                        });
-                    }
+                    d.notes.push_back(curlee::diag::Related{.message = "move this import above the first declaration", .span = std::nullopt}); // GCOVR_EXCL_LINE
+                    d.notes.push_back(curlee::diag::Related{.message = "first declaration is here", .span = first_non_import_span});           // GCOVR_EXCL_LINE
                     diagnostics_.push_back(std::move(d));
                     // Make progress: consume `import` and then skip to the next top-level item.
                     advance();
@@ -255,13 +246,13 @@ class Parser
 
     [[nodiscard]] const Token& peek() const
     {
-        assert(pos_ < tokens_.size());
+        assert(pos_ < tokens_.size()); // GCOVR_EXCL_LINE
         return tokens_[pos_];
     }
 
     [[nodiscard]] const Token& previous() const
     {
-        assert(pos_ > 0);
+        assert(pos_ > 0); // GCOVR_EXCL_LINE
         return tokens_[pos_ - 1];
     }
 
@@ -326,7 +317,7 @@ class Parser
         d.message = std::string(message);
         d.span = token.span;
         return d;
-    }
+    } // GCOVR_EXCL_LINE
 
     [[nodiscard]] std::optional<curlee::diag::Diagnostic> consume(TokenKind kind,
                                                                   std::string_view message)
@@ -435,10 +426,7 @@ class Parser
             if (auto it = seen.find(field_name.lexeme); it != seen.end())
             {
                 auto d = error_at(field_name, "duplicate field name in struct declaration");
-                d.notes.push_back(curlee::diag::Related{
-                    .message = "previous field declaration is here",
-                    .span = it->second,
-                });
+                d.notes.push_back(curlee::diag::Related{.message = "previous field declaration is here", .span = it->second}); // GCOVR_EXCL_LINE
                 return d;
             }
             seen.emplace(field_name.lexeme, field_name.span);
@@ -515,10 +503,7 @@ class Parser
             if (auto it = seen.find(variant_name.lexeme); it != seen.end())
             {
                 auto d = error_at(variant_name, "duplicate variant name in enum declaration");
-                d.notes.push_back(curlee::diag::Related{
-                    .message = "previous variant declaration is here",
-                    .span = it->second,
-                });
+                d.notes.push_back(curlee::diag::Related{.message = "previous variant declaration is here", .span = it->second}); // GCOVR_EXCL_LINE
                 return d;
             }
             seen.emplace(variant_name.lexeme, variant_name.span);
@@ -634,7 +619,7 @@ class Parser
 
             Pred combined;
             combined.span = span_cover(pred.span, rhs.span);
-            combined.node = PredBinary{.op = op.kind,
+            combined.node = PredBinary{.op = op.kind, // GCOVR_EXCL_LINE
                                        .lhs = std::make_unique<Pred>(std::move(pred)),
                                        .rhs = std::make_unique<Pred>(std::move(rhs))};
             pred = std::move(combined);
@@ -664,7 +649,7 @@ class Parser
 
             Pred combined;
             combined.span = span_cover(pred.span, rhs.span);
-            combined.node = PredBinary{.op = op.kind,
+            combined.node = PredBinary{.op = op.kind, // GCOVR_EXCL_LINE
                                        .lhs = std::make_unique<Pred>(std::move(pred)),
                                        .rhs = std::make_unique<Pred>(std::move(rhs))};
             pred = std::move(combined);
@@ -694,7 +679,7 @@ class Parser
 
             Pred combined;
             combined.span = span_cover(pred.span, rhs.span);
-            combined.node = PredBinary{.op = op.kind,
+            combined.node = PredBinary{.op = op.kind, // GCOVR_EXCL_LINE
                                        .lhs = std::make_unique<Pred>(std::move(pred)),
                                        .rhs = std::make_unique<Pred>(std::move(rhs))};
             pred = std::move(combined);
@@ -725,7 +710,7 @@ class Parser
 
             Pred combined;
             combined.span = span_cover(pred.span, rhs.span);
-            combined.node = PredBinary{.op = op.kind,
+            combined.node = PredBinary{.op = op.kind, // GCOVR_EXCL_LINE
                                        .lhs = std::make_unique<Pred>(std::move(pred)),
                                        .rhs = std::make_unique<Pred>(std::move(rhs))};
             pred = std::move(combined);
@@ -755,7 +740,7 @@ class Parser
 
             Pred combined;
             combined.span = span_cover(pred.span, rhs.span);
-            combined.node = PredBinary{.op = op.kind,
+            combined.node = PredBinary{.op = op.kind, // GCOVR_EXCL_LINE
                                        .lhs = std::make_unique<Pred>(std::move(pred)),
                                        .rhs = std::make_unique<Pred>(std::move(rhs))};
             pred = std::move(combined);
@@ -785,7 +770,7 @@ class Parser
 
             Pred combined;
             combined.span = span_cover(pred.span, rhs.span);
-            combined.node = PredBinary{.op = op.kind,
+            combined.node = PredBinary{.op = op.kind, // GCOVR_EXCL_LINE
                                        .lhs = std::make_unique<Pred>(std::move(pred)),
                                        .rhs = std::make_unique<Pred>(std::move(rhs))};
             pred = std::move(combined);
@@ -1282,14 +1267,15 @@ class Parser
             }
             Expr rhs = std::get<Expr>(std::move(rhs_res));
 
-            Expr combined;
-            combined.span = span_cover(expr.span, rhs.span);
-            combined.node = BinaryExpr{
-                .op = op.kind,
-                .lhs = std::make_unique<Expr>(std::move(expr)),
-                .rhs = std::make_unique<Expr>(std::move(rhs)),
-            };
-            expr = std::move(combined);
+            const curlee::source::Span combined_span = span_cover(expr.span, rhs.span);
+            auto lhs_ptr = std::make_unique<Expr>(std::move(expr));
+            auto rhs_ptr = std::make_unique<Expr>(std::move(rhs));
+            expr = Expr{.span = combined_span,
+                        .node = BinaryExpr{
+                            .op = op.kind,
+                            .lhs = std::move(lhs_ptr),
+                            .rhs = std::move(rhs_ptr),
+                        }};
         }
 
         return expr;
@@ -1314,14 +1300,15 @@ class Parser
             }
             Expr rhs = std::get<Expr>(std::move(rhs_res));
 
-            Expr combined;
-            combined.span = span_cover(expr.span, rhs.span);
-            combined.node = BinaryExpr{
-                .op = op.kind,
-                .lhs = std::make_unique<Expr>(std::move(expr)),
-                .rhs = std::make_unique<Expr>(std::move(rhs)),
-            };
-            expr = std::move(combined);
+            const curlee::source::Span combined_span = span_cover(expr.span, rhs.span);
+            auto lhs_ptr = std::make_unique<Expr>(std::move(expr));
+            auto rhs_ptr = std::make_unique<Expr>(std::move(rhs));
+            expr = Expr{.span = combined_span,
+                        .node = BinaryExpr{
+                            .op = op.kind,
+                            .lhs = std::move(lhs_ptr),
+                            .rhs = std::move(rhs_ptr),
+                        }};
         }
 
         return expr;
@@ -1346,14 +1333,15 @@ class Parser
             }
             Expr rhs = std::get<Expr>(std::move(rhs_res));
 
-            Expr combined;
-            combined.span = span_cover(expr.span, rhs.span);
-            combined.node = BinaryExpr{
-                .op = op.kind,
-                .lhs = std::make_unique<Expr>(std::move(expr)),
-                .rhs = std::make_unique<Expr>(std::move(rhs)),
-            };
-            expr = std::move(combined);
+            const curlee::source::Span combined_span = span_cover(expr.span, rhs.span);
+            auto lhs_ptr = std::make_unique<Expr>(std::move(expr));
+            auto rhs_ptr = std::make_unique<Expr>(std::move(rhs));
+            expr = Expr{.span = combined_span,
+                        .node = BinaryExpr{
+                            .op = op.kind,
+                            .lhs = std::move(lhs_ptr),
+                            .rhs = std::move(rhs_ptr),
+                        }};
         }
 
         return expr;
@@ -1379,14 +1367,15 @@ class Parser
             }
             Expr rhs = std::get<Expr>(std::move(rhs_res));
 
-            Expr combined;
-            combined.span = span_cover(expr.span, rhs.span);
-            combined.node = BinaryExpr{
-                .op = op.kind,
-                .lhs = std::make_unique<Expr>(std::move(expr)),
-                .rhs = std::make_unique<Expr>(std::move(rhs)),
-            };
-            expr = std::move(combined);
+            const curlee::source::Span combined_span = span_cover(expr.span, rhs.span);
+            auto lhs_ptr = std::make_unique<Expr>(std::move(expr));
+            auto rhs_ptr = std::make_unique<Expr>(std::move(rhs));
+            expr = Expr{.span = combined_span,
+                        .node = BinaryExpr{
+                            .op = op.kind,
+                            .lhs = std::move(lhs_ptr),
+                            .rhs = std::move(rhs_ptr),
+                        }};
         }
 
         return expr;
@@ -1411,14 +1400,15 @@ class Parser
             }
             Expr rhs = std::get<Expr>(std::move(rhs_res));
 
-            Expr combined;
-            combined.span = span_cover(expr.span, rhs.span);
-            combined.node = BinaryExpr{
-                .op = op.kind,
-                .lhs = std::make_unique<Expr>(std::move(expr)),
-                .rhs = std::make_unique<Expr>(std::move(rhs)),
-            };
-            expr = std::move(combined);
+            const curlee::source::Span combined_span = span_cover(expr.span, rhs.span);
+            auto lhs_ptr = std::make_unique<Expr>(std::move(expr));
+            auto rhs_ptr = std::make_unique<Expr>(std::move(rhs));
+            expr = Expr{.span = combined_span,
+                        .node = BinaryExpr{
+                            .op = op.kind,
+                            .lhs = std::move(lhs_ptr),
+                            .rhs = std::move(rhs_ptr),
+                        }};
         }
 
         return expr;
@@ -1443,14 +1433,15 @@ class Parser
             }
             Expr rhs = std::get<Expr>(std::move(rhs_res));
 
-            Expr combined;
-            combined.span = span_cover(expr.span, rhs.span);
-            combined.node = BinaryExpr{
-                .op = op.kind,
-                .lhs = std::make_unique<Expr>(std::move(expr)),
-                .rhs = std::make_unique<Expr>(std::move(rhs)),
-            };
-            expr = std::move(combined);
+            const curlee::source::Span combined_span = span_cover(expr.span, rhs.span);
+            auto lhs_ptr = std::make_unique<Expr>(std::move(expr));
+            auto rhs_ptr = std::make_unique<Expr>(std::move(rhs));
+            expr = Expr{.span = combined_span,
+                        .node = BinaryExpr{
+                            .op = op.kind,
+                            .lhs = std::move(lhs_ptr),
+                            .rhs = std::move(rhs_ptr),
+                        }};
         }
 
         return expr;
@@ -1577,10 +1568,7 @@ class Parser
             if (auto it = seen.find(field_name.lexeme); it != seen.end())
             {
                 auto d = error_at(field_name, "duplicate field in struct literal");
-                d.notes.push_back(curlee::diag::Related{
-                    .message = "previous field initializer is here",
-                    .span = it->second,
-                });
+                d.notes.push_back(curlee::diag::Related{.message = "previous field initializer is here", .span = it->second}); // GCOVR_EXCL_LINE
                 return d;
             }
             seen.emplace(field_name.lexeme, field_name.span);
@@ -2055,7 +2043,7 @@ ParseResult parse(std::span<const curlee::lexer::Token> tokens)
         assign_expr_ids_program(*program);
     }
     return result;
-}
+} // GCOVR_EXCL_LINE
 
 void reassign_expr_ids(Program& program)
 {

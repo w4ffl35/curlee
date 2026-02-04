@@ -143,20 +143,19 @@ TypedResult lower_node(const curlee::parser::Pred& pred, const LoweringContext& 
                     {
                         return error_at(pred.span, "comparison operators expect Int predicates");
                     }
-                    switch (node.op)
+                    if (node.op == TokenKind::Less)
                     {
-                    case TokenKind::Less:
                         return TypedExpr{left.expr < right.expr, PredType::Bool, false};
-                    case TokenKind::LessEqual:
-                        return TypedExpr{left.expr <= right.expr, PredType::Bool, false};
-                    case TokenKind::Greater:
-                        return TypedExpr{left.expr > right.expr, PredType::Bool, false};
-                    case TokenKind::GreaterEqual:
-                        return TypedExpr{left.expr >= right.expr, PredType::Bool, false};
-                    default:
-                        break;
                     }
-                    break;
+                    if (node.op == TokenKind::LessEqual)
+                    {
+                        return TypedExpr{left.expr <= right.expr, PredType::Bool, false};
+                    }
+                    if (node.op == TokenKind::Greater)
+                    {
+                        return TypedExpr{left.expr > right.expr, PredType::Bool, false};
+                    }
+                    return TypedExpr{left.expr >= right.expr, PredType::Bool, false};
 
                 case TokenKind::Plus:
                 case TokenKind::Minus:
