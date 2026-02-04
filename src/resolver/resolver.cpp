@@ -219,9 +219,7 @@ class Resolver
                 d.severity = Severity::Error;
                 d.message = "import not found: '" + import_name + "'";
                 d.span = imp.span;
-                d.notes.push_back(
-                    Related{.message = "expected module at " + first_expected.string(),
-                            .span = std::nullopt}); // GCOVR_EXCL_LINE
+                d.notes.push_back(Related{.message = "expected module at " + first_expected.string(), .span = std::nullopt}); // GCOVR_EXCL_LINE
                 diagnostics_.push_back(std::move(d));
                 continue;
             }
@@ -314,8 +312,7 @@ class Resolver
             d.severity = Severity::Error;
             d.message = std::string(kind) + ": '" + std::string(name) + "'";
             d.span = span;
-            d.notes.push_back(Related{.message = "previous definition is here",
-                                      .span = it->second.span}); // GCOVR_EXCL_LINE
+            d.notes.push_back(Related{.message = "previous definition is here", .span = it->second.span}); // GCOVR_EXCL_LINE
             diagnostics_.push_back(std::move(d));
             return;
         }

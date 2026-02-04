@@ -26,8 +26,7 @@ class Lexer
             const std::size_t start = pos_;
             if (is_at_end())
             {
-                tokens.push_back(Token{
-                    .kind = TokenKind::Eof, .lexeme = std::string_view{}, .span = {start, start}});
+                tokens.push_back(make_token(TokenKind::Eof, start, start));
                 return tokens;
             }
 
@@ -44,8 +43,7 @@ class Lexer
                     advance();
                 }
                 const std::string_view lexeme = input_.substr(start, pos_ - start);
-                tokens.push_back(Token{
-                    .kind = keyword_or_ident(lexeme), .lexeme = lexeme, .span = {start, pos_}});
+                tokens.push_back(make_token(keyword_or_ident(lexeme), start, pos_));
                 continue;
             }
 
@@ -57,9 +55,7 @@ class Lexer
                 {
                     advance();
                 }
-                const std::string_view lexeme = input_.substr(start, pos_ - start);
-                tokens.push_back(
-                    Token{.kind = TokenKind::IntLiteral, .lexeme = lexeme, .span = {start, pos_}});
+                tokens.push_back(make_token(TokenKind::IntLiteral, start, pos_));
                 continue;
             }
 
@@ -73,10 +69,7 @@ class Lexer
                     if (ch == '"')
                     {
                         advance();
-                        const std::string_view lexeme = input_.substr(start, pos_ - start);
-                        tokens.push_back(Token{.kind = TokenKind::StringLiteral,
-                                               .lexeme = lexeme,
-                                               .span = {start, pos_}});
+                        tokens.push_back(make_token(TokenKind::StringLiteral, start, pos_));
                         break;
                     }
 
@@ -331,8 +324,7 @@ class Lexer
 
     [[nodiscard]] Token make_token(TokenKind kind, std::size_t start, std::size_t end) const
     {
-        return Token{
-            .kind = kind, .lexeme = input_.substr(start, end - start), .span = {start, end}};
+        return Token{.kind = kind, .lexeme = input_.substr(start, end - start), .span = {start, end}};
     }
 
     [[nodiscard]] curlee::diag::Diagnostic make_error(std::size_t start, std::size_t end,
