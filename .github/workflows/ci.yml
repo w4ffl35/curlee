@@ -42,3 +42,21 @@ jobs:
       - name: Smoke (release)
         if: matrix.preset == 'linux-release'
         run: bash scripts/smoke.sh --preset linux-release --skip-build
+
+  coverage-gate:
+    name: Coverage Gate (linux-debug-coverage)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ gcovr libz3-dev pkg-config ripgrep
+
+      - name: Coverage
+        run: |
+          bash scripts/coverage.sh --fail-under 100 --fail-under-branch 100 --fail-under-function 100

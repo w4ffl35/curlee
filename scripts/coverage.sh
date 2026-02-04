@@ -5,6 +5,8 @@ preset="linux-debug-coverage"
 # Keep this as an incremental ratchet rather than an aspirational goal.
 # Raise over time as coverage improves.
 fail_under="94"
+fail_under_branch=""
+fail_under_function=""
 out_dir="build/coverage"
 exclude_throw_branches=1
 exclude_unreachable_branches=1
@@ -12,6 +14,7 @@ exclude_unreachable_branches=1
 usage() {
   cat <<'EOF'
 Usage: scripts/coverage.sh [--preset <cmake-preset>] [--out <dir>] [--fail-under <percent>] [--no-fail]
+                           [--fail-under-branch <percent>] [--fail-under-function <percent>]
                            [--include-throw-branches] [--include-unreachable-branches]
 
 Builds + runs tests under coverage instrumentation, then prints a coverage summary.
@@ -20,6 +23,10 @@ Defaults:
   --preset      linux-debug-coverage
   --out         build/coverage
   --fail-under  94
+
+Notes:
+  --fail-under is line coverage only.
+  Branch/function coverage thresholds are optional and only enforced when provided.
 
 Requires one of:
   - gcovr (recommended), or
@@ -43,6 +50,10 @@ while [[ $# -gt 0 ]]; do
       out_dir="$2"; shift 2 ;;
     --fail-under)
       fail_under="$2"; shift 2 ;;
+    --fail-under-branch)
+      fail_under_branch="$2"; shift 2 ;;
+    --fail-under-function)
+      fail_under_function="$2"; shift 2 ;;
     --no-fail)
       no_fail=1; shift ;;
     --include-throw-branches)
@@ -136,6 +147,14 @@ if command -v gcovr >/dev/null 2>&1; then
 
   if [[ $no_fail -eq 0 ]]; then
     args+=(--fail-under-line "$fail_under")
+
+    if [[ -n "$fail_under_branch" ]]; then
+      args+=(--fail-under-branch "$fail_under_branch")
+    fi
+
+    if [[ -n "$fail_under_function" ]]; then
+      args+=(--fail-under-function "$fail_under_function")
+    fi
   fi
 
   gcovr "${args[@]}"
@@ -157,11 +176,28 @@ if command -v lcov >/dev/null 2>&1 && command -v genhtml >/dev/null 2>&1; then
   lcov --summary "$out_dir/coverage.filtered.info" | tee "$out_dir/coverage.txt"
 
   if [[ $no_fail -eq 0 ]]; then
-    # Extract line coverage percentage and compare.
-    pct=$(lcov --summary "$out_dir/coverage.filtered.info" | rg -o 'lines\.+: ([0-9]+\.[0-9]+)%' -r '$1' | head -n1 || true)
-    if [[ -n "$pct" ]]; then
-      awk -v pct="$pct" -v min="$fail_under" 'BEGIN { exit !(pct+0 >= min+0) }' || {
-        echo "FAIL: line coverage ${pct}% < ${fail_under}%" >&2
+    # Extract summary percentages and compare.
+    line_pct=$(lcov --summary "$out_dir/coverage.filtered.info" | rg -o 'lines\.+: ([0-9]+\.[0-9]+)%' -r '$1' | head -n1 || true)
+    func_pct=$(lcov --summary "$out_dir/coverage.filtered.info" | rg -o 'functions\.+: ([0-9]+\.[0-9]+)%' -r '$1' | head -n1 || true)
+    branch_pct=$(lcov --summary "$out_dir/coverage.filtered.info" | rg -o 'branches\.+: ([0-9]+\.[0-9]+)%' -r '$1' | head -n1 || true)
+
+    if [[ -n "$line_pct" ]]; then
+      awk -v pct="$line_pct" -v min="$fail_under" 'BEGIN { exit !(pct+0 >= min+0) }' || {
+        echo "FAIL: line coverage ${line_pct}% < ${fail_under}%" >&2
+        exit 1
+      }
+    fi
+
+    if [[ -n "$fail_under_function" && -n "$func_pct" ]]; then
+      awk -v pct="$func_pct" -v min="$fail_under_function" 'BEGIN { exit !(pct+0 >= min+0) }' || {
+        echo "FAIL: function coverage ${func_pct}% < ${fail_under_function}%" >&2
+        exit 1
+      }
+    fi
+
+    if [[ -n "$fail_under_branch" && -n "$branch_pct" ]]; then
+      awk -v pct="$branch_pct" -v min="$fail_under_branch" 'BEGIN { exit !(pct+0 >= min+0) }' || {
+        echo "FAIL: branch coverage ${branch_pct}% < ${fail_under_branch}%" >&2
         exit 1
       }
     fi
