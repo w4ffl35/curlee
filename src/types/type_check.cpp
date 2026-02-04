@@ -611,6 +611,9 @@ class Checker
                 return std::nullopt;
             }
             return Type{.kind = TypeKind::Bool};
+
+        default:
+            break;
         }
 
         error_at(span, "unsupported binary operator"); // GCOVR_EXCL_LINE

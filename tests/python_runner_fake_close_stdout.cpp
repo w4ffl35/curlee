@@ -17,7 +17,8 @@ void maybe_read_stdin_line()
     if (rv > 0)
     {
         char buf[256];
-        (void)read(0, buf, sizeof(buf));
+        const auto ignored = read(0, buf, sizeof(buf));
+        (void)ignored;
     }
 }
 } // namespace
@@ -30,7 +31,8 @@ int main()
     (void)close(STDOUT_FILENO);
 
     static constexpr char kMsg[] = "stderr: still alive\n";
-    (void)write(STDERR_FILENO, kMsg, sizeof(kMsg) - 1);
+    const auto ignored = write(STDERR_FILENO, kMsg, sizeof(kMsg) - 1);
+    (void)ignored;
 
     // Sleep long enough for the parent to spin at least one more poll iteration.
     std::this_thread::sleep_for(std::chrono::milliseconds(120));
