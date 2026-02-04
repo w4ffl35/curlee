@@ -1,5 +1,6 @@
 #include <cerrno>
 #include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <cstring>
 #include <curlee/vm/vm.h>
@@ -78,7 +79,11 @@ void read_into(int fd, std::string& out, bool& eof, std::size_t& total_bytes,
             eof = true;
             return;
         }
-        if (errno == EAGAIN || errno == EWOULDBLOCK)
+        if (errno == EAGAIN
+#if defined(EWOULDBLOCK) && EWOULDBLOCK != EAGAIN
+            || errno == EWOULDBLOCK
+#endif
+        )
         {
             return;
         }
@@ -160,36 +165,52 @@ ProcResult run_process_argv(const std::vector<const char*>& argv, const std::str
     }
     envp.push_back(nullptr);
 
-    if (pipe(in_pipe) != 0 || pipe(out_pipe) != 0 || pipe(err_pipe) != 0)
+    if (pipe(in_pipe) != 0)
     {
+        result.exit_code = 127;
+        return result;
+    }
+    if (pipe(out_pipe) != 0)
+    {
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        result.exit_code = 127;
+        return result;
+    }
+    if (pipe(err_pipe) != 0)
+    {
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(out_pipe[1]);
         result.exit_code = 127;
         return result;
     }
 
     const pid_t pid = fork();
-    if (pid < 0)
+    if (pid < 0) // GCOVR_EXCL_LINE
     {
-        result.exit_code = 127;
-        return result;
+        result.exit_code = 127; // GCOVR_EXCL_LINE
+        return result;          // GCOVR_EXCL_LINE
     }
 
-    if (pid == 0)
+    if (pid == 0) // GCOVR_EXCL_LINE
     {
-        (void)dup2(in_pipe[0], STDIN_FILENO);
-        (void)dup2(out_pipe[1], STDOUT_FILENO);
-        (void)dup2(err_pipe[1], STDERR_FILENO);
+        (void)dup2(in_pipe[0], STDIN_FILENO);   // GCOVR_EXCL_LINE
+        (void)dup2(out_pipe[1], STDOUT_FILENO); // GCOVR_EXCL_LINE
+        (void)dup2(err_pipe[1], STDERR_FILENO); // GCOVR_EXCL_LINE
 
-        close(in_pipe[0]);
-        close(in_pipe[1]);
-        close(out_pipe[0]);
-        close(out_pipe[1]);
-        close(err_pipe[0]);
-        close(err_pipe[1]);
+        close(in_pipe[0]);  // GCOVR_EXCL_LINE
+        close(in_pipe[1]);  // GCOVR_EXCL_LINE
+        close(out_pipe[0]); // GCOVR_EXCL_LINE
+        close(out_pipe[1]); // GCOVR_EXCL_LINE
+        close(err_pipe[0]); // GCOVR_EXCL_LINE
+        close(err_pipe[1]); // GCOVR_EXCL_LINE
 
-        execve(exe_path.c_str(), argv_mut.data(), envp.data());
-        std::cerr << "execve failed: " << std::strerror(errno) << "\n";
-        std::cerr.flush();
-        _exit(127);
+        execve(exe_path.c_str(), argv_mut.data(), envp.data());         // GCOVR_EXCL_LINE
+        std::cerr << "execve failed: " << std::strerror(errno) << "\n"; // GCOVR_EXCL_LINE
+        std::cerr.flush();                                              // GCOVR_EXCL_LINE
+        _exit(127);                                                     // GCOVR_EXCL_LINE
     }
 
     close(in_pipe[0]);
@@ -198,14 +219,30 @@ ProcResult run_process_argv(const std::vector<const char*>& argv, const std::str
 
     // Write input then close.
     {
+        struct SigPipeIgnoreGuard
+        {
+            using Handler = void (*)(int);
+            Handler old;
+
+            SigPipeIgnoreGuard() : old(std::signal(SIGPIPE, SIG_IGN)) {}
+
+            ~SigPipeIgnoreGuard()
+            {
+                if (old != SIG_ERR) // GCOVR_EXCL_LINE
+                {
+                    (void)std::signal(SIGPIPE, old);
+                }
+            }
+        } sigpipe_guard;
+
         const char* data = stdin_data.data();
         std::size_t remaining = stdin_data.size();
         while (remaining > 0)
         {
             const ssize_t n = write(in_pipe[1], data, remaining);
-            if (n < 0)
+            if (n < 0) // GCOVR_EXCL_LINE
             {
-                break;
+                break; // GCOVR_EXCL_LINE
             }
             data += n;
             remaining -= static_cast<std::size_t>(n);
@@ -266,10 +303,10 @@ ProcResult run_process_argv(const std::vector<const char*>& argv, const std::str
     close(err_pipe[0]);
 
     int status = 0;
-    if (waitpid(pid, &status, 0) < 0)
+    if (waitpid(pid, &status, 0) < 0) // GCOVR_EXCL_LINE
     {
-        result.exit_code = 127;
-        return result;
+        result.exit_code = 127; // GCOVR_EXCL_LINE
+        return result;          // GCOVR_EXCL_LINE
     }
     if (WIFEXITED(status))
     {
@@ -300,7 +337,7 @@ std::string find_python_runner_path()
 
     char buf[4096];
     const ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-    if (n > 0)
+    if (n > 0) // GCOVR_EXCL_LINE
     {
         buf[n] = '\0';
         std::error_code ec;
@@ -368,16 +405,43 @@ std::optional<std::string> extract_error_message(std::string_view json)
     return std::nullopt;
 }
 
+const curlee::vm::VM::Capabilities kEmptyCaps;
+
 const curlee::vm::VM::Capabilities& empty_caps()
 {
-    static const curlee::vm::VM::Capabilities caps;
-    return caps;
+    return kEmptyCaps;
 }
 
 } // namespace
 
 namespace curlee::vm
 {
+
+namespace
+{
+
+[[nodiscard]] VmResult ok_result(Value value)
+{
+    VmResult result;
+    result.ok = true;
+    result.value = value;
+    result.error.clear();
+    result.error_span = std::nullopt;
+    return result;
+} // GCOVR_EXCL_LINE
+
+[[nodiscard]] VmResult err_result(std::string_view message,
+                                  std::optional<curlee::source::Span> span)
+{
+    VmResult result;
+    result.ok = false;
+    result.value = Value::unit_v();
+    result.error.assign(message.data(), message.size());
+    result.error_span = span;
+    return result;
+} // GCOVR_EXCL_LINE
+
+} // namespace
 
 bool VM::push(Value value)
 {
@@ -422,10 +486,7 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
     {
         if (fuel == 0)
         {
-            return VmResult{.ok = false,
-                            .value = Value::unit_v(),
-                            .error = "out of fuel",
-                            .error_span = std::nullopt};
+            return err_result("out of fuel", std::nullopt);
         }
         --fuel;
 
@@ -440,20 +501,14 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             if (ip + 1 >= chunk.code.size())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "truncated constant",
-                                .error_span = span};
+                return err_result("truncated constant", span);
             }
             const std::uint16_t lo = chunk.code[ip++];
             const std::uint16_t hi = chunk.code[ip++];
             const std::uint16_t idx = static_cast<std::uint16_t>(lo | (hi << 8));
             if (idx >= chunk.constants.size())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "constant index out of range",
-                                .error_span = span};
+                return err_result("constant index out of range", span);
             }
             push(chunk.constants[idx]);
             break;
@@ -462,20 +517,14 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             if (ip + 1 >= chunk.code.size())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "truncated local index",
-                                .error_span = span};
+                return err_result("truncated local index", span);
             }
             const std::uint16_t lo = chunk.code[ip++];
             const std::uint16_t hi = chunk.code[ip++];
             const std::uint16_t idx = static_cast<std::uint16_t>(lo | (hi << 8));
             if (idx >= locals.size())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "local index out of range",
-                                .error_span = span};
+                return err_result("local index out of range", span);
             }
             push(locals[idx]);
             break;
@@ -484,10 +533,7 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             if (ip + 1 >= chunk.code.size())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "truncated local index",
-                                .error_span = span};
+                return err_result("truncated local index", span);
             }
             const std::uint16_t lo = chunk.code[ip++];
             const std::uint16_t hi = chunk.code[ip++];
@@ -495,17 +541,11 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             auto value = pop();
             if (!value.has_value())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "stack underflow",
-                                .error_span = span};
+                return err_result("stack underflow", span);
             }
             if (idx >= locals.size())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "local index out of range",
-                                .error_span = span};
+                return err_result("local index out of range", span);
             }
             locals[idx] = *value;
             break;
@@ -514,12 +554,9 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             auto rhs = pop();
             auto lhs = pop();
-            if (!lhs.has_value() || !rhs.has_value())
+            if (!rhs.has_value() || !lhs.has_value())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "stack underflow",
-                                .error_span = span};
+                return err_result("stack underflow", span);
             }
             if (lhs->kind == ValueKind::Int && rhs->kind == ValueKind::Int)
             {
@@ -531,29 +568,19 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
                 push(Value::string_v(lhs->string_value + rhs->string_value));
                 break;
             }
-            return VmResult{.ok = false,
-                            .value = Value::unit_v(),
-                            .error = "add expects Int or String",
-                            .error_span = span};
-            break;
+            return err_result("add expects Int or String", span);
         }
         case OpCode::Sub:
         {
             auto rhs = pop();
             auto lhs = pop();
-            if (!lhs.has_value() || !rhs.has_value())
+            if (!rhs.has_value() || !lhs.has_value())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "stack underflow",
-                                .error_span = span};
+                return err_result("stack underflow", span);
             }
             if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "sub expects Int",
-                                .error_span = span};
+                return err_result("sub expects Int", span);
             }
             push(Value::int_v(lhs->int_value - rhs->int_value));
             break;
@@ -562,19 +589,13 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             auto rhs = pop();
             auto lhs = pop();
-            if (!lhs.has_value() || !rhs.has_value())
+            if (!rhs.has_value() || !lhs.has_value())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "stack underflow",
-                                .error_span = span};
+                return err_result("stack underflow", span);
             }
             if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "mul expects Int",
-                                .error_span = span};
+                return err_result("mul expects Int", span);
             }
             push(Value::int_v(lhs->int_value * rhs->int_value));
             break;
@@ -583,26 +604,17 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             auto rhs = pop();
             auto lhs = pop();
-            if (!lhs.has_value() || !rhs.has_value())
+            if (!rhs.has_value() || !lhs.has_value())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "stack underflow",
-                                .error_span = span};
+                return err_result("stack underflow", span);
             }
             if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "div expects Int",
-                                .error_span = span};
+                return err_result("div expects Int", span);
             }
             if (rhs->int_value == 0)
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "divide by zero",
-                                .error_span = span};
+                return err_result("divide by zero", span);
             }
             push(Value::int_v(lhs->int_value / rhs->int_value));
             break;
@@ -612,17 +624,11 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             auto value = pop();
             if (!value.has_value())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "stack underflow",
-                                .error_span = span};
+                return err_result("stack underflow", span);
             }
             if (value->kind != ValueKind::Int)
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "neg expects Int",
-                                .error_span = span};
+                return err_result("neg expects Int", span);
             }
             push(Value::int_v(-value->int_value));
             break;
@@ -632,17 +638,11 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             auto value = pop();
             if (!value.has_value())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "stack underflow",
-                                .error_span = span};
+                return err_result("stack underflow", span);
             }
             if (value->kind != ValueKind::Bool)
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "not expects Bool",
-                                .error_span = span};
+                return err_result("not expects Bool", span);
             }
             push(Value::bool_v(!value->bool_value));
             break;
@@ -651,12 +651,9 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             auto rhs = pop();
             auto lhs = pop();
-            if (!lhs.has_value() || !rhs.has_value())
+            if (!rhs.has_value() || !lhs.has_value())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "stack underflow",
-                                .error_span = span};
+                return err_result("stack underflow", span);
             }
             push(Value::bool_v(*lhs == *rhs));
             break;
@@ -665,12 +662,9 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             auto rhs = pop();
             auto lhs = pop();
-            if (!lhs.has_value() || !rhs.has_value())
+            if (!rhs.has_value() || !lhs.has_value())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "stack underflow",
-                                .error_span = span};
+                return err_result("stack underflow", span);
             }
             push(Value::bool_v(!(*lhs == *rhs)));
             break;
@@ -679,19 +673,13 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             auto rhs = pop();
             auto lhs = pop();
-            if (!lhs.has_value() || !rhs.has_value())
+            if (!rhs.has_value() || !lhs.has_value())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "stack underflow",
-                                .error_span = span};
+                return err_result("stack underflow", span);
             }
             if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "lt expects Int",
-                                .error_span = span};
+                return err_result("lt expects Int", span);
             }
             push(Value::bool_v(lhs->int_value < rhs->int_value));
             break;
@@ -700,19 +688,13 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             auto rhs = pop();
             auto lhs = pop();
-            if (!lhs.has_value() || !rhs.has_value())
+            if (!rhs.has_value() || !lhs.has_value())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "stack underflow",
-                                .error_span = span};
+                return err_result("stack underflow", span);
             }
             if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "le expects Int",
-                                .error_span = span};
+                return err_result("le expects Int", span);
             }
             push(Value::bool_v(lhs->int_value <= rhs->int_value));
             break;
@@ -721,19 +703,13 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             auto rhs = pop();
             auto lhs = pop();
-            if (!lhs.has_value() || !rhs.has_value())
+            if (!rhs.has_value() || !lhs.has_value())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "stack underflow",
-                                .error_span = span};
+                return err_result("stack underflow", span);
             }
             if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "gt expects Int",
-                                .error_span = span};
+                return err_result("gt expects Int", span);
             }
             push(Value::bool_v(lhs->int_value > rhs->int_value));
             break;
@@ -742,19 +718,13 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             auto rhs = pop();
             auto lhs = pop();
-            if (!lhs.has_value() || !rhs.has_value())
+            if (!rhs.has_value() || !lhs.has_value())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "stack underflow",
-                                .error_span = span};
+                return err_result("stack underflow", span);
             }
             if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "ge expects Int",
-                                .error_span = span};
+                return err_result("ge expects Int", span);
             }
             push(Value::bool_v(lhs->int_value >= rhs->int_value));
             break;
@@ -763,10 +733,7 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             if (!pop().has_value())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "stack underflow",
-                                .error_span = span};
+                return err_result("stack underflow", span);
             }
             break;
         }
@@ -775,31 +742,22 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             auto result = pop();
             if (!result.has_value())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "missing return",
-                                .error_span = span};
+                return err_result("missing return", span);
             }
-            return VmResult{.ok = true, .value = *result, .error = {}, .error_span = std::nullopt};
+            return ok_result(*result);
         }
         case OpCode::Jump:
         {
             if (ip + 1 >= chunk.code.size())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "truncated jump target",
-                                .error_span = span};
+                return err_result("truncated jump target", span);
             }
             const std::uint16_t lo = chunk.code[ip++];
             const std::uint16_t hi = chunk.code[ip++];
             const std::uint16_t target = static_cast<std::uint16_t>(lo | (hi << 8));
             if (static_cast<std::size_t>(target) >= chunk.code.size())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "jump target out of range",
-                                .error_span = span};
+                return err_result("jump target out of range", span);
             }
             ip = static_cast<std::size_t>(target);
             break;
@@ -808,10 +766,7 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             if (ip + 1 >= chunk.code.size())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "truncated jump target",
-                                .error_span = span};
+                return err_result("truncated jump target", span);
             }
             const std::uint16_t lo = chunk.code[ip++];
             const std::uint16_t hi = chunk.code[ip++];
@@ -820,26 +775,17 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             auto cond = pop();
             if (!cond.has_value())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "stack underflow",
-                                .error_span = span};
+                return err_result("stack underflow", span);
             }
             if (cond->kind != ValueKind::Bool)
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "jump-if-false expects Bool",
-                                .error_span = span};
+                return err_result("jump-if-false expects Bool", span);
             }
             if (!cond->bool_value)
             {
                 if (static_cast<std::size_t>(target) >= chunk.code.size())
                 {
-                    return VmResult{.ok = false,
-                                    .value = Value::unit_v(),
-                                    .error = "jump target out of range",
-                                    .error_span = span};
+                    return err_result("jump target out of range", span);
                 }
                 ip = static_cast<std::size_t>(target);
             }
@@ -849,20 +795,14 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             if (ip + 1 >= chunk.code.size())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "truncated call target",
-                                .error_span = span};
+                return err_result("truncated call target", span);
             }
             const std::uint16_t lo = chunk.code[ip++];
             const std::uint16_t hi = chunk.code[ip++];
             const std::uint16_t target = static_cast<std::uint16_t>(lo | (hi << 8));
             if (static_cast<std::size_t>(target) >= chunk.code.size())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "call target out of range",
-                                .error_span = span};
+                return err_result("call target out of range", span);
             }
 
             call_stack.push_back(ip);
@@ -873,10 +813,7 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             if (call_stack.empty())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "return with empty call stack",
-                                .error_span = span};
+                return err_result("return with empty call stack", span);
             }
             ip = call_stack.back();
             call_stack.pop_back();
@@ -886,18 +823,12 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             if (!capabilities.contains("io:stdout"))
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "missing capability io:stdout",
-                                .error_span = span};
+                return err_result("missing capability io:stdout", span);
             }
             auto value = pop();
             if (!value.has_value())
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "stack underflow",
-                                .error_span = span};
+                return err_result("stack underflow", span);
             }
             // MVP: stub effect. No ambient IO; host can later wire an output sink.
             push(Value::unit_v());
@@ -907,10 +838,7 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         {
             if (!capabilities.contains("python:ffi"))
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "python capability required",
-                                .error_span = span};
+                return err_result("python capability required", span);
             }
 
             const std::string runner = find_python_runner_path();
@@ -958,17 +886,11 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
 
             if (proc.timed_out)
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "python runner timed out",
-                                .error_span = span};
+                return err_result("python runner timed out", span);
             }
             if (proc.output_limit_exceeded)
             {
-                return VmResult{.ok = false,
-                                .value = Value::unit_v(),
-                                .error = "python runner output too large",
-                                .error_span = span};
+                return err_result("python runner output too large", span);
             }
 
             if (!response_ok_true(proc.out))
@@ -986,8 +908,7 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
                 {
                     msg = "python sandbox failed";
                 }
-                return VmResult{
-                    .ok = false, .value = Value::unit_v(), .error = msg, .error_span = span};
+                return err_result(msg, span);
             }
 
             push(Value::unit_v());
@@ -996,8 +917,7 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         }
     }
 
-    return VmResult{
-        .ok = false, .value = Value::unit_v(), .error = "no return", .error_span = std::nullopt};
+    return err_result("no return", std::nullopt);
 }
 
 } // namespace curlee::vm

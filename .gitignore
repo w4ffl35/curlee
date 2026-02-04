@@ -5,3 +5,6 @@ wiki/
 
 # Generated dataset export (do not commit).
 training_data.txt
+
+# Coverage artifacts (gcov can emit these in the repo root depending on invocation).
+*.gcov

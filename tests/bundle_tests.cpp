@@ -151,14 +151,9 @@ int main()
         std::filesystem::remove(legacy_no_version);
 
         const std::vector<std::uint8_t> bytes{0x01};
-        write_text_file(
-            legacy_no_version,
-            std::string("CURLEE_BUNDLE_V1\n") +
-                "bytecode_hash=" + hash_bytes(bytes) + "\n" +
-                "capabilities=\n" +
-                "imports=\n" +
-                "proof=\n" +
-                "bytecode=AQ==\n");
+        write_text_file(legacy_no_version, std::string("CURLEE_BUNDLE_V1\n") + "bytecode_hash=" +
+                                               hash_bytes(bytes) + "\n" + "capabilities=\n" +
+                                               "imports=\n" + "proof=\n" + "bytecode=AQ==\n");
 
         expect_read_ok(legacy_no_version);
         std::filesystem::remove(legacy_no_version);
@@ -167,11 +162,8 @@ int main()
     {
         const auto missing_version = temp_path("curlee_bundle_missing_version.bundle");
         std::filesystem::remove(missing_version);
-        write_text_file(
-            missing_version,
-            std::string("CURLEE_BUNDLE\n") +
-                "bytecode_hash=deadbeef\n" +
-                "bytecode=AQ==\n");
+        write_text_file(missing_version, std::string("CURLEE_BUNDLE\n") +
+                                             "bytecode_hash=deadbeef\n" + "bytecode=AQ==\n");
         expect_read_error(missing_version, "missing bundle format version");
         std::filesystem::remove(missing_version);
     }
@@ -179,39 +171,43 @@ int main()
     {
         const auto invalid_version = temp_path("curlee_bundle_invalid_version.bundle");
         std::filesystem::remove(invalid_version);
-        write_text_file(
-            invalid_version,
-            std::string("CURLEE_BUNDLE\n") +
-                "format_version=not_an_int\n" +
-                "bytecode_hash=deadbeef\n" +
-                "bytecode=AQ==\n");
+        write_text_file(invalid_version, std::string("CURLEE_BUNDLE\n") +
+                                             "format_version=not_an_int\n" +
+                                             "bytecode_hash=deadbeef\n" + "bytecode=AQ==\n");
         expect_read_error(invalid_version, "invalid bundle format version");
         std::filesystem::remove(invalid_version);
     }
 
     {
+        // parse_int: ec == ok but ptr != end (trailing junk) should be rejected.
+        const auto invalid_version_trailing =
+            temp_path("curlee_bundle_invalid_version_trailing.bundle");
+        std::filesystem::remove(invalid_version_trailing);
+        write_text_file(invalid_version_trailing,
+                        std::string("CURLEE_BUNDLE\n") + "format_version=1x\n" +
+                            "bytecode_hash=deadbeef\n" + "bytecode=AQ==\n");
+        expect_read_error(invalid_version_trailing, "invalid bundle format version");
+        std::filesystem::remove(invalid_version_trailing);
+    }
+
+    {
         const auto unsupported_version = temp_path("curlee_bundle_unsupported_version.bundle");
         std::filesystem::remove(unsupported_version);
-        write_text_file(
-            unsupported_version,
-            std::string("CURLEE_BUNDLE\n") +
-                "format_version=999\n" +
-                "bytecode_hash=deadbeef\n" +
-                "bytecode=AQ==\n");
-        expect_read_error(
-            unsupported_version,
-            "unsupported bundle format version: 999 (supported: " + std::to_string(kBundleFormatVersion) + ")");
+        write_text_file(unsupported_version, std::string("CURLEE_BUNDLE\n") +
+                                                 "format_version=999\n" +
+                                                 "bytecode_hash=deadbeef\n" + "bytecode=AQ==\n");
+        expect_read_error(unsupported_version,
+                          "unsupported bundle format version: 999 (supported: " +
+                              std::to_string(kBundleFormatVersion) + ")");
         std::filesystem::remove(unsupported_version);
     }
 
     {
         const auto missing_hash = temp_path("curlee_bundle_missing_hash.bundle");
         std::filesystem::remove(missing_hash);
-        write_text_file(
-            missing_hash,
-            std::string("CURLEE_BUNDLE\n") +
-                "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
-                "bytecode=AQ==\n");
+        write_text_file(missing_hash, std::string("CURLEE_BUNDLE\n") +
+                                          "format_version=" + std::to_string(kBundleFormatVersion) +
+                                          "\n" + "bytecode=AQ==\n");
         expect_read_error(missing_hash, "missing bytecode_hash");
         std::filesystem::remove(missing_hash);
     }
@@ -219,11 +215,9 @@ int main()
     {
         const auto missing_bytecode = temp_path("curlee_bundle_missing_bytecode.bundle");
         std::filesystem::remove(missing_bytecode);
-        write_text_file(
-            missing_bytecode,
-            std::string("CURLEE_BUNDLE\n") +
-                "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
-                "bytecode_hash=deadbeef\n");
+        write_text_file(missing_bytecode, std::string("CURLEE_BUNDLE\n") + "format_version=" +
+                                              std::to_string(kBundleFormatVersion) + "\n" +
+                                              "bytecode_hash=deadbeef\n");
         expect_read_error(missing_bytecode, "missing bytecode");
         std::filesystem::remove(missing_bytecode);
     }
@@ -231,25 +225,32 @@ int main()
     {
         const auto invalid_b64 = temp_path("curlee_bundle_invalid_b64.bundle");
         std::filesystem::remove(invalid_b64);
-        write_text_file(
-            invalid_b64,
-            std::string("CURLEE_BUNDLE\n") +
-                "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
-                "bytecode_hash=deadbeef\n" +
-                "bytecode=@!\n");
+        write_text_file(invalid_b64, std::string("CURLEE_BUNDLE\n") +
+                                         "format_version=" + std::to_string(kBundleFormatVersion) +
+                                         "\n" + "bytecode_hash=deadbeef\n" + "bytecode=@!\n");
         expect_read_error(invalid_b64, "invalid base64 bytecode");
         std::filesystem::remove(invalid_b64);
     }
 
     {
+        // decode_base64_char: c >= 'a' true but c <= 'z' false (e.g. '{') should reject.
+        const auto invalid_b64_after_lower =
+            temp_path("curlee_bundle_invalid_b64_after_lower.bundle");
+        std::filesystem::remove(invalid_b64_after_lower);
+        write_text_file(invalid_b64_after_lower,
+                        std::string("CURLEE_BUNDLE\n") +
+                            "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
+                            "bytecode_hash=deadbeef\n" + "bytecode={AAA\n");
+        expect_read_error(invalid_b64_after_lower, "invalid base64 bytecode");
+        std::filesystem::remove(invalid_b64_after_lower);
+    }
+
+    {
         const auto b64_short = temp_path("curlee_bundle_b64_short.bundle");
         std::filesystem::remove(b64_short);
-        write_text_file(
-            b64_short,
-            std::string("CURLEE_BUNDLE\n") +
-                "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
-                "bytecode_hash=deadbeef\n" +
-                "bytecode=A\n");
+        write_text_file(b64_short, std::string("CURLEE_BUNDLE\n") +
+                                       "format_version=" + std::to_string(kBundleFormatVersion) +
+                                       "\n" + "bytecode_hash=deadbeef\n" + "bytecode=A\n");
         expect_read_error(b64_short, "invalid base64 bytecode");
         std::filesystem::remove(b64_short);
     }
@@ -257,12 +258,9 @@ int main()
     {
         const auto b64_bad_padding = temp_path("curlee_bundle_b64_bad_padding.bundle");
         std::filesystem::remove(b64_bad_padding);
-        write_text_file(
-            b64_bad_padding,
-            std::string("CURLEE_BUNDLE\n") +
-                "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
-                "bytecode_hash=deadbeef\n" +
-                "bytecode=====\n");
+        write_text_file(b64_bad_padding, std::string("CURLEE_BUNDLE\n") + "format_version=" +
+                                             std::to_string(kBundleFormatVersion) + "\n" +
+                                             "bytecode_hash=deadbeef\n" + "bytecode=====\n");
         expect_read_error(b64_bad_padding, "invalid base64 bytecode");
         std::filesystem::remove(b64_bad_padding);
     }
@@ -270,25 +268,30 @@ int main()
     {
         const auto b64_starts_with_pad = temp_path("curlee_bundle_b64_starts_with_pad.bundle");
         std::filesystem::remove(b64_starts_with_pad);
-        write_text_file(
-            b64_starts_with_pad,
-            std::string("CURLEE_BUNDLE\n") +
-                "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
-                "bytecode_hash=deadbeef\n" +
-                "bytecode==AA\n");
+        write_text_file(b64_starts_with_pad, std::string("CURLEE_BUNDLE\n") + "format_version=" +
+                                                 std::to_string(kBundleFormatVersion) + "\n" +
+                                                 "bytecode_hash=deadbeef\n" + "bytecode==AA\n");
         expect_read_error(b64_starts_with_pad, "invalid base64 bytecode");
         std::filesystem::remove(b64_starts_with_pad);
     }
 
     {
+        // base64_decode: vals[0] ok but vals[1] negative (padding in 2nd position) should reject.
+        const auto b64_second_is_pad = temp_path("curlee_bundle_b64_second_is_pad.bundle");
+        std::filesystem::remove(b64_second_is_pad);
+        write_text_file(b64_second_is_pad, std::string("CURLEE_BUNDLE\n") + "format_version=" +
+                                               std::to_string(kBundleFormatVersion) + "\n" +
+                                               "bytecode_hash=deadbeef\n" + "bytecode=A=AA\n");
+        expect_read_error(b64_second_is_pad, "invalid base64 bytecode");
+        std::filesystem::remove(b64_second_is_pad);
+    }
+
+    {
         const auto b64_lowercase = temp_path("curlee_bundle_b64_lowercase.bundle");
         std::filesystem::remove(b64_lowercase);
-        write_text_file(
-            b64_lowercase,
-            std::string("CURLEE_BUNDLE\n") +
-                "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
-                "bytecode_hash=deadbeef\n" +
-                "bytecode=aAAA\n");
+        write_text_file(b64_lowercase, std::string("CURLEE_BUNDLE\n") + "format_version=" +
+                                           std::to_string(kBundleFormatVersion) + "\n" +
+                                           "bytecode_hash=deadbeef\n" + "bytecode=aAAA\n");
         expect_read_error(b64_lowercase, "bytecode hash mismatch");
         std::filesystem::remove(b64_lowercase);
     }
@@ -296,12 +299,9 @@ int main()
     {
         const auto b64_plus = temp_path("curlee_bundle_b64_plus.bundle");
         std::filesystem::remove(b64_plus);
-        write_text_file(
-            b64_plus,
-            std::string("CURLEE_BUNDLE\n") +
-                "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
-                "bytecode_hash=deadbeef\n" +
-                "bytecode=++++\n");
+        write_text_file(b64_plus, std::string("CURLEE_BUNDLE\n") +
+                                      "format_version=" + std::to_string(kBundleFormatVersion) +
+                                      "\n" + "bytecode_hash=deadbeef\n" + "bytecode=++++\n");
         expect_read_error(b64_plus, "bytecode hash mismatch");
         std::filesystem::remove(b64_plus);
     }
@@ -309,12 +309,9 @@ int main()
     {
         const auto b64_digit = temp_path("curlee_bundle_b64_digit.bundle");
         std::filesystem::remove(b64_digit);
-        write_text_file(
-            b64_digit,
-            std::string("CURLEE_BUNDLE\n") +
-                "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
-                "bytecode_hash=deadbeef\n" +
-                "bytecode=0AAA\n");
+        write_text_file(b64_digit, std::string("CURLEE_BUNDLE\n") +
+                                       "format_version=" + std::to_string(kBundleFormatVersion) +
+                                       "\n" + "bytecode_hash=deadbeef\n" + "bytecode=0AAA\n");
         expect_read_error(b64_digit, "bytecode hash mismatch");
         std::filesystem::remove(b64_digit);
     }
@@ -323,57 +320,79 @@ int main()
         const auto whitespace_b64 = temp_path("curlee_bundle_whitespace_b64.bundle");
         std::filesystem::remove(whitespace_b64);
         const std::vector<std::uint8_t> empty_bytes;
-        write_text_file(
-            whitespace_b64,
-            std::string("CURLEE_BUNDLE\n") +
-                "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
-                "bytecode_hash=" + hash_bytes(empty_bytes) + "\n" +
-                "imports=stdlib.math:deadbeef\n" +
-                "capabilities=,io:stdout,,net:none,\n" +
-                "proof=hello\n" +
-                "bytecode=   \t \n");
+        write_text_file(whitespace_b64, std::string("CURLEE_BUNDLE\n") + "format_version=" +
+                                            std::to_string(kBundleFormatVersion) + "\n" +
+                                            "bytecode_hash=" + hash_bytes(empty_bytes) + "\n" +
+                                            "imports=stdlib.math:deadbeef\n" +
+                                            "capabilities=,io:stdout,,net:none,\n" +
+                                            "proof=hello\n" + "bytecode=   \t \n");
         expect_read_ok(whitespace_b64);
         std::filesystem::remove(whitespace_b64);
     }
 
     {
-        const auto invalid_import_no_colon = temp_path("curlee_bundle_invalid_import_no_colon.bundle");
+        // Many imports should exercise vector growth paths in manifest.imports.
+        const auto many_imports = temp_path("curlee_bundle_many_imports.bundle");
+        std::filesystem::remove(many_imports);
+        const std::vector<std::uint8_t> bytes{0x01};
+        const auto hash = hash_bytes(bytes);
+        write_text_file(many_imports, std::string("CURLEE_BUNDLE\n") +
+                                          "format_version=" + std::to_string(kBundleFormatVersion) +
+                                          "\n" + "bytecode_hash=" + hash + "\n" +
+                                          "imports=a:1,b:2,c:3,d:4,e:5,f:6,g:7,h:8,i:9,j:10\n" +
+                                          "bytecode=AQ==\n");
+        expect_read_ok(many_imports);
+        std::filesystem::remove(many_imports);
+    }
+
+    {
+        // An unknown key of the same length as "bytecode" should not be treated as bytecode.
+        const auto near_bytecode = temp_path("curlee_bundle_near_bytecode_key.bundle");
+        std::filesystem::remove(near_bytecode);
+        const std::vector<std::uint8_t> bytes{0x01};
+        const auto hash = hash_bytes(bytes);
+        write_text_file(near_bytecode,
+                        std::string("CURLEE_BUNDLE\n") +
+                            "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
+                            "bytecode_hash=" + hash + "\n" + "bytecodf=AQ==\n" + "bytecode=AQ==\n");
+        expect_read_ok(near_bytecode);
+        std::filesystem::remove(near_bytecode);
+    }
+
+    {
+        const auto invalid_import_no_colon =
+            temp_path("curlee_bundle_invalid_import_no_colon.bundle");
         std::filesystem::remove(invalid_import_no_colon);
-        write_text_file(
-            invalid_import_no_colon,
-            std::string("CURLEE_BUNDLE\n") +
-                "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
-                "bytecode_hash=deadbeef\n" +
-                "imports=stdlib.math\n" +
-                "bytecode=AQ==\n");
+        write_text_file(invalid_import_no_colon,
+                        std::string("CURLEE_BUNDLE\n") +
+                            "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
+                            "bytecode_hash=deadbeef\n" + "imports=stdlib.math\n" +
+                            "bytecode=AQ==\n");
         expect_read_error(invalid_import_no_colon, "invalid import pin");
         std::filesystem::remove(invalid_import_no_colon);
     }
 
     {
-        const auto invalid_import_empty_path = temp_path("curlee_bundle_invalid_import_empty_path.bundle");
+        const auto invalid_import_empty_path =
+            temp_path("curlee_bundle_invalid_import_empty_path.bundle");
         std::filesystem::remove(invalid_import_empty_path);
-        write_text_file(
-            invalid_import_empty_path,
-            std::string("CURLEE_BUNDLE\n") +
-                "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
-                "bytecode_hash=deadbeef\n" +
-                "imports=:bead\n" +
-                "bytecode=AQ==\n");
+        write_text_file(invalid_import_empty_path,
+                        std::string("CURLEE_BUNDLE\n") +
+                            "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
+                            "bytecode_hash=deadbeef\n" + "imports=:bead\n" + "bytecode=AQ==\n");
         expect_read_error(invalid_import_empty_path, "invalid import pin");
         std::filesystem::remove(invalid_import_empty_path);
     }
 
     {
-        const auto invalid_import_empty_hash = temp_path("curlee_bundle_invalid_import_empty_hash.bundle");
+        const auto invalid_import_empty_hash =
+            temp_path("curlee_bundle_invalid_import_empty_hash.bundle");
         std::filesystem::remove(invalid_import_empty_hash);
-        write_text_file(
-            invalid_import_empty_hash,
-            std::string("CURLEE_BUNDLE\n") +
-                "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
-                "bytecode_hash=deadbeef\n" +
-                "imports=stdlib.math:\n" +
-                "bytecode=AQ==\n");
+        write_text_file(invalid_import_empty_hash,
+                        std::string("CURLEE_BUNDLE\n") +
+                            "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
+                            "bytecode_hash=deadbeef\n" + "imports=stdlib.math:\n" +
+                            "bytecode=AQ==\n");
         expect_read_error(invalid_import_empty_hash, "invalid import pin");
         std::filesystem::remove(invalid_import_empty_hash);
     }
@@ -381,14 +400,10 @@ int main()
     {
         const auto weird_lines = temp_path("curlee_bundle_weird_lines.bundle");
         std::filesystem::remove(weird_lines);
-        write_text_file(
-            weird_lines,
-            std::string("CURLEE_BUNDLE\n") +
-                "\n" +
-                "this line has no equals sign\n" +
-                "format_version=" + std::to_string(kBundleFormatVersion) + "\n" +
-                "bytecode_hash=deadbeef\n" +
-                "bytecode=AQ==\n");
+        write_text_file(weird_lines, std::string("CURLEE_BUNDLE\n") + "\n" +
+                                         "this line has no equals sign\n" +
+                                         "format_version=" + std::to_string(kBundleFormatVersion) +
+                                         "\n" + "bytecode_hash=deadbeef\n" + "bytecode=AQ==\n");
         expect_read_error(weird_lines, "bytecode hash mismatch");
         std::filesystem::remove(weird_lines);
     }
@@ -449,7 +464,8 @@ int main()
         Bundle bundle_1;
         bundle_1.manifest.format_version = kBundleFormatVersion;
         bundle_1.manifest.capabilities = {"io:stdout"};
-        bundle_1.manifest.imports = {ImportPin{.path = "a", .hash = "b"}, ImportPin{.path = "c", .hash = "d"}};
+        bundle_1.manifest.imports = {ImportPin{.path = "a", .hash = "b"},
+                                     ImportPin{.path = "c", .hash = "d"}};
         bundle_1.bytecode = {0xFF};
         const auto write_err_1 = write_bundle(path_1.string(), bundle_1);
         if (!write_err_1.message.empty())

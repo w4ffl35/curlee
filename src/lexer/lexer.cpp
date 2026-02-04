@@ -44,8 +44,7 @@ class Lexer
                     advance();
                 }
                 const std::string_view lexeme = input_.substr(start, pos_ - start);
-                tokens.push_back(Token{
-                    .kind = keyword_or_ident(lexeme), .lexeme = lexeme, .span = {start, pos_}});
+                tokens.push_back(Token{.kind = keyword_or_ident(lexeme), .lexeme = lexeme, .span = {start, pos_}});
                 continue;
             }
 
@@ -74,11 +73,7 @@ class Lexer
                     {
                         advance();
                         const std::string_view lexeme = input_.substr(start, pos_ - start);
-                        tokens.push_back(Token{
-                            .kind = TokenKind::StringLiteral,
-                            .lexeme = lexeme,
-                            .span = {start, pos_},
-                        });
+                        tokens.push_back(Token{.kind = TokenKind::StringLiteral, .lexeme = lexeme, .span = {start, pos_}});
                         break;
                     }
 
@@ -236,7 +231,7 @@ class Lexer
     std::size_t pos_ = 0;
 
     [[nodiscard]] bool is_at_end() const { return pos_ >= input_.size(); }
-    [[nodiscard]] char peek() const { return is_at_end() ? '\0' : input_[pos_]; }
+    [[nodiscard]] char peek() const;
 
     [[nodiscard]] char peek_next() const
     {
@@ -345,7 +340,7 @@ class Lexer
         d.message = std::string(message);
         d.span = curlee::source::Span{start, end};
         return d;
-    }
+    } // GCOVR_EXCL_LINE
 
     // Skips whitespace and comments. Returns a diagnostic on unterminated block comment.
     [[nodiscard]] std::optional<curlee::diag::Diagnostic> skip_trivia()
@@ -399,6 +394,11 @@ class Lexer
         return std::nullopt;
     }
 };
+
+[[nodiscard]] char Lexer::peek() const
+{
+    return input_[pos_];
+}
 
 } // namespace
 

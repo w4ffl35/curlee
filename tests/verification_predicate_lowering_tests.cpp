@@ -218,6 +218,20 @@ int main()
         }
     }
 
+    // Boolean operators expect Bool predicates (cover rhs-type mismatch branch).
+    {
+        Solver solver;
+        auto& ctx = solver.context();
+        LoweringContext lower_ctx(ctx);
+
+        auto pred = make_binary(TokenKind::AndAnd, make_bool(true), make_int("1"));
+        auto lowered = lower_predicate(pred, lower_ctx);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(lowered))
+        {
+            fail("expected boolean operator type error (rhs mismatch)");
+        }
+    }
+
     // Equality expects matching predicate types.
     {
         Solver solver;
@@ -246,6 +260,20 @@ int main()
         }
     }
 
+    // Comparison operators expect Int predicates (cover rhs-type mismatch branch).
+    {
+        Solver solver;
+        auto& ctx = solver.context();
+        LoweringContext lower_ctx(ctx);
+
+        auto pred = make_binary(TokenKind::Less, make_int("0"), make_bool(true));
+        auto lowered = lower_predicate(pred, lower_ctx);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(lowered))
+        {
+            fail("expected comparison rhs type mismatch to be rejected");
+        }
+    }
+
     // Arithmetic operators expect Int predicates.
     {
         Solver solver;
@@ -259,6 +287,56 @@ int main()
         if (!std::holds_alternative<curlee::diag::Diagnostic>(lowered))
         {
             fail("expected arithmetic type mismatch to be rejected");
+        }
+    }
+
+    // Arithmetic operators expect Int predicates (cover rhs-type mismatch branch).
+    {
+        Solver solver;
+        auto& ctx = solver.context();
+        LoweringContext lower_ctx(ctx);
+
+        auto pred = make_binary(TokenKind::EqualEqual,
+                                make_binary(TokenKind::Plus, make_int("1"), make_bool(true)),
+                                make_int("0"));
+        auto lowered = lower_predicate(pred, lower_ctx);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(lowered))
+        {
+            fail("expected arithmetic rhs type mismatch to be rejected");
+        }
+    }
+
+    // Cover literal tracking in arithmetic: literal + literal.
+    {
+        Solver solver;
+        auto& ctx = solver.context();
+        LoweringContext lower_ctx(ctx);
+
+        auto pred = make_binary(TokenKind::EqualEqual,
+                                make_binary(TokenKind::Plus, make_int("1"), make_int("2")),
+                                make_int("3"));
+        auto lowered = lower_predicate(pred, lower_ctx);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lowered))
+        {
+            fail("expected literal + literal lowering to succeed");
+        }
+    }
+
+    // Cover literal tracking in arithmetic: literal + var (forces RHS literal flag evaluation).
+    {
+        Solver solver;
+        auto& ctx = solver.context();
+        LoweringContext lower_ctx(ctx);
+        auto x = ctx.int_const("x");
+        lower_ctx.int_vars.emplace("x", x);
+
+        auto pred = make_binary(TokenKind::EqualEqual,
+                                make_binary(TokenKind::Plus, make_int("1"), make_name("x")),
+                                make_int("0"));
+        auto lowered = lower_predicate(pred, lower_ctx);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lowered))
+        {
+            fail("expected literal + var lowering to succeed");
         }
     }
 
@@ -545,6 +623,27 @@ int main()
         if (d.message != "'*' expects Int predicates")
         {
             fail("unexpected diagnostic for '*' type mismatch");
+        }
+    }
+
+    // '*' expects Int predicates (cover rhs-type mismatch branch).
+    {
+        Solver solver;
+        auto& ctx = solver.context();
+        LoweringContext lower_ctx(ctx);
+
+        auto pred = make_binary(TokenKind::EqualEqual,
+                                make_binary(TokenKind::Star, make_int("1"), make_bool(true)),
+                                make_int("0"));
+        auto lowered = lower_predicate(pred, lower_ctx);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(lowered))
+        {
+            fail("expected '*' rhs type mismatch to be rejected");
+        }
+        const auto& d = std::get<curlee::diag::Diagnostic>(lowered);
+        if (d.message != "'*' expects Int predicates")
+        {
+            fail("unexpected diagnostic for '*' rhs type mismatch");
         }
     }
 
