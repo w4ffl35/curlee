@@ -44,7 +44,8 @@ class Lexer
                     advance();
                 }
                 const std::string_view lexeme = input_.substr(start, pos_ - start);
-                tokens.push_back(Token{.kind = keyword_or_ident(lexeme), .lexeme = lexeme, .span = {start, pos_}});
+                tokens.push_back(Token{
+                    .kind = keyword_or_ident(lexeme), .lexeme = lexeme, .span = {start, pos_}});
                 continue;
             }
 
@@ -73,7 +74,9 @@ class Lexer
                     {
                         advance();
                         const std::string_view lexeme = input_.substr(start, pos_ - start);
-                        tokens.push_back(Token{.kind = TokenKind::StringLiteral, .lexeme = lexeme, .span = {start, pos_}});
+                        tokens.push_back(Token{.kind = TokenKind::StringLiteral,
+                                               .lexeme = lexeme,
+                                               .span = {start, pos_}});
                         break;
                     }
 
