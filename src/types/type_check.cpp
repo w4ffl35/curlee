@@ -282,8 +282,42 @@ class Checker
         diags_.push_back(std::move(d));
     }
 
+    [[nodiscard]] bool has_capability_value(std::string_view cap_name) const
+    {
+        for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it)
+        {
+            for (const auto& [var_name, t] : it->vars)
+            {
+                (void)var_name;
+                if (t.kind == TypeKind::Capability && t.name == cap_name)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    void require_capability(std::string_view cap_name, Span use_span)
+    {
+        info_.required_capabilities.push_back(curlee::types::TypeInfo::RequiredCapability{
+            .name = cap_name, .span = use_span});
+
+        if (!has_capability_value(cap_name))
+        {
+            error_at(use_span, "missing capability value '" + std::string(cap_name) +
+                                   "' (add a parameter of type cap " + std::string(cap_name) + ")");
+        }
+    }
+
     [[nodiscard]] std::optional<Type> type_from_ast(const curlee::parser::TypeName& name)
     {
+        // MVP: capability types are introduced by the explicit `cap <name>` syntax.
+        if (name.is_capability)
+        {
+            return Type{.kind = TypeKind::Capability, .name = name.name};
+        }
+
         const auto t = core_type_from_name(name.name);
         if (!t.has_value())
         {
@@ -676,6 +710,8 @@ class Checker
                 return std::nullopt;
             }
 
+            require_capability("python.ffi", span);
+
             if (!e.args.empty())
             {
                 error_at(span, "python_ffi.call is stubbed and currently takes 0 arguments");
@@ -793,6 +829,9 @@ class Checker
                 error_at(span, "print expects exactly 1 argument");
                 return std::nullopt;
             }
+
+            require_capability("io.stdout", span);
+
             const auto arg_t = check_expr(e.args[0]);
             if (!arg_t.has_value())
             {

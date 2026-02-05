@@ -231,17 +231,25 @@ class Emitter
         locals_.clear();
         local_base_ = next_local_base_;
 
-        if (is_main && !fn.params.empty())
+        if (is_main)
         {
-            diags_.push_back(error_at(fn.span, "main cannot take parameters in runnable code"));
-            return;
+            for (const auto& p : fn.params)
+            {
+                if (!p.type.is_capability)
+                {
+                    diags_.push_back(error_at(
+                        p.type.span,
+                        "main parameters are only supported for capability types (cap ...)"));
+                    return;
+                }
+            }
         }
 
         // Parameters live in the first slots of this function's locals range.
         for (std::size_t i = 0; i < fn.params.size(); ++i)
         {
             const auto& p = fn.params[i];
-            if (p.type.name != "Int" && p.type.name != "Bool")
+            if (!p.type.is_capability && p.type.name != "Int" && p.type.name != "Bool")
             {
                 diags_.push_back(
                     error_at(p.type.span, "parameter type not supported in runnable code: '" +
@@ -253,13 +261,29 @@ class Emitter
             locals_.emplace(p.name, slot);
         }
 
-        // Callee prologue: pop call arguments into parameter locals.
-        // Call sites evaluate args left-to-right, so we pop into params right-to-left.
-        for (std::size_t i = fn.params.size(); i > 0; --i)
+        if (is_main && !fn.params.empty())
         {
-            const auto& p = fn.params[i - 1];
-            const auto slot = static_cast<std::uint16_t>(local_base_ + (i - 1));
-            chunk_.emit_local(OpCode::StoreLocal, slot, p.span);
+            // Entry point has no caller, so synthesize default capability values.
+            // Capabilities are represented as Unit at runtime; authority is gated by the host
+            // capability set passed to VM::run.
+            for (std::size_t i = 0; i < fn.params.size(); ++i)
+            {
+                const auto& p = fn.params[i];
+                const auto slot = static_cast<std::uint16_t>(local_base_ + i);
+                chunk_.emit_constant(Value::unit_v(), p.span);
+                chunk_.emit_local(OpCode::StoreLocal, slot, p.span);
+            }
+        }
+        else
+        {
+            // Callee prologue: pop call arguments into parameter locals.
+            // Call sites evaluate args left-to-right, so we pop into params right-to-left.
+            for (std::size_t i = fn.params.size(); i > 0; --i)
+            {
+                const auto& p = fn.params[i - 1];
+                const auto slot = static_cast<std::uint16_t>(local_base_ + (i - 1));
+                chunk_.emit_local(OpCode::StoreLocal, slot, p.span);
+            }
         }
 
         for (const auto& stmt : fn.body.stmts)

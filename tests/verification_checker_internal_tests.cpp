@@ -258,6 +258,17 @@ int main()
         {
             fail("expected unknown type diagnostic");
         }
+
+        // supported_type: capability type is treated as Unit (uninterpreted) for verification.
+        curlee::parser::TypeName cap;
+        cap.span = curlee::source::Span{.start = 0, .end = 1};
+        cap.is_capability = true;
+        cap.name = "foo";
+        const auto cap_t = v.supported_type(cap);
+        if (!cap_t.has_value() || *cap_t != curlee::types::TypeKind::Unit)
+        {
+            fail("expected supported_type(cap foo) to return Unit");
+        }
     }
 
     {
@@ -882,6 +893,32 @@ int main()
     }
 
     {
+        // check_call: non-Int/Bool signature params are ignored by the MVP verifier.
+        const curlee::source::Span s{.start = 0, .end = 1};
+        curlee::parser::Function decl;
+        decl.name = "non_scalar_param";
+        decl.return_type = curlee::parser::TypeName{.span = s, .name = "Int"};
+        decl.params.push_back(curlee::parser::Function::Param{
+            .span = s,
+            .name = "cap",
+            .type = curlee::parser::TypeName{.span = s, .is_capability = true, .name = "foo"},
+            .refinement = std::nullopt,
+        });
+
+        curlee::verification::FunctionSig sig;
+        sig.decl = &decl;
+        sig.params = {curlee::types::TypeKind::Unit};
+        sig.result = curlee::types::TypeKind::Int;
+        v.functions_.insert_or_assign("non_scalar_param", sig);
+
+        curlee::parser::CallExpr call;
+        call.callee =
+            make_expr_ptr(make_expr(s, curlee::parser::NameExpr{.name = "non_scalar_param"}));
+        call.args.push_back(make_expr(s, curlee::parser::IntExpr{.lexeme = "0"}));
+        v.check_call(call);
+    }
+
+    {
         // is_python_ffi_call: cover early returns.
         const curlee::source::Span s{.start = 0, .end = 1};
 
@@ -1087,6 +1124,10 @@ int main()
         {
             fail("expected ensures failure diagnostic for result==true when returning false");
         }
+
+        // The verifier stores a raw pointer to the function decl. Ensure we don't keep a
+        // dangling pointer to this stack object across later tests.
+        v.current_function_ = std::nullopt;
     }
 
     {
