@@ -1,6 +1,6 @@
 curlee bundle info:
 format_version: 1
 bytecode_hash: be7a5e775165785d
-capabilities: io:stdout,net:none
+capabilities: io.stdout,net:none
 imports: stdlib.math:deadbeef
 proof: present

@@ -6,7 +6,7 @@ namespace curlee::interop
 namespace
 {
 
-constexpr std::string_view kPythonCapability = "python:ffi";
+constexpr std::string_view kPythonCapability = "python.ffi";
 
 } // namespace
 

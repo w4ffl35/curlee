@@ -21,6 +21,43 @@ static curlee::source::Span span_cover(const curlee::source::Span& a, const curl
     return curlee::source::Span{.start = a.start, .end = b.end};
 }
 
+[[gnu::noinline]] static void set_notes1(curlee::diag::Diagnostic& d, std::string_view message,
+                                         std::optional<curlee::source::Span> span)
+{
+    curlee::diag::Related note;
+    note.message = std::string(message);
+    note.span = span;
+
+    // Exercise both allocating and non-allocating growth paths in `std::vector::push_back`.
+    d.notes.clear();
+    d.notes.push_back(note);
+    d.notes.clear();
+    d.notes.reserve(1);
+    d.notes.push_back(note);
+}
+
+[[gnu::noinline]] static void set_notes2(curlee::diag::Diagnostic& d, std::string_view message1,
+                                         std::optional<curlee::source::Span> span1,
+                                         std::string_view message2,
+                                         std::optional<curlee::source::Span> span2)
+{
+    curlee::diag::Related note1;
+    note1.message = std::string(message1);
+    note1.span = span1;
+
+    curlee::diag::Related note2;
+    note2.message = std::string(message2);
+    note2.span = span2;
+
+    d.notes.clear();
+    d.notes.push_back(note1);
+    d.notes.push_back(note2);
+    d.notes.clear();
+    d.notes.reserve(2);
+    d.notes.push_back(note1);
+    d.notes.push_back(note2);
+}
+
 void assign_expr_ids(curlee::parser::Expr& expr, std::size_t& next_id);
 
 void assign_expr_ids_block(curlee::parser::Block& block, std::size_t& next_id);
@@ -150,8 +187,8 @@ class Parser
                     auto d = error_at(
                         peek(),
                         "import declarations must appear before any other top-level declarations");
-                    d.notes.push_back(curlee::diag::Related{.message = "move this import above the first declaration", .span = std::nullopt}); // GCOVR_EXCL_LINE
-                    d.notes.push_back(curlee::diag::Related{.message = "first declaration is here", .span = first_non_import_span});           // GCOVR_EXCL_LINE
+                    set_notes2(d, "move this import above the first declaration", std::nullopt,
+                               "first declaration is here", first_non_import_span);
                     diagnostics_.push_back(std::move(d));
                     // Make progress: consume `import` and then skip to the next top-level item.
                     advance();
@@ -332,12 +369,50 @@ class Parser
 
     [[nodiscard]] std::variant<TypeName, curlee::diag::Diagnostic> parse_type()
     {
+        if (match(TokenKind::KwCap))
+        {
+            const Token kw = previous();
+            if (!check(TokenKind::Identifier))
+            {
+                return error_at(peek(), "expected capability name after 'cap'");
+            }
+
+            const Token first = advance();
+            Token last = first;
+
+            // Qualified capability name: cap io.stdout
+            while (match(TokenKind::Dot))
+            {
+                const Token dot = previous();
+                if (!check(TokenKind::Identifier))
+                {
+                    return error_at(peek(), "expected identifier after '.' in capability name");
+                }
+                const Token seg = advance();
+
+                // Require adjacency so the underlying source slice is a stable identifier.
+                if (dot.span.start != last.span.end || seg.span.start != dot.span.end)
+                {
+                    return error_at(dot, "whitespace is not allowed in qualified capability names");
+                }
+
+                last = seg;
+            }
+
+            const std::size_t len = last.span.end - first.span.start;
+            const std::string_view name{first.lexeme.data(), len};
+            return TypeName{.span =
+                                curlee::source::Span{.start = kw.span.start, .end = last.span.end},
+                            .is_capability = true,
+                            .name = name};
+        }
+
         if (!check(TokenKind::Identifier))
         {
             return error_at(peek(), "expected type name");
         }
         const Token t = advance();
-        return TypeName{.span = t.span, .name = t.lexeme};
+        return TypeName{.span = t.span, .is_capability = false, .name = t.lexeme};
     }
 
     [[nodiscard]] std::variant<ImportDecl, curlee::diag::Diagnostic> parse_import()
@@ -426,7 +501,7 @@ class Parser
             if (auto it = seen.find(field_name.lexeme); it != seen.end())
             {
                 auto d = error_at(field_name, "duplicate field name in struct declaration");
-                d.notes.push_back(curlee::diag::Related{.message = "previous field declaration is here", .span = it->second}); // GCOVR_EXCL_LINE
+                set_notes1(d, "previous field declaration is here", it->second);
                 return d;
             }
             seen.emplace(field_name.lexeme, field_name.span);
@@ -503,7 +578,7 @@ class Parser
             if (auto it = seen.find(variant_name.lexeme); it != seen.end())
             {
                 auto d = error_at(variant_name, "duplicate variant name in enum declaration");
-                d.notes.push_back(curlee::diag::Related{.message = "previous variant declaration is here", .span = it->second}); // GCOVR_EXCL_LINE
+                set_notes1(d, "previous variant declaration is here", it->second);
                 return d;
             }
             seen.emplace(variant_name.lexeme, variant_name.span);
@@ -1568,7 +1643,7 @@ class Parser
             if (auto it = seen.find(field_name.lexeme); it != seen.end())
             {
                 auto d = error_at(field_name, "duplicate field in struct literal");
-                d.notes.push_back(curlee::diag::Related{.message = "previous field initializer is here", .span = it->second}); // GCOVR_EXCL_LINE
+                set_notes1(d, "previous field initializer is here", it->second);
                 return d;
             }
             seen.emplace(field_name.lexeme, field_name.span);
@@ -1780,12 +1855,24 @@ class Dumper
   private:
     std::ostringstream& out_;
 
+    void dump_type(const TypeName& t)
+    {
+        if (t.is_capability)
+        {
+            out_ << "cap " << t.name;
+            return;
+        }
+        out_ << t.name;
+    }
+
     void dump_struct_decl(const StructDecl& s)
     {
         out_ << "struct " << s.name << " {";
         for (const auto& f : s.fields)
         {
-            out_ << " " << f.name << ": " << f.type.name << ";";
+            out_ << " " << f.name << ": ";
+            dump_type(f.type);
+            out_ << ";";
         }
         out_ << " }\n";
     }
@@ -1798,7 +1885,9 @@ class Dumper
             out_ << " " << v.name;
             if (v.payload.has_value())
             {
-                out_ << "(" << v.payload->name << ")";
+                out_ << "(";
+                dump_type(*v.payload);
+                out_ << ")";
             }
             out_ << ";";
         }
@@ -1811,7 +1900,8 @@ class Dumper
         for (std::size_t i = 0; i < f.params.size(); ++i)
         {
             const auto& p = f.params[i];
-            out_ << p.name << ": " << p.type.name;
+            out_ << p.name << ": ";
+            dump_type(p.type);
             if (p.refinement.has_value())
             {
                 out_ << " where ";
@@ -1825,7 +1915,8 @@ class Dumper
         out_ << ")";
         if (f.return_type.has_value())
         {
-            out_ << " -> " << f.return_type->name;
+            out_ << " -> ";
+            dump_type(*f.return_type);
         }
 
         if (!f.requires_clauses.empty() || !f.ensures.empty())
@@ -1867,7 +1958,8 @@ class Dumper
 
     void dump_stmt_node(const LetStmt& s)
     {
-        out_ << "let " << s.name << ": " << s.type.name;
+        out_ << "let " << s.name << ": ";
+        dump_type(s.type);
         if (s.refinement.has_value())
         {
             out_ << " where ";

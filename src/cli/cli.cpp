@@ -151,9 +151,13 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
     std::vector<parser::Program> imported_programs;
     std::unordered_map<std::string, std::size_t> imported_by_path;
 
+    std::optional<types::TypeInfo> last_type_info;
+
     auto run_checks = [&](parser::Program& program) -> bool
     {
         namespace fs = std::filesystem;
+
+        last_type_info.reset();
 
         constexpr int kMaxImportDepth = 64;
 
@@ -530,6 +534,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         }
 
         const auto& type_info = std::get<types::TypeInfo>(typed);
+        last_type_info = type_info;
         const auto verified = verification::verify(program, type_info);
         if (std::holds_alternative<std::vector<diag::Diagnostic>>(verified))
         {
@@ -601,6 +606,24 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         if (!run_checks(program))
         {
             return kExitError;
+        }
+
+        for (const auto& req : last_type_info.value().required_capabilities)
+        {
+            const std::string req_name(req.name);
+            if (!granted_caps.contains(req_name))
+            {
+                diag::Diagnostic d;
+                d.severity = diag::Severity::Error;
+                d.message = "capability not granted: " + req_name;
+                d.span = req.span;
+                diag::Related note;
+                note.message = "grant it with: curlee run --cap " + req_name + " <file.curlee>";
+                note.span = std::nullopt;
+                d.notes.push_back(note);
+                std::cerr << diag::render(d, file);
+                return kExitError;
+            }
         }
 
         const auto emitted = compiler::emit_bytecode(program);

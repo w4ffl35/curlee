@@ -586,7 +586,7 @@ int main()
 
     {
         // python_ffi.call(...) should not be treated as a verifier-checked call.
-        const std::string source = "fn main() -> Int {\n"
+        const std::string source = "fn main(p: cap python.ffi) -> Int {\n"
                                    "  unsafe { python_ffi.call(); }\n"
                                    "  return 0;\n"
                                    "}\n";

@@ -20,6 +20,7 @@ enum class TypeKind
     Bool,
     String,
     Unit,
+    Capability,
     Struct,
     Enum,
 };
@@ -43,7 +44,7 @@ struct Type
     {
         return false;
     }
-    if (a.kind == TypeKind::Struct || a.kind == TypeKind::Enum)
+    if (a.kind == TypeKind::Capability || a.kind == TypeKind::Struct || a.kind == TypeKind::Enum)
     {
         return a.name == b.name;
     }
@@ -87,6 +88,8 @@ struct CapabilityType
         return "String";
     case TypeKind::Unit:
         return "Unit";
+    case TypeKind::Capability:
+        return "cap";
     case TypeKind::Struct:
         return "Struct";
     case TypeKind::Enum:
@@ -97,7 +100,7 @@ struct CapabilityType
 
 [[nodiscard]] constexpr std::string_view to_string(Type t)
 {
-    if (t.kind == TypeKind::Struct || t.kind == TypeKind::Enum)
+    if (t.kind == TypeKind::Capability || t.kind == TypeKind::Struct || t.kind == TypeKind::Enum)
     {
         return t.name;
     }

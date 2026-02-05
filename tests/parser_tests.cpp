@@ -93,6 +93,76 @@ fn main() -> Unit {
         expect_parse_error_contains(src, "duplicate field in struct literal");
     }
 
+    // Capability types: parse_type success (qualified + unqualified) + dump formatting.
+    {
+        const std::string src = R"(fn main(p0: cap io.stdout, p1: cap foo) -> Unit { return; })";
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on capability-type program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on capability-type program");
+        }
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("cap io.stdout") == std::string::npos)
+        {
+            fail("dump missing cap io.stdout type");
+        }
+        if (dumped.find("cap foo") == std::string::npos)
+        {
+            fail("dump missing cap foo type");
+        }
+    }
+
+    // Capability types: missing capability name after 'cap'.
+    {
+        const std::string src = R"(fn main(p: cap) -> Unit { return; })";
+        expect_parse_error_contains(src, "expected capability name after 'cap'");
+    }
+
+    // Capability types: missing identifier after '.' in qualified name.
+    {
+        const std::string src = R"(fn main(p: cap io.) -> Unit { return; })";
+        expect_parse_error_contains(src, "expected identifier after '.' in capability name");
+    }
+
+    // Capability types: whitespace not allowed in qualified capability names.
+    {
+        const std::string src = R"(fn main(p: cap io .stdout) -> Unit { return; })";
+        expect_parse_error_contains(src, "whitespace is not allowed in qualified capability names");
+    }
+
+    {
+        const std::string src = R"(fn main(p: cap io. stdout) -> Unit { return; })";
+        expect_parse_error_contains(src, "whitespace is not allowed in qualified capability names");
+    }
+
+    // Struct literal: allow trailing comma.
+    {
+        const std::string src = R"(struct Point { x: Int; y: Int; }
+fn main() -> Unit {
+  let p: Point = Point { x: 1, y: 2, };
+  return;
+}
+)";
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on trailing-comma struct literal program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on trailing-comma struct literal program");
+        }
+    }
+
     {
         const std::string src = R"(fn main() -> Unit {
     let x: Int = 1 + 2;

@@ -821,9 +821,9 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         }
         case OpCode::Print:
         {
-            if (!capabilities.contains("io:stdout"))
+            if (!capabilities.contains("io.stdout"))
             {
-                return err_result("missing capability io:stdout", span);
+                return err_result("missing capability io.stdout", span);
             }
             auto value = pop();
             if (!value.has_value())
@@ -836,7 +836,7 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         }
         case OpCode::PythonCall:
         {
-            if (!capabilities.contains("python:ffi"))
+            if (!capabilities.contains("python.ffi"))
             {
                 return err_result("python capability required", span);
             }
@@ -845,7 +845,7 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             const std::string request =
                 "{\"protocol_version\":1,\"id\":\"vm\",\"op\":\"handshake\"}\n";
 
-            const bool use_sandbox = capabilities.contains("python:sandbox");
+            const bool use_sandbox = capabilities.contains("python.sandbox");
             ProcResult proc;
             if (use_sandbox)
             {

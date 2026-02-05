@@ -347,11 +347,11 @@ int main()
         }
 
         curlee::vm::VM::Capabilities caps;
-        caps.insert("io:stdout");
+        caps.insert("io.stdout");
         const auto res = run_chunk_with_caps(chunk, caps);
         if (!res.ok || !(res.value == curlee::vm::Value::int_v(0)))
         {
-            fail("expected print(...) program to run with io:stdout capability");
+            fail("expected print(...) program to run with io.stdout capability");
         }
     }
 
@@ -690,7 +690,7 @@ int main()
         }
     }
 
-    // main cannot take parameters in runnable code.
+    // main cannot take non-capability parameters in runnable code.
     {
         const std::string source = "fn main(x: Int) -> Int { return x; }";
 
@@ -715,9 +715,35 @@ int main()
         }
         const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
         if (diags.empty() ||
-            diags[0].message.find("main cannot take parameters") == std::string::npos)
+            diags[0].message.find("main parameters are only supported") == std::string::npos)
         {
             fail("expected main params diagnostic");
+        }
+    }
+
+    // main may take capability parameters in runnable code.
+    {
+        const std::string source = "fn helper(c: cap io.stdout) -> Unit { print(1); return; }"
+                                   "fn main(c: cap io.stdout) -> Unit { helper(c); return; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for main cap params case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for main cap params case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<curlee::vm::Chunk>(emitted))
+        {
+            fail("expected emission to succeed for main cap params case");
         }
     }
 
