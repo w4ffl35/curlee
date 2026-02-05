@@ -11,6 +11,7 @@
 #include <curlee/source/source_file.h>
 #include <curlee/types/type_check.h>
 #include <curlee/verification/checker.h>
+#include <curlee/vm/chunk_codec.h>
 #include <curlee/vm/value.h>
 #include <curlee/vm/vm.h>
 #include <filesystem>
@@ -123,8 +124,7 @@ std::string join_import_pins(const std::vector<curlee::bundle::ImportPin>& pins)
 } // GCOVR_EXCL_LINE
 
 int cmd_read_only(std::string_view cmd, const std::string& path,
-                  const curlee::runtime::Capabilities& granted_caps,
-                  const curlee::bundle::Manifest* bundle_manifest, std::size_t fuel)
+                  const curlee::runtime::Capabilities& granted_caps, std::size_t fuel)
 {
     auto loaded = source::load_source_file(path);
     if (auto* err = std::get_if<source::LoadError>(&loaded))
@@ -202,18 +202,10 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             }
 
             std::vector<fs::path> roots;
-            if (bundle_manifest != nullptr)
+            roots.push_back(fs::path(importing_file.path).parent_path());
+            if (entry_dir != roots.front())
             {
-                // Bundle mode: no dynamic filesystem resolution. Resolve from a single, fixed root.
                 roots.push_back(entry_dir);
-            }
-            else
-            {
-                roots.push_back(fs::path(importing_file.path).parent_path());
-                if (entry_dir != roots.front())
-                {
-                    roots.push_back(entry_dir);
-                }
             }
 
             std::string last_err = "failed to open file";
@@ -243,50 +235,6 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                 }
 
                 auto dep_file = std::get<source::SourceFile>(loaded);
-
-                if (bundle_manifest != nullptr)
-                {
-                    std::vector<std::uint8_t> bytes;
-                    bytes.reserve(dep_file.contents.size());
-                    for (const char c : dep_file.contents)
-                    {
-                        bytes.push_back(static_cast<std::uint8_t>(c));
-                    }
-                    const std::string actual_hash = curlee::bundle::hash_bytes(bytes);
-
-                    const auto it = std::find_if(bundle_manifest->imports.begin(),
-                                                 bundle_manifest->imports.end(),
-                                                 [&](const curlee::bundle::ImportPin& pin)
-                                                 { return pin.path == import_name; });
-
-                    if (it == bundle_manifest->imports.end())
-                    {
-                        diag::Diagnostic d;
-                        d.severity = diag::Severity::Error;
-                        d.message = "import not pinned: '" + import_name + "'";
-                        d.span = imp.span;
-                        const diag::Related note{.message = "expected pin '" + import_name + ":" +
-                                                            actual_hash + "'",
-                                                 .span = std::nullopt};
-                        d.notes.push_back(note); // GCOVR_EXCL_LINE
-                        return d;
-                    }
-
-                    if (it->hash != actual_hash)
-                    {
-                        diag::Diagnostic d;
-                        d.severity = diag::Severity::Error;
-                        d.message = "import pin hash mismatch: '" + import_name + "'";
-                        d.span = imp.span;
-                        const diag::Related expected_note{.message = "expected hash " + it->hash,
-                                                          .span = std::nullopt};
-                        d.notes.push_back(expected_note); // GCOVR_EXCL_LINE
-                        const diag::Related actual_note{.message = "actual hash " + actual_hash,
-                                                        .span = std::nullopt};
-                        d.notes.push_back(actual_note); // GCOVR_EXCL_LINE
-                        return d;
-                    }
-                }
 
                 ImportLoadResult ok;
                 ok.file = std::move(dep_file);
@@ -668,39 +616,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
 
         const auto& chunk = std::get<vm::Chunk>(emitted);
         vm::VM machine;
-
-        curlee::runtime::Capabilities effective_caps = granted_caps;
-        if (bundle_manifest != nullptr)
-        {
-            effective_caps.clear();
-            for (const auto& cap : bundle_manifest->capabilities)
-            {
-                if (!granted_caps.contains(cap))
-                {
-                    diag::Diagnostic d;
-                    d.severity = diag::Severity::Error;
-                    d.message = "missing capability required by bundle: " + cap;
-                    d.span = curlee::source::Span{.start = 0, .end = 0};
-                    const diag::Related required_note{
-                        .message = "bundle manifest requires capability '" + cap + "'",
-                        .span = std::nullopt,
-                    };
-                    d.notes.push_back(required_note); // GCOVR_EXCL_LINE
-
-                    const diag::Related grant_note{
-                        .message = "grant it with: curlee run --cap " + cap +
-                                   " --bundle <file.bundle> <file.curlee>",
-                        .span = std::nullopt,
-                    };
-                    d.notes.push_back(grant_note); // GCOVR_EXCL_LINE
-                    std::cerr << diag::render(d, file);
-                    return kExitError;
-                }
-                effective_caps.insert(cap);
-            }
-        }
-
-        const auto result = machine.run(chunk, fuel, effective_caps);
+        const auto result = machine.run(chunk, fuel, granted_caps);
         if (!result.ok)
         {
             diag::Diagnostic d;
@@ -717,6 +633,86 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
 
     std::cerr << "error: unknown command: " << cmd << "\n";
     return kExitUsage;
+}
+
+int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entry_path,
+                   const curlee::runtime::Capabilities& granted_caps, std::size_t fuel)
+{
+    auto loaded = source::load_source_file(entry_path);
+    if (auto* err = std::get_if<source::LoadError>(&loaded))
+    {
+        source::SourceFile pseudo_file{};
+        pseudo_file.path = entry_path;
+        pseudo_file.contents = "";
+        const diag::Diagnostic diag{
+            .severity = diag::Severity::Error,
+            .message = err->message,
+            .span = std::nullopt,
+            .notes = {},
+        };
+
+        std::cerr << diag::render(diag, pseudo_file);
+        return kExitError;
+    }
+
+    const auto& file = std::get<source::SourceFile>(loaded);
+
+    curlee::runtime::Capabilities effective_caps;
+    for (const auto& cap : bundle.manifest.capabilities)
+    {
+        if (!granted_caps.contains(cap))
+        {
+            diag::Diagnostic d;
+            d.severity = diag::Severity::Error;
+            d.message = "missing capability required by bundle: " + cap;
+            d.span = curlee::source::Span{.start = 0, .end = 0};
+            const diag::Related required_note{
+                .message = "bundle manifest requires capability '" + cap + "'",
+                .span = std::nullopt,
+            };
+            d.notes.push_back(required_note);
+
+            const diag::Related grant_note{
+                .message = "grant it with: curlee run --cap " + cap +
+                           " --bundle <file.bundle> <file.curlee>",
+                .span = std::nullopt,
+            };
+            d.notes.push_back(grant_note);
+            std::cerr << diag::render(d, file);
+            return kExitError;
+        }
+        effective_caps.insert(cap);
+    }
+
+    const auto decoded = curlee::vm::decode_chunk(bundle.bytecode);
+    if (const auto* decode_err = std::get_if<curlee::vm::ChunkDecodeError>(&decoded))
+    {
+        const diag::Diagnostic d{
+            .severity = diag::Severity::Error,
+            .message = "invalid bundle bytecode: " + decode_err->message,
+            .span = std::nullopt,
+            .notes = {},
+        };
+        std::cerr << diag::render(d, file);
+        return kExitError;
+    }
+
+    const auto& chunk = std::get<curlee::vm::Chunk>(decoded);
+    vm::VM machine;
+
+    const auto result = machine.run(chunk, fuel, effective_caps);
+    if (!result.ok)
+    {
+        diag::Diagnostic d;
+        d.severity = diag::Severity::Error;
+        d.message = result.error;
+        d.span = result.error_span;
+        std::cerr << diag::render(d, file);
+        return kExitError;
+    }
+
+    std::cout << "curlee run: result " << vm::to_string(result.value) << "\n";
+    return kExitOk;
 }
 
 std::optional<std::size_t> parse_size(std::string_view s)
@@ -789,7 +785,7 @@ int run(int argc, char** argv)
     // path/to/file.curlee`.
     if (argc == 2 && !first.starts_with('-') && ends_with(first, ".curlee"))
     {
-        return cmd_read_only("run", std::string(first), empty_caps(), nullptr, kDefaultFuel);
+        return cmd_read_only("run", std::string(first), empty_caps(), kDefaultFuel);
     }
 
     const std::string_view cmd = argv[1];
@@ -1009,8 +1005,12 @@ int run(int argc, char** argv)
             bundle = std::get<curlee::bundle::Bundle>(loaded);
         }
 
-        const curlee::bundle::Manifest* manifest = bundle.has_value() ? &bundle->manifest : nullptr;
-        return cmd_read_only(cmd, *path, caps, manifest, fuel);
+        if (bundle.has_value())
+        {
+            return cmd_run_bundle(*bundle, *path, caps, fuel);
+        }
+
+        return cmd_read_only(cmd, *path, caps, fuel);
     }
 
     if (argc != 3)
@@ -1021,7 +1021,7 @@ int run(int argc, char** argv)
     }
 
     const std::string path = argv[2];
-    return cmd_read_only(cmd, path, empty_caps(), nullptr, kDefaultFuel);
+    return cmd_read_only(cmd, path, empty_caps(), kDefaultFuel);
 }
 
 } // namespace curlee::cli

@@ -167,9 +167,9 @@ ProcResult run_process_argv(const std::vector<const char*>& argv, const std::str
 
     if (pipe(in_pipe) != 0)
     {
-        result.exit_code = 127;
-        return result;
-    }
+        result.exit_code = 127; // GCOVR_EXCL_LINE
+        return result;          // GCOVR_EXCL_LINE
+    } // GCOVR_EXCL_LINE
     if (pipe(out_pipe) != 0)
     {
         close(in_pipe[0]);

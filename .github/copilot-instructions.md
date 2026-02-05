@@ -147,7 +147,28 @@ When reporting work as “done”, include the exact command(s) you ran to verif
 
 ---
 
+## Coverage Gate (strict)
+
+Curlee treats coverage as a **hard quality gate** for landing code.
+
+- When making code changes (implementation or tests), run `./scripts/coverage.sh` before claiming work is done.
+- Treat any drop below **100% line/function/branch coverage** as a blocker: keep iterating until the report is back to 100%.
+- If coverage appears “stuck” due to tooling artifacts, prefer fixing the root cause (missing tests / stale build notes). Only use targeted exclusions when the uncovered line is truly non-executable (e.g., brace-only lines) and the exclusion is narrowly scoped.
+
+---
+
 ## Repo-Specific Expectations
+
+### C++23 generation guidelines
+
+When writing or refactoring C++ in this repo, use the shared guide as the default set of idioms and anti-patterns:
+
+- Reference: `C++23 Best Practices for LLM Agents.md`
+- Prefer value semantics, explicit ownership, and non-owning views.
+- Prefer `std::expected`-style error returns for domain failures over exceptions and out-params.
+- Prefer ranges pipelines over manual loops when it improves clarity.
+- Prefer `std::mdspan` for multidimensional views over `std::vector<std::vector<T>>`.
+- Use “deducing this” patterns to avoid duplicated cv/ref-qualified overloads when appropriate.
 
 - Prefer golden tests for diagnostics and verification failures.
 - Keep syntax unambiguous (no indentation-significant parsing).

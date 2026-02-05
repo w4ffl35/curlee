@@ -208,6 +208,40 @@ std::string join_pairs(const std::vector<ImportPin>& imports)
     return out;
 } // GCOVR_EXCL_LINE
 
+std::string join_csv(const std::vector<std::string>& xs)
+{
+    std::string out;
+    for (std::size_t i = 0; i < xs.size(); ++i)
+    {
+        if (i > 0)
+        {
+            out.push_back(',');
+        }
+        out.append(xs[i]);
+    }
+    return out;
+} // GCOVR_EXCL_LINE
+
+std::string compute_manifest_hash(const Manifest& manifest)
+{
+    // Stable, ordered serialization of manifest fields (excluding the manifest hash itself).
+    // This is integrity, not cryptographic signing.
+    const std::string proof = manifest.proof.value_or("");
+    const std::string material =
+        std::string("format_version=") + std::to_string(manifest.format_version) + "\n" +
+        "bytecode_hash=" + manifest.bytecode_hash + "\n" +
+        "capabilities=" + join_csv(manifest.capabilities) + "\n" +
+        "imports=" + join_pairs(manifest.imports) + "\n" + "proof=" + proof + "\n";
+
+    std::vector<std::uint8_t> bytes;
+    bytes.reserve(material.size());
+    for (const char c : material)
+    {
+        bytes.push_back(static_cast<std::uint8_t>(c));
+    }
+    return hash_bytes(bytes);
+}
+
 } // namespace
 
 std::string hash_bytes(const std::vector<std::uint8_t>& bytes)
@@ -232,10 +266,12 @@ BundleError write_bundle(const std::string& path, const Bundle& bundle)
     Bundle bundle_copy = bundle;
     bundle_copy.manifest.format_version = kBundleFormatVersion;
     bundle_copy.manifest.bytecode_hash = hash_bytes(bundle.bytecode);
+    const std::string manifest_hash = compute_manifest_hash(bundle_copy.manifest);
 
     out << kHeader << "\n";
     out << "format_version=" << bundle_copy.manifest.format_version << "\n";
     out << "bytecode_hash=" << bundle_copy.manifest.bytecode_hash << "\n";
+    out << "manifest_hash=" << manifest_hash << "\n";
     out << "capabilities=";
     for (std::size_t i = 0; i < bundle_copy.manifest.capabilities.size(); ++i)
     {
@@ -276,6 +312,7 @@ BundleResult read_bundle(const std::string& path)
     Manifest manifest;
     bool saw_format_version = false;
     std::string bytecode_b64;
+    std::string manifest_hash;
 
     if (legacy_v1_header)
     {
@@ -310,6 +347,10 @@ BundleResult read_bundle(const std::string& path)
         else if (key == "bytecode_hash")
         {
             manifest.bytecode_hash = value;
+        }
+        else if (key == "manifest_hash")
+        {
+            manifest_hash = value;
         }
         else if (key == "capabilities")
         {
@@ -377,6 +418,16 @@ BundleResult read_bundle(const std::string& path)
     if (actual_hash != manifest.bytecode_hash)
     {
         return BundleError{"bytecode hash mismatch"};
+    }
+
+    // Optional manifest integrity check (bundles produced by current tooling include it).
+    if (!manifest_hash.empty())
+    {
+        const std::string expected = compute_manifest_hash(manifest);
+        if (expected != manifest_hash)
+        {
+            return BundleError{"manifest hash mismatch"};
+        }
     }
 
     return Bundle{.manifest = std::move(manifest), .bytecode = std::move(*decoded)};
