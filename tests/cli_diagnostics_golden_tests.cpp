@@ -559,6 +559,92 @@ static bool run_check_unknown_name_case(const fs::path& golden_path)
     return true;
 }
 
+static bool run_check_import_missing_case(const fs::path& golden_path)
+{
+    std::ostringstream captured_out;
+    std::ostringstream captured_err;
+
+    auto* old_cout = std::cout.rdbuf(captured_out.rdbuf());
+    auto* old_cerr = std::cerr.rdbuf(captured_err.rdbuf());
+
+    const std::string rel_path = "tests/fixtures/import_missing/entry.curlee";
+
+    std::vector<std::string> argv_storage = {"curlee", "check", rel_path};
+    std::vector<char*> argv;
+    argv.reserve(argv_storage.size());
+    for (auto& s : argv_storage)
+    {
+        argv.push_back(s.data());
+    }
+
+    const int rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
+
+    std::cout.rdbuf(old_cout);
+    std::cerr.rdbuf(old_cerr);
+
+    const std::string got = captured_err.str();
+    const std::string expected = slurp(golden_path);
+
+    if (rc == 0)
+    {
+        std::cerr << "expected non-zero exit code for check-import-missing\n";
+        return false;
+    }
+
+    if (got != expected)
+    {
+        std::cerr << "GOLDEN MISMATCH: " << golden_path.filename().string() << "\n";
+        std::cerr << "--- expected ---\n" << expected;
+        std::cerr << "--- got ---\n" << got;
+        return false;
+    }
+
+    return true;
+}
+
+static bool run_check_import_ambiguous_case(const fs::path& golden_path)
+{
+    std::ostringstream captured_out;
+    std::ostringstream captured_err;
+
+    auto* old_cout = std::cout.rdbuf(captured_out.rdbuf());
+    auto* old_cerr = std::cerr.rdbuf(captured_err.rdbuf());
+
+    const std::string rel_path = "tests/fixtures/import_ambiguous/entry.curlee";
+
+    std::vector<std::string> argv_storage = {"curlee", "check", rel_path};
+    std::vector<char*> argv;
+    argv.reserve(argv_storage.size());
+    for (auto& s : argv_storage)
+    {
+        argv.push_back(s.data());
+    }
+
+    const int rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
+
+    std::cout.rdbuf(old_cout);
+    std::cerr.rdbuf(old_cerr);
+
+    const std::string got = captured_err.str();
+    const std::string expected = slurp(golden_path);
+
+    if (rc == 0)
+    {
+        std::cerr << "expected non-zero exit code for check-import-ambiguous\n";
+        return false;
+    }
+
+    if (got != expected)
+    {
+        std::cerr << "GOLDEN MISMATCH: " << golden_path.filename().string() << "\n";
+        std::cerr << "--- expected ---\n" << expected;
+        std::cerr << "--- got ---\n" << got;
+        return false;
+    }
+
+    return true;
+}
+
 static bool run_check_type_error_case(const fs::path& golden_path)
 {
     std::ostringstream captured_out;
@@ -817,6 +903,8 @@ int main(int argc, char** argv)
     const fs::path check_requires_while_condition_fact_golden =
         dir / "check_requires_while_condition_fact.golden";
     const fs::path check_unknown_name_golden = dir / "check_unknown_name.golden";
+    const fs::path check_import_missing_golden = dir / "check_import_missing.golden";
+    const fs::path check_import_ambiguous_golden = dir / "check_import_ambiguous.golden";
     const fs::path check_type_error_golden = dir / "check_type_error.golden";
     const fs::path check_if_condition_type_error_golden =
         dir / "check_if_condition_type_error.golden";
@@ -898,6 +986,16 @@ int main(int argc, char** argv)
         }
 
         if (!run_check_unknown_name_case(check_unknown_name_golden))
+        {
+            return 1;
+        }
+
+        if (!run_check_import_missing_case(check_import_missing_golden))
+        {
+            return 1;
+        }
+
+        if (!run_check_import_ambiguous_case(check_import_ambiguous_golden))
         {
             return 1;
         }

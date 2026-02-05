@@ -213,6 +213,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             }
 
             std::string last_err = "failed to open file";
+            std::vector<ImportLoadResult> matches;
             for (const auto& root : roots)
             {
                 fs::path module_path = root;
@@ -244,11 +245,38 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                 ok.file = std::move(dep_file);
                 ok.path = module_path;
                 ok.key = normalize_path(module_path.string());
+                matches.push_back(std::move(ok));
+            }
+
+            if (matches.size() == 1)
+            {
                 if (std::getenv("CURLEE_DEBUG_IMPORTS") != nullptr)
                 {
-                    std::cerr << "[import] ok: " << ok.path.string() << "\n";
+                    std::cerr << "[import] ok: " << matches[0].path.string() << "\n";
                 }
-                return ok;
+                return std::move(matches[0]);
+            }
+
+            if (matches.size() > 1)
+            {
+                diag::Diagnostic d;
+                d.severity = diag::Severity::Error;
+                d.message = "ambiguous import: '" + import_name + "'";
+                d.span = imp.span;
+
+                for (const auto& m : matches)
+                {
+                    diag::Related note;
+                    note.message = "found module at " + m.path.string();
+                    note.span = std::nullopt;
+                    d.notes.push_back(std::move(note));
+                }
+
+                diag::Related hint;
+                hint.message = "remove/rename one of the modules so the import is unambiguous";
+                hint.span = std::nullopt;
+                d.notes.push_back(std::move(hint));
+                return d;
             }
 
             diag::Diagnostic d;
