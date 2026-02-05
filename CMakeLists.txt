@@ -107,6 +107,7 @@ add_executable(curlee
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
+  src/vm/chunk_codec.cpp
 )
 
 target_include_directories(curlee PRIVATE include)
@@ -197,6 +198,14 @@ target_include_directories(curlee_header_smoke_tests PRIVATE include)
 
 add_test(NAME curlee_header_smoke_tests COMMAND curlee_header_smoke_tests)
 
+add_executable(curlee_chunk_codec_tests
+  tests/chunk_codec_tests.cpp
+  src/vm/chunk_codec.cpp
+)
+target_include_directories(curlee_chunk_codec_tests PRIVATE include)
+
+add_test(NAME curlee_chunk_codec_tests COMMAND curlee_chunk_codec_tests)
+
 add_executable(curlee_cli_diagnostics_golden_tests
   tests/cli_diagnostics_golden_tests.cpp
   src/bundle/bundle.cpp
@@ -213,6 +222,7 @@ add_executable(curlee_cli_diagnostics_golden_tests
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
+  src/vm/chunk_codec.cpp
 )
 target_include_directories(curlee_cli_diagnostics_golden_tests PRIVATE include)
 target_link_libraries(curlee_cli_diagnostics_golden_tests PRIVATE Z3::Z3)
@@ -442,6 +452,7 @@ add_executable(curlee_cli_fmt_tests
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
+  src/vm/chunk_codec.cpp
 )
 target_include_directories(curlee_cli_fmt_tests PRIVATE include)
 target_link_libraries(curlee_cli_fmt_tests PRIVATE Z3::Z3)
@@ -465,6 +476,7 @@ add_executable(curlee_cli_bundle_tests
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
+  src/vm/chunk_codec.cpp
 )
 target_include_directories(curlee_cli_bundle_tests PRIVATE include)
 target_link_libraries(curlee_cli_bundle_tests PRIVATE Z3::Z3)
@@ -486,6 +498,7 @@ add_executable(curlee_cli_bundle_golden_tests
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
+  src/vm/chunk_codec.cpp
 )
 target_include_directories(curlee_cli_bundle_golden_tests PRIVATE include)
 target_link_libraries(curlee_cli_bundle_golden_tests PRIVATE Z3::Z3)
@@ -507,6 +520,7 @@ add_executable(curlee_cli_version_tests
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
+  src/vm/chunk_codec.cpp
 )
 target_include_directories(curlee_cli_version_tests PRIVATE include)
 target_link_libraries(curlee_cli_version_tests PRIVATE Z3::Z3)
@@ -530,6 +544,7 @@ add_executable(curlee_cli_bad_args_tests
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
+  src/vm/chunk_codec.cpp
 )
 target_include_directories(curlee_cli_bad_args_tests PRIVATE include)
 target_link_libraries(curlee_cli_bad_args_tests PRIVATE Z3::Z3)
@@ -553,6 +568,7 @@ add_executable(curlee_cli_lex_parse_error_tests
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
+  src/vm/chunk_codec.cpp
 )
 target_include_directories(curlee_cli_lex_parse_error_tests PRIVATE include)
 target_link_libraries(curlee_cli_lex_parse_error_tests PRIVATE Z3::Z3)
@@ -576,6 +592,7 @@ add_executable(curlee_cli_check_import_error_tests
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
+  src/vm/chunk_codec.cpp
 )
 target_include_directories(curlee_cli_check_import_error_tests PRIVATE include)
 target_link_libraries(curlee_cli_check_import_error_tests PRIVATE Z3::Z3)
@@ -599,6 +616,7 @@ add_executable(curlee_cli_check_import_cycle_tests
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
+  src/vm/chunk_codec.cpp
 )
 target_include_directories(curlee_cli_check_import_cycle_tests PRIVATE include)
 target_link_libraries(curlee_cli_check_import_cycle_tests PRIVATE Z3::Z3)
@@ -622,6 +640,7 @@ add_executable(curlee_cli_check_import_depth_tests
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
+  src/vm/chunk_codec.cpp
 )
 target_include_directories(curlee_cli_check_import_depth_tests PRIVATE include)
 target_link_libraries(curlee_cli_check_import_depth_tests PRIVATE Z3::Z3)
@@ -645,6 +664,7 @@ add_executable(curlee_cli_check_imported_main_tests
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
+  src/vm/chunk_codec.cpp
 )
 target_include_directories(curlee_cli_check_imported_main_tests PRIVATE include)
 target_link_libraries(curlee_cli_check_imported_main_tests PRIVATE Z3::Z3)
@@ -668,6 +688,7 @@ add_executable(curlee_cli_check_duplicate_function_tests
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
+  src/vm/chunk_codec.cpp
 )
 target_include_directories(curlee_cli_check_duplicate_function_tests PRIVATE include)
 target_link_libraries(curlee_cli_check_duplicate_function_tests PRIVATE Z3::Z3)
@@ -691,6 +712,7 @@ add_executable(curlee_cli_check_import_order_tests
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
+  src/vm/chunk_codec.cpp
 )
 target_include_directories(curlee_cli_check_import_order_tests PRIVATE include)
 target_link_libraries(curlee_cli_check_import_order_tests PRIVATE Z3::Z3)
@@ -714,6 +736,7 @@ add_executable(curlee_cli_check_import_path_tests
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
+  src/vm/chunk_codec.cpp
 )
 target_include_directories(curlee_cli_check_import_path_tests PRIVATE include)
 target_link_libraries(curlee_cli_check_import_path_tests PRIVATE Z3::Z3)
@@ -745,6 +768,7 @@ add_executable(curlee_cli_fuel_tests
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
+  src/vm/chunk_codec.cpp
 )
 target_include_directories(curlee_cli_fuel_tests PRIVATE include)
 target_link_libraries(curlee_cli_fuel_tests PRIVATE Z3::Z3)

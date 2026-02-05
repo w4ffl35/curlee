@@ -1,9 +1,11 @@
 #include <curlee/bundle/bundle.h>
 #include <curlee/cli/cli.h>
+#include <curlee/vm/chunk_codec.h>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -44,6 +46,39 @@ static std::filesystem::path temp_path(const std::string& name)
     return std::filesystem::temp_directory_path() / name;
 }
 
+static std::string slurp(const std::filesystem::path& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in)
+    {
+        throw std::runtime_error("failed to open file: " + path.string());
+    }
+
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    return buffer.str();
+}
+
+static void write_all(const std::filesystem::path& path, const std::string& contents)
+{
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out)
+    {
+        throw std::runtime_error("failed to open file for writing: " + path.string());
+    }
+    out << contents;
+}
+
+static curlee::vm::Chunk make_return_int_chunk(std::int64_t v)
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    const curlee::source::Span span{.start = 0, .end = 0};
+    chunk.emit_constant(Value::int_v(v), span);
+    chunk.emit(OpCode::Return, span);
+    return chunk;
+}
+
 int main()
 {
     namespace fs = std::filesystem;
@@ -65,7 +100,7 @@ int main()
     bundle.manifest.capabilities = {"io:stdout", "net:none"};
     bundle.manifest.imports = {ImportPin{.path = "stdlib.math", .hash = "deadbeef"}};
     bundle.manifest.proof = "proof-v1";
-    bundle.bytecode = {0x01, 0x02, 0x03, 0x04};
+    bundle.bytecode = curlee::vm::encode_chunk(make_return_int_chunk(0));
 
     const auto write_err = write_bundle(ok_path.string(), bundle);
     if (!write_err.message.empty())
@@ -142,7 +177,7 @@ int main()
         bundle.manifest.imports = {ImportPin{.path = "stdlib.math", .hash = "deadbeef"},
                                    ImportPin{.path = "stdlib.io", .hash = "bead"}};
         bundle.manifest.proof = std::nullopt;
-        bundle.bytecode = {0x01, 0x02, 0x03, 0x04};
+        bundle.bytecode = curlee::vm::encode_chunk(make_return_int_chunk(0));
 
         const auto write_err = write_bundle(ok2_path.string(), bundle);
         if (!write_err.message.empty())
@@ -190,6 +225,37 @@ int main()
         if (err.find("unknown bundle subcommand: nope") == std::string::npos)
         {
             fail("expected stderr to mention unknown bundle subcommand");
+        }
+    }
+
+    // bundle verify: bundles produced by current tooling include a manifest_hash; tampering
+    // with manifest fields should fail verification.
+    {
+        std::string contents = slurp(ok_path);
+        const std::string needle = "capabilities=io:stdout,net:none\n";
+        const auto pos = contents.find(needle);
+        if (pos == std::string::npos)
+        {
+            fail("expected bundle to contain capabilities line for tamper test");
+        }
+
+        contents.replace(pos, needle.size(), "capabilities=io:stdout,net:all\n");
+        write_all(ok_path, contents);
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli({"curlee", "bundle", "verify", ok_path.string()}, out, err);
+        if (rc == 0)
+        {
+            fail("expected bundle verify to fail for tampered manifest");
+        }
+        if (err.find("manifest hash mismatch") == std::string::npos)
+        {
+            fail("expected stderr to mention manifest hash mismatch");
+        }
+        if (!out.empty())
+        {
+            fail("expected stdout to be empty on verify failure");
         }
     }
 
@@ -264,87 +330,24 @@ int main()
         }
     }
 
-    // Bundle mode: imports must be pinned (no dynamic resolution).
+    // Bundle mode: bundled bytecode is the execution source-of-truth.
     {
-        const fs::path dir = temp_path("curlee_cli_bundle_pins");
+        const fs::path dir = temp_path("curlee_cli_bundle_source_of_truth");
         fs::remove_all(dir);
         fs::create_directories(dir);
 
         const fs::path entry = dir / "main.curlee";
-        const fs::path dep = dir / "dep.curlee";
-        const fs::path bundle_path = dir / "pins.bundle";
+        const fs::path bundle_path = dir / "payload.bundle";
 
         {
             std::ofstream out(entry);
-            out << "import dep;\n";
-            out << "fn main() -> Int { return foo(); }\n";
-        }
-        {
-            std::ofstream out(dep);
-            out << "fn foo() -> Int { return 7; }\n";
-        }
-
-        Bundle bundle;
-        bundle.manifest.capabilities = {"io:stdout"};
-        bundle.manifest.imports = {}; // dep is intentionally unpinned
-        bundle.bytecode = {0x01, 0x02, 0x03, 0x04};
-
-        const auto write_err = write_bundle(bundle_path.string(), bundle);
-        if (!write_err.message.empty())
-        {
-            fail("expected bundle write to succeed");
-        }
-
-        std::string out;
-        std::string err;
-        const int rc =
-            run_cli({"curlee", "run", "--bundle", bundle_path.string(), entry.string()}, out, err);
-        if (rc == 0)
-        {
-            fail("expected run to fail for unpinned import in bundle mode");
-        }
-        if (err.find("import not pinned: 'dep'") == std::string::npos)
-        {
-            fail("expected stderr to mention unpinned import");
-        }
-        if (err.find("expected pin 'dep:") == std::string::npos)
-        {
-            fail("expected stderr to mention expected pin for dep");
-        }
-        if (!out.empty())
-        {
-            fail("expected stdout to be empty on failure");
-        }
-
-        fs::remove_all(dir);
-    }
-
-    // Bundle mode: long import names should still produce a clear "import not pinned" diagnostic.
-    {
-        const fs::path dir = temp_path("curlee_cli_bundle_pins_long");
-        fs::remove_all(dir);
-        fs::create_directories(dir);
-
-        const std::string import_name = "averyveryverylongmodule";
-
-        const fs::path entry = dir / "main.curlee";
-        const fs::path dep = dir / (import_name + ".curlee");
-        const fs::path bundle_path = dir / "pins_long.bundle";
-
-        {
-            std::ofstream out(entry);
-            out << "import " << import_name << ";\n";
             out << "fn main() -> Int { return 0; }\n";
         }
-        {
-            std::ofstream out(dep);
-            out << "fn foo() -> Int { return 7; }\n";
-        }
 
         Bundle bundle;
         bundle.manifest.capabilities = {};
-        bundle.manifest.imports = {}; // import is intentionally unpinned
-        bundle.bytecode = {0x01, 0x02, 0x03, 0x04};
+        bundle.manifest.imports = {};
+        bundle.bytecode = curlee::vm::encode_chunk(make_return_int_chunk(7));
 
         const auto write_err = write_bundle(bundle_path.string(), bundle);
         if (!write_err.message.empty())
@@ -352,264 +355,48 @@ int main()
             fail("expected bundle write to succeed");
         }
 
-        std::string out;
-        std::string err;
-        const int rc =
-            run_cli({"curlee", "run", "--bundle", bundle_path.string(), entry.string()}, out, err);
-        if (rc == 0)
         {
-            fail("expected run to fail for unpinned long import in bundle mode");
-        }
-        if (err.find("import not pinned: '" + import_name + "'") == std::string::npos)
-        {
-            fail("expected stderr to mention unpinned import");
-        }
-        if (err.find("expected pin '") == std::string::npos)
-        {
-            fail("expected stderr to mention expected pin");
-        }
-        if (!out.empty())
-        {
-            fail("expected stdout to be empty on failure");
+            std::string out;
+            std::string err;
+            const int rc = run_cli(
+                {"curlee", "run", "--bundle", bundle_path.string(), entry.string()}, out, err);
+            if (rc != 0)
+            {
+                fail("expected run to succeed for bundled payload; stderr: " + err);
+            }
+            if (out.find("curlee run: result 7") == std::string::npos)
+            {
+                fail("expected run stdout to include result 7");
+            }
+            if (!err.empty())
+            {
+                fail("expected run stderr to be empty on success");
+            }
         }
 
-        fs::remove_all(dir);
-    }
-
-    // Bundle mode: pinned imports must match their content hash.
-    {
-        const fs::path dir = temp_path("curlee_cli_bundle_pin_mismatch");
-        fs::remove_all(dir);
-        fs::create_directories(dir);
-
-        const fs::path entry = dir / "main.curlee";
-        const fs::path dep = dir / "dep.curlee";
-        const fs::path bundle_path = dir / "pin_mismatch.bundle";
-
+        // Mutate source after bundle creation: must not affect bundle execution.
         {
             std::ofstream out(entry);
-            out << "import dep;\n";
-            out << "fn main() -> Int { return foo(); }\n";
-        }
-        {
-            std::ofstream out(dep);
-            out << "fn foo() -> Int { return 7; }\n";
+            out << "fn main() -> Int { return 999; }\n";
         }
 
-        Bundle bundle;
-        bundle.manifest.capabilities = {"io:stdout"};
-        bundle.manifest.imports = {ImportPin{.path = "dep", .hash = "deadbeef"}};
-        bundle.bytecode = {0x01, 0x02, 0x03, 0x04};
-
-        const auto write_err = write_bundle(bundle_path.string(), bundle);
-        if (!write_err.message.empty())
         {
-            fail("expected bundle write to succeed");
-        }
-
-        std::string out;
-        std::string err;
-        const int rc =
-            run_cli({"curlee", "run", "--bundle", bundle_path.string(), entry.string()}, out, err);
-        if (rc == 0)
-        {
-            fail("expected run to fail for pinned import hash mismatch");
-        }
-        if (err.find("import pin hash mismatch: 'dep'") == std::string::npos)
-        {
-            fail("expected stderr to mention import pin hash mismatch");
-        }
-        if (err.find("expected hash deadbeef") == std::string::npos)
-        {
-            fail("expected stderr to mention expected hash");
-        }
-        if (err.find("actual hash ") == std::string::npos)
-        {
-            fail("expected stderr to mention actual hash");
-        }
-        if (!out.empty())
-        {
-            fail("expected stdout to be empty on failure");
-        }
-
-        fs::remove_all(dir);
-    }
-
-    // Bundle mode: pinned imports must match their content hash (long expected hash variant).
-    {
-        const fs::path dir = temp_path("curlee_cli_bundle_pin_mismatch_long");
-        fs::remove_all(dir);
-        fs::create_directories(dir);
-
-        const fs::path entry = dir / "main.curlee";
-        const fs::path dep = dir / "dep.curlee";
-        const fs::path bundle_path = dir / "pin_mismatch_long.bundle";
-
-        {
-            std::ofstream out(entry);
-            out << "import dep;\n";
-            out << "fn main() -> Int { return foo(); }\n";
-        }
-        {
-            std::ofstream out(dep);
-            out << "fn foo() -> Int { return 7; }\n";
-        }
-
-        const std::string long_hash(80, 'a');
-
-        Bundle bundle;
-        bundle.manifest.capabilities = {};
-        bundle.manifest.imports = {ImportPin{.path = "dep", .hash = long_hash}};
-        bundle.bytecode = {0x01, 0x02, 0x03, 0x04};
-
-        const auto write_err = write_bundle(bundle_path.string(), bundle);
-        if (!write_err.message.empty())
-        {
-            fail("expected bundle write to succeed");
-        }
-
-        std::string out;
-        std::string err;
-        const int rc =
-            run_cli({"curlee", "run", "--bundle", bundle_path.string(), entry.string()}, out, err);
-        if (rc == 0)
-        {
-            fail("expected run to fail for pinned import hash mismatch (long expected hash)");
-        }
-        if (err.find("import pin hash mismatch: 'dep'") == std::string::npos)
-        {
-            fail("expected stderr to mention import pin hash mismatch");
-        }
-        if (err.find("expected hash ") == std::string::npos)
-        {
-            fail("expected stderr to mention expected hash");
-        }
-        if (err.find("actual hash ") == std::string::npos)
-        {
-            fail("expected stderr to mention actual hash");
-        }
-
-        fs::remove_all(dir);
-    }
-
-    // Bundle mode: pinned imports that match are accepted.
-    {
-        const fs::path dir = temp_path("curlee_cli_bundle_pin_match");
-        fs::remove_all(dir);
-        fs::create_directories(dir);
-
-        const fs::path entry = dir / "main.curlee";
-        const fs::path dep = dir / "dep.curlee";
-        const fs::path bundle_path = dir / "pin_match.bundle";
-
-        const std::string dep_src = "fn foo() -> Int { return 7; }\n";
-        {
-            std::ofstream out(entry);
-            out << "import dep;\n";
-            out << "fn main() -> Int { return 0; }\n";
-        }
-        {
-            std::ofstream out(dep);
-            out << dep_src;
-        }
-
-        std::vector<std::uint8_t> bytes;
-        bytes.reserve(dep_src.size());
-        for (const char c : dep_src)
-        {
-            bytes.push_back(static_cast<std::uint8_t>(c));
-        }
-        const std::string dep_hash = hash_bytes(bytes);
-
-        Bundle bundle;
-        bundle.manifest.capabilities = {};
-        bundle.manifest.imports = {ImportPin{.path = "dep", .hash = dep_hash}};
-        bundle.bytecode = {0x01, 0x02, 0x03, 0x04};
-
-        const auto write_err = write_bundle(bundle_path.string(), bundle);
-        if (!write_err.message.empty())
-        {
-            fail("expected bundle write to succeed");
-        }
-
-        std::string out;
-        std::string err;
-        const int rc =
-            run_cli({"curlee", "run", "--bundle", bundle_path.string(), entry.string()}, out, err);
-        if (rc != 0)
-        {
-            fail("expected run to succeed for pinned import hash match; stderr: " + err);
-        }
-        if (out.find("curlee run: result 0") == std::string::npos)
-        {
-            fail("expected run stdout to include result 0");
-        }
-        if (!err.empty())
-        {
-            fail("expected run stderr to be empty on success");
-        }
-
-        fs::remove_all(dir);
-    }
-
-    // Bundle mode: pinned imports that match are accepted (relative paths).
-    {
-        const fs::path dir = fs::path("curlee_cli_bundle_pin_match_rel");
-        fs::remove_all(dir);
-        fs::create_directories(dir);
-
-        const fs::path entry = dir / "main.curlee";
-        const fs::path dep = dir / "dep.curlee";
-        const fs::path bundle_path = dir / "pin_match.bundle";
-
-        const std::string dep_src = "fn foo() -> Int { return 7; }\n";
-        {
-            std::ofstream out(entry);
-            out << "import dep;\n";
-            out << "fn main() -> Int { return 0; }\n";
-        }
-        {
-            std::ofstream out(dep);
-            out << dep_src;
-        }
-
-        std::vector<std::uint8_t> bytes;
-        bytes.reserve(dep_src.size());
-        for (const char c : dep_src)
-        {
-            bytes.push_back(static_cast<std::uint8_t>(c));
-        }
-        const std::string dep_hash = hash_bytes(bytes);
-
-        Bundle bundle;
-        bundle.manifest.capabilities = {};
-        bundle.manifest.imports = {ImportPin{.path = "dep", .hash = dep_hash}};
-        bundle.bytecode = {0x01, 0x02, 0x03, 0x04};
-
-        const auto write_err = write_bundle(bundle_path.string(), bundle);
-        if (!write_err.message.empty())
-        {
-            fail("expected bundle write to succeed");
-        }
-
-        const std::string entry_arg = (fs::path(".") / entry).string();
-        const std::string bundle_arg = (fs::path(".") / bundle_path).string();
-
-        std::string out;
-        std::string err;
-        const int rc = run_cli({"curlee", "run", "--bundle", bundle_arg, entry_arg}, out, err);
-        if (rc != 0)
-        {
-            fail("expected run to succeed for pinned import hash match (relative paths); stderr: " +
-                 err);
-        }
-        if (out.find("curlee run: result 0") == std::string::npos)
-        {
-            fail("expected run stdout to include result 0");
-        }
-        if (!err.empty())
-        {
-            fail("expected run stderr to be empty on success");
+            std::string out;
+            std::string err;
+            const int rc = run_cli(
+                {"curlee", "run", "--bundle", bundle_path.string(), entry.string()}, out, err);
+            if (rc != 0)
+            {
+                fail("expected run to succeed after source mutation; stderr: " + err);
+            }
+            if (out.find("curlee run: result 7") == std::string::npos)
+            {
+                fail("expected bundle execution to remain result 7 after source mutation");
+            }
+            if (!err.empty())
+            {
+                fail("expected run stderr to be empty on success");
+            }
         }
 
         fs::remove_all(dir);
@@ -626,13 +413,13 @@ int main()
 
         {
             std::ofstream out(entry);
-            out << "fn main() -> Int { unsafe { python_ffi.call(); } return 0; }\n";
+            out << "fn main() -> Int { return 0; }\n";
         }
 
         Bundle bundle;
         bundle.manifest.capabilities = {"python:ffi"};
         bundle.manifest.imports = {};
-        bundle.bytecode = {0x01, 0x02, 0x03, 0x04};
+        bundle.bytecode = curlee::vm::encode_chunk(make_return_int_chunk(0));
 
         const auto write_err = write_bundle(bundle_path.string(), bundle);
         if (!write_err.message.empty())
@@ -656,8 +443,7 @@ int main()
             }
         }
 
-        // Allowed past the bundle check when capability is granted; VM executes the runner
-        // round-trip (currently a no-op handshake) and continues.
+        // Allowed when capability is granted.
         {
             std::string out;
             std::string err;
@@ -700,7 +486,7 @@ int main()
         Bundle bundle;
         bundle.manifest.capabilities = {cap};
         bundle.manifest.imports = {};
-        bundle.bytecode = {0x01, 0x02, 0x03, 0x04};
+        bundle.bytecode = curlee::vm::encode_chunk(make_return_int_chunk(0));
 
         const auto write_err = write_bundle(bundle_path.string(), bundle);
         if (!write_err.message.empty())
@@ -727,6 +513,132 @@ int main()
         if (err.find("grant it with:") == std::string::npos)
         {
             fail("expected stderr to include grant-it-with hint");
+        }
+
+        fs::remove_all(dir);
+    }
+
+    // Bundle mode: entry file load errors should be diagnosed.
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_missing_entry");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path entry = dir / "missing.curlee";
+        const fs::path bundle_path = dir / "ok.bundle";
+
+        Bundle bundle;
+        bundle.manifest.capabilities = {};
+        bundle.manifest.imports = {};
+        bundle.bytecode = curlee::vm::encode_chunk(make_return_int_chunk(0));
+
+        const auto write_err = write_bundle(bundle_path.string(), bundle);
+        if (!write_err.message.empty())
+        {
+            fail("expected bundle write to succeed");
+        }
+
+        std::string out;
+        std::string err;
+        const int rc =
+            run_cli({"curlee", "run", "--bundle", bundle_path.string(), entry.string()}, out, err);
+        if (rc == 0)
+        {
+            fail("expected run to fail when entry file cannot be loaded");
+        }
+        if (err.find("failed to open file") == std::string::npos)
+        {
+            fail("expected stderr to mention failed to open file");
+        }
+
+        fs::remove_all(dir);
+    }
+
+    // Bundle mode: invalid bundle bytecode should be diagnosed.
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_bad_bytecode");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path entry = dir / "main.curlee";
+        const fs::path bundle_path = dir / "bad_bytecode.bundle";
+
+        {
+            std::ofstream out(entry);
+            out << "fn main() -> Int { return 0; }\n";
+        }
+
+        Bundle bundle;
+        bundle.manifest.capabilities = {};
+        bundle.manifest.imports = {};
+        bundle.bytecode = {0x00, 0x01, 0x02};
+
+        const auto write_err = write_bundle(bundle_path.string(), bundle);
+        if (!write_err.message.empty())
+        {
+            fail("expected bundle write to succeed");
+        }
+
+        std::string out;
+        std::string err;
+        const int rc =
+            run_cli({"curlee", "run", "--bundle", bundle_path.string(), entry.string()}, out, err);
+        if (rc == 0)
+        {
+            fail("expected run to fail when bundle bytecode is invalid");
+        }
+        if (err.find("invalid bundle bytecode") == std::string::npos)
+        {
+            fail("expected stderr to mention invalid bundle bytecode");
+        }
+        if (err.find("invalid chunk header") == std::string::npos)
+        {
+            fail("expected stderr to include the decode error");
+        }
+
+        fs::remove_all(dir);
+    }
+
+    // Bundle mode: VM runtime errors should be diagnosed.
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_vm_error");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path entry = dir / "main.curlee";
+        const fs::path bundle_path = dir / "vm_error.bundle";
+
+        {
+            std::ofstream out(entry);
+            out << "fn main() -> Int { return 0; }\n";
+        }
+
+        curlee::vm::Chunk bad;
+        const curlee::source::Span span{.start = 0, .end = 0};
+        bad.emit(curlee::vm::OpCode::Jump, span);
+
+        Bundle bundle;
+        bundle.manifest.capabilities = {};
+        bundle.manifest.imports = {};
+        bundle.bytecode = curlee::vm::encode_chunk(bad);
+
+        const auto write_err = write_bundle(bundle_path.string(), bundle);
+        if (!write_err.message.empty())
+        {
+            fail("expected bundle write to succeed");
+        }
+
+        std::string out;
+        std::string err;
+        const int rc =
+            run_cli({"curlee", "run", "--bundle", bundle_path.string(), entry.string()}, out, err);
+        if (rc == 0)
+        {
+            fail("expected run to fail when bundled bytecode triggers VM error");
+        }
+        if (err.find("truncated jump target") == std::string::npos)
+        {
+            fail("expected stderr to mention truncated jump target");
         }
 
         fs::remove_all(dir);
