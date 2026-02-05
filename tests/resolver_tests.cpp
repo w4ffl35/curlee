@@ -451,6 +451,61 @@ fn m() -> Unit {
     }
 
     {
+        // Ambiguous import across roots must be rejected deterministically.
+        // Entry dir: <base>
+        // Importing file dir: <base>/sub
+        // Both <base>/shared.curlee and <base>/sub/shared.curlee exist.
+
+        namespace fs = std::filesystem;
+        const fs::path base = fs::temp_directory_path() / "curlee_resolver_tests_ambiguous_import";
+        fs::create_directories(base / "sub");
+
+        write_file(base / "shared.curlee", "fn shared() -> Unit { return 0; }");
+        write_file(base / "sub" / "shared.curlee", "fn shared() -> Unit { return 0; }");
+                const std::string src = R"(import shared;
+
+fn main() -> Unit {
+    return 0;
+})";
+
+                write_file(base / "sub" / "m.curlee", src);
+
+                const auto res = resolve_with_source(src, (base / "sub" / "m.curlee").string(), base);
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
+        {
+            fail("expected resolver error for ambiguous import");
+        }
+
+        const auto& ds = std::get<std::vector<diag::Diagnostic>>(res);
+        bool found = false;
+        std::size_t found_module_notes = 0;
+        for (const auto& d : ds)
+        {
+            if (d.message.find("ambiguous import") != std::string::npos)
+            {
+                found = true;
+                for (const auto& note : d.notes)
+                {
+                    if (note.message.find("found module at") != std::string::npos)
+                    {
+                        ++found_module_notes;
+                    }
+                }
+                break;
+            }
+        }
+
+        if (!found)
+        {
+            fail("expected ambiguous-import diagnostic");
+        }
+        if (found_module_notes < 2)
+        {
+            fail("expected at least two 'found module at' notes for ambiguous import");
+        }
+    }
+
+    {
         const std::string src = R"(import missing.mod;
 
 fn main() -> Unit {
