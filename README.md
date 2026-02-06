@@ -114,11 +114,17 @@ Curlee currently supports two useful workflows:
 
 The runnable subset is intentionally small:
 
-- Expressions: `Int` / `Bool` literals, names, `+`, grouping.
-- Statements: `let`, `return`, `if/else`, `while`.
-- Calls: simple **no-arg** calls to a named function.
+The supported fragment evolves quickly; the **wiki is the source of truth**:
 
-Out of scope (for now): strings, general unary/binary ops, function parameters, modules/import execution.
+- Supported fragment + runnable subset: https://github.com/w4ffl35/curlee/wiki/Stability-and-Supported-Fragment
+- Syntax reference: https://github.com/w4ffl35/curlee/wiki/Language-Syntax
+- Modules/imports: https://github.com/w4ffl35/curlee/wiki/Modules-and-Imports
+- Execution model (fuel, capabilities, interop): https://github.com/w4ffl35/curlee/wiki/Running-Programs
+
+At a high level:
+
+- `curlee check` supports imports (including aliasing and module-qualified calls) and function parameters, and verifies contracts within the MVP scope.
+- `curlee run` executes a conservative, deterministic subset on the VM after successful verification (see the wiki for the exact runnable subset).
 
 ---
 
