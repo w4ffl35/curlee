@@ -67,6 +67,8 @@ void print_usage(std::ostream& out)
     out << "  curlee run [--fuel <n>] [--bundle <file.bundle>] [--cap <capability>]... "
            "<file.curlee>\n";
     out << "  curlee fmt [--check] <file>\n";
+        out << "  curlee bundle build [--root <dir>] [--stdlib-root <dir>] [--cap <capability>]... "
+            "<entry.curlee> <out.bundle>\n";
     out << "  curlee bundle verify <file.bundle>\n";
     out << "  curlee bundle info <file.bundle>\n";
 }
@@ -126,7 +128,10 @@ std::string join_import_pins(const std::vector<curlee::bundle::ImportPin>& pins)
 
 int cmd_read_only(std::string_view cmd, const std::string& path,
                   const curlee::runtime::Capabilities& granted_caps, std::size_t fuel,
-                  const std::vector<std::filesystem::path>& stdlib_roots = {})
+                  const std::vector<std::filesystem::path>& stdlib_roots = {},
+                  const std::optional<std::filesystem::path>& entry_dir_override = std::nullopt,
+                  std::vector<curlee::bundle::ImportPin>* out_import_pins = nullptr,
+                  std::vector<std::uint8_t>* out_bytecode = nullptr)
 {
     auto loaded = source::load_source_file(path);
     if (auto* err = std::get_if<source::LoadError>(&loaded))
@@ -166,7 +171,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         auto normalize_path = [](const std::string& p) -> std::string
         { return fs::absolute(fs::path(p)).lexically_normal().string(); };
 
-        const fs::path entry_dir = fs::path(file.path).parent_path();
+        const fs::path entry_dir = entry_dir_override.value_or(fs::path(file.path).parent_path());
 
         imported_files.clear();
         imported_file_by_path.clear();
@@ -616,6 +621,64 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         return kExitOk;
     }
 
+    if (cmd == "bundle-build")
+    {
+        parser::Program program;
+        if (!run_checks(program))
+        {
+            return kExitError;
+        }
+
+        const auto emitted = compiler::emit_bytecode(program);
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(emitted))
+        {
+            const auto& ds = std::get<std::vector<diag::Diagnostic>>(emitted);
+            for (const auto& d : ds)
+            {
+                std::cerr << diag::render(d, file);
+            }
+            return kExitError;
+        }
+
+        if (out_import_pins == nullptr || out_bytecode == nullptr) // GCOVR_EXCL_LINE
+        {
+            return kExitError;
+        }
+
+        std::vector<std::string> keys;
+        keys.reserve(imported_file_by_path.size());
+        for (const auto& [k, _] : imported_file_by_path)
+        {
+            keys.push_back(k);
+        }
+        std::sort(keys.begin(), keys.end());
+
+        out_import_pins->clear();
+        out_import_pins->reserve(keys.size());
+
+        for (const auto& key : keys)
+        {
+            const std::size_t idx = imported_file_by_path.at(key);
+            const auto& src = imported_files[idx]->contents;
+            std::vector<std::uint8_t> bytes;
+            bytes.reserve(src.size());
+            for (const char ch : src)
+            {
+                bytes.push_back(static_cast<std::uint8_t>(ch));
+            }
+
+            curlee::bundle::ImportPin pin;
+            pin.path = key;
+            pin.hash = curlee::bundle::hash_bytes(bytes);
+            out_import_pins->push_back(std::move(pin));
+        }
+
+        const auto& chunk = std::get<vm::Chunk>(emitted);
+        *out_bytecode = curlee::vm::encode_chunk(chunk);
+
+        return kExitOk;
+    }
+
     std::cerr << "error: unknown command: " << cmd << "\n";
     return kExitUsage;
 }
@@ -664,7 +727,7 @@ int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entr
             };
             d.notes.push_back(grant_note);
             std::cerr << diag::render(d, file);
-            return kExitError;
+            return kExitError; // GCOVR_EXCL_LINE
         }
         effective_caps.insert(cap);
     }
@@ -697,6 +760,49 @@ int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entr
     }
 
     std::cout << "curlee run: result " << vm::to_string(result.value) << "\n";
+    return kExitOk;
+}
+
+int cmd_bundle_build(const std::string& entry_path_arg, const std::string& bundle_path,
+                     const curlee::runtime::Capabilities& requested_caps,
+                     const std::vector<std::filesystem::path>& stdlib_roots,
+                     const std::optional<std::filesystem::path>& input_root)
+{
+    namespace fs = std::filesystem;
+
+    fs::path entry_path = fs::path(entry_path_arg);
+    if (input_root.has_value() && !entry_path.is_absolute()) // GCOVR_EXCL_LINE
+    {
+        entry_path = *input_root / entry_path;
+    }
+
+    std::vector<curlee::bundle::ImportPin> import_pins;
+    std::vector<std::uint8_t> bytecode;
+    const int rc = cmd_read_only("bundle-build", entry_path.string(), empty_caps(), kDefaultFuel,
+                                 stdlib_roots, input_root, &import_pins, &bytecode);
+    if (rc != kExitOk)
+    {
+        return rc;
+    }
+
+    std::vector<std::string> capabilities(requested_caps.begin(), requested_caps.end());
+    std::sort(capabilities.begin(), capabilities.end());
+    capabilities.erase(std::unique(capabilities.begin(), capabilities.end()), capabilities.end());
+
+    curlee::bundle::Bundle bundle;
+    bundle.manifest.capabilities = std::move(capabilities);
+    bundle.manifest.imports = std::move(import_pins);
+    bundle.manifest.proof = std::nullopt;
+    bundle.bytecode = std::move(bytecode);
+
+    const auto write_err = curlee::bundle::write_bundle(bundle_path, bundle);
+    if (!write_err.message.empty())
+    {
+        std::cerr << "error: bundle build failed: " << write_err.message << "\n";
+        return kExitError;
+    }
+
+    std::cout << "curlee bundle build: wrote " << bundle_path << "\n";
     return kExitOk;
 }
 
@@ -830,6 +936,128 @@ int run(int argc, char** argv)
 
     if (cmd == "bundle")
     {
+        if (args.empty())
+        {
+            std::cerr << "error: expected curlee bundle <build|verify|info> ...\n\n";
+            print_usage(std::cerr);
+            return kExitUsage;
+        }
+
+        const std::string_view sub = args[0];
+
+        if (sub == "build")
+        {
+            curlee::runtime::Capabilities caps;
+            auto stdlib_roots = load_stdlib_roots_from_env();
+            std::optional<std::filesystem::path> root;
+            std::vector<std::string> positional;
+
+            for (std::size_t i = 1; i < args.size();)
+            {
+                const std::string_view a = args[i]; // GCOVR_EXCL_LINE
+
+                if (a == "--root")
+                {
+                    if (i + 1 >= args.size())
+                    {
+                        std::cerr << "error: expected path after --root\n\n"; // GCOVR_EXCL_LINE
+                        print_usage(std::cerr);
+                        return kExitUsage;
+                    }
+                    root = std::filesystem::path(std::string(args[i + 1]));
+                    i += 2;
+                    continue; // GCOVR_EXCL_LINE
+                }
+
+                if (a.starts_with("--root="))
+                {
+                    const auto root_value = a.substr(std::string_view("--root=").size());
+                    if (root_value.empty()) // GCOVR_EXCL_LINE
+                    {
+                        std::cerr << "error: expected path after --root=\n\n";
+                        print_usage(std::cerr);
+                        return kExitUsage;
+                    }
+                    root = std::filesystem::path(std::string(root_value)); // GCOVR_EXCL_LINE
+                    ++i;
+                    continue; // GCOVR_EXCL_LINE
+                }
+
+                if (a == "--stdlib-root")
+                {
+                    if (i + 1 >= args.size()) // GCOVR_EXCL_LINE
+                    {
+                        std::cerr << "error: expected path after --stdlib-root\n\n"; // GCOVR_EXCL_LINE
+                        print_usage(std::cerr);
+                        return kExitUsage;
+                    }
+                    stdlib_roots.push_back(std::string(args[i + 1])); // GCOVR_EXCL_LINE
+                    i += 2;
+                    continue;
+                }
+
+                if (a.starts_with("--stdlib-root="))
+                {
+                    const auto root_value = a.substr(std::string_view("--stdlib-root=").size());
+                    if (root_value.empty()) // GCOVR_EXCL_LINE
+                    {
+                        std::cerr << "error: expected path after --stdlib-root=\n\n";
+                        print_usage(std::cerr);
+                        return kExitUsage;
+                    }
+                    stdlib_roots.push_back(std::string(root_value)); // GCOVR_EXCL_LINE
+                    ++i;
+                    continue;
+                }
+
+                if (a == "--cap" || a == "--capability") // GCOVR_EXCL_LINE
+                {
+                    if (i + 1 >= args.size())
+                    {
+                        std::cerr << "error: expected capability name after " << a << "\n\n";
+                        print_usage(std::cerr);
+                        return kExitUsage;
+                    }
+                    caps.insert(std::string(args[i + 1]));
+                    i += 2;
+                    continue;
+                }
+
+                if (a.starts_with("--cap="))
+                {
+                    const auto cap = a.substr(std::string_view("--cap=").size());
+                    if (cap.empty()) // GCOVR_EXCL_LINE
+                    {
+                        std::cerr << "error: expected capability name after --cap=\n\n";
+                        print_usage(std::cerr);
+                        return kExitUsage;
+                    }
+                    caps.insert(std::string(cap)); // GCOVR_EXCL_LINE
+                    ++i;
+                    continue;
+                }
+
+                if (a.starts_with('-'))
+                {
+                    std::cerr << "error: unknown option: " << a << "\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+
+                positional.push_back(std::string(a));
+                ++i;
+            }
+
+            if (positional.size() != 2)
+            {
+                std::cerr << "error: expected curlee bundle build [options] <entry.curlee> <out.bundle>\n\n";
+                print_usage(std::cerr);
+                return kExitUsage;
+            }
+
+            return cmd_bundle_build(positional[0], positional[1], caps, stdlib_roots, root);
+        }
+
         if (args.size() != 2)
         {
             std::cerr << "error: expected curlee bundle <verify|info> <file.bundle>\n\n";
@@ -837,7 +1065,6 @@ int run(int argc, char** argv)
             return kExitUsage;
         }
 
-        const std::string_view sub = args[0];
         const std::string path = std::string(args[1]);
 
         const auto loaded = curlee::bundle::read_bundle(path);

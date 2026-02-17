@@ -1,6 +1,7 @@
 #include <curlee/bundle/bundle.h>
 #include <curlee/cli/cli.h>
 #include <curlee/vm/chunk_codec.h>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -139,6 +140,222 @@ int main()
         {
             fail("expected stderr to mention expected curlee bundle <verify|info> <file.bundle>");
         }
+    }
+
+    // bundle build: produces an artifact consumable by verify and run.
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_build_e2e");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path root = dir / "src";
+        const fs::path entry_abs = root / "main.curlee";
+        const fs::path mod_abs = root / "lib" / "math.curlee";
+        const fs::path out_bundle = dir / "built.bundle";
+
+        fs::create_directories(mod_abs.parent_path());
+        write_all(entry_abs,
+                  R"(import lib.math;
+
+fn main() -> Int {
+  return lib.math.nine();
+}
+)");
+        write_all(mod_abs,
+                  R"(fn nine() -> Int {
+  return 9;
+}
+)");
+
+        {
+            std::string out;
+            std::string err;
+            const int rc = run_cli({"curlee", "bundle", "build", "--root", root.string(),
+                                    "--cap", "python.ffi", "main.curlee", out_bundle.string()},
+                                   out, err);
+            if (rc != 0)
+            {
+                fail("expected bundle build to succeed; stderr: " + err);
+            }
+            if (out.find("curlee bundle build: wrote ") == std::string::npos)
+            {
+                fail("expected bundle build stdout to mention output path");
+            }
+            if (!err.empty())
+            {
+                fail("expected bundle build stderr to be empty on success");
+            }
+        }
+
+        {
+            std::string out;
+            std::string err;
+            const int rc = run_cli({"curlee", "bundle", "verify", out_bundle.string()}, out, err);
+            if (rc != 0)
+            {
+                fail("expected bundle verify to succeed for built artifact");
+            }
+            if (out != "curlee bundle verify: ok\n")
+            {
+                fail("unexpected bundle verify stdout after build: " + out);
+            }
+            if (!err.empty())
+            {
+                fail("expected bundle verify stderr to be empty");
+            }
+        }
+
+        const auto loaded_built = read_bundle(out_bundle.string());
+        if (auto* err = std::get_if<BundleError>(&loaded_built))
+        {
+            fail("expected to read built bundle: " + err->message);
+        }
+        const auto& built = std::get<Bundle>(loaded_built);
+        if (std::find(built.manifest.capabilities.begin(), built.manifest.capabilities.end(),
+                      "python.ffi") == built.manifest.capabilities.end())
+        {
+            fail("expected built bundle capabilities to include explicit --cap value");
+        }
+        if (built.manifest.imports.empty())
+        {
+            fail("expected built bundle to include at least one import pin");
+        }
+
+        {
+            std::string out;
+            std::string err;
+            const int rc =
+                run_cli({"curlee", "run", "--cap", "python.ffi", "--bundle",
+                         out_bundle.string(), entry_abs.string()},
+                        out, err);
+            if (rc != 0)
+            {
+                fail("expected run --bundle to succeed for built artifact; stderr: " + err);
+            }
+            if (out.find("curlee run: result 9") == std::string::npos)
+            {
+                fail("expected bundled execution result to be 9");
+            }
+            if (!err.empty())
+            {
+                fail("expected run --bundle stderr to be empty on success");
+            }
+        }
+
+        fs::remove_all(dir);
+    }
+
+    // bundle build: option parsing and arity errors are reported.
+    {
+        const std::vector<std::vector<std::string>> bad_argvs = {
+            {"curlee", "bundle", "build", "--root"},
+            {"curlee", "bundle", "build", "--root="},
+            {"curlee", "bundle", "build", "--stdlib-root"},
+            {"curlee", "bundle", "build", "--stdlib-root="},
+            {"curlee", "bundle", "build", "--cap"},
+            {"curlee", "bundle", "build", "--cap="},
+            {"curlee", "bundle", "build", "--nope", "a.curlee", "a.bundle"},
+            {"curlee", "bundle", "build", "only-entry.curlee"},
+        };
+
+        for (const auto& argv_storage : bad_argvs)
+        {
+            std::string out;
+            std::string err;
+            const int rc = run_cli(argv_storage, out, err);
+            if (rc == 0)
+            {
+                fail("expected bundle build bad-args case to fail");
+            }
+            if (err.empty())
+            {
+                fail("expected stderr for bundle build bad-args case");
+            }
+        }
+    }
+
+    // bundle build: frontend parse/check failures are surfaced.
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_build_bad_source");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path bad_entry = dir / "bad.curlee";
+        write_all(bad_entry, "fn main( -> Int { return 1; }\n");
+
+        std::string out;
+        std::string err;
+        const int rc =
+            run_cli({"curlee", "bundle", "build", bad_entry.string(), (dir / "x.bundle").string()},
+                    out, err);
+        if (rc == 0)
+        {
+            fail("expected bundle build to fail for parse/check errors");
+        }
+        if (err.empty())
+        {
+            fail("expected stderr for parse/check failure");
+        }
+
+        fs::remove_all(dir);
+    }
+
+    // bundle build: emitter diagnostics are surfaced (no main entry function).
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_build_no_main");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path entry = dir / "no_main.curlee";
+        write_all(entry,
+                  R"(fn helper() -> Int {
+  return 1;
+}
+)");
+
+        std::string out;
+        std::string err;
+        const int rc =
+            run_cli({"curlee", "bundle", "build", entry.string(), (dir / "x.bundle").string()},
+                    out, err);
+        if (rc == 0)
+        {
+            fail("expected bundle build to fail without main");
+        }
+        if (err.find("no entry function 'main' found") == std::string::npos)
+        {
+            fail("expected emitter diagnostic for missing main");
+        }
+
+        fs::remove_all(dir);
+    }
+
+    // bundle build: write failures are surfaced.
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_build_write_fail");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path entry = dir / "main.curlee";
+        write_all(entry,
+                  R"(fn main() -> Int {
+  return 1;
+}
+)");
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli({"curlee", "bundle", "build", entry.string(), dir.string()}, out, err);
+        if (rc == 0)
+        {
+            fail("expected bundle build to fail when output path is a directory");
+        }
+        if (err.find("bundle build failed") == std::string::npos)
+        {
+            fail("expected stderr to mention bundle build write failure");
+        }
+
+        fs::remove_all(dir);
     }
 
     {
