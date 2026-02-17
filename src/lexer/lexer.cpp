@@ -324,7 +324,11 @@ class Lexer
 
     [[nodiscard]] Token make_token(TokenKind kind, std::size_t start, std::size_t end) const
     {
-        return Token{.kind = kind, .lexeme = input_.substr(start, end - start), .span = {start, end}};
+        return Token{
+            .kind = kind,
+            .lexeme = input_.substr(start, end - start),
+            .span = {start, end},
+        };
     }
 
     [[nodiscard]] curlee::diag::Diagnostic make_error(std::size_t start, std::size_t end,

@@ -17,23 +17,7 @@ namespace
 using curlee::diag::Diagnostic;
 using curlee::diag::Related;
 using curlee::diag::Severity;
-using curlee::parser::BinaryExpr;
-using curlee::parser::BlockStmt;
-using curlee::parser::CallExpr;
-using curlee::parser::Expr;
-using curlee::parser::ExprStmt;
-using curlee::parser::Function;
-using curlee::parser::GroupExpr;
-using curlee::parser::IfStmt;
-using curlee::parser::LetStmt;
-using curlee::parser::MemberExpr;
-using curlee::parser::NameExpr;
-using curlee::parser::ReturnStmt;
-using curlee::parser::ScopedNameExpr;
-using curlee::parser::Stmt;
-using curlee::parser::StructLiteralExpr;
-using curlee::parser::UnsafeStmt;
-using curlee::parser::WhileStmt;
+using namespace curlee::parser;
 using curlee::source::Span;
 
 static std::string join_path(const std::vector<std::string_view>& parts)
