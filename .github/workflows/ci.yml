@@ -79,3 +79,100 @@ jobs:
           grep -q "ctest --preset linux-debug --output-on-failure" "$file"
           grep -q "bash scripts/smoke.sh --both" "$file"
           grep -q "bash scripts/coverage.sh --fail-under 100 --fail-under-branch 100 --fail-under-function 100" "$file"
+
+  quality-audit:
+    name: Quality audit gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run quality audit (deterministic JSON)
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          python3 scripts/quality_audit.py --format json --out build/quality-audit-report.json
+
+      - name: Enforce blocking policy (severity=error)
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import sys
+
+          report = json.load(open("build/quality-audit-report.json", encoding="utf-8"))
+          blocking = []
+          for file_entry in report.get("files", []):
+            for violation in file_entry.get("violations", []):
+              if violation.get("severity") == "error":
+                blocking.append((file_entry.get("path", "<unknown>"), violation))
+
+          summary = report.get("summary", {})
+          print("quality_audit_summary", summary)
+
+          if blocking:
+            print(f"blocking_violations={len(blocking)}")
+            for path, violation in blocking[:20]:
+              line = violation.get("line")
+              line_part = f":{line}" if line is not None else ""
+              print(f"- {path}{line_part}: [{violation.get('severity')}] {violation.get('rule')} - {violation.get('message')}")
+            sys.exit(1)
+          print("blocking_violations=0")
+          PY
+
+      - name: Upload quality audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-audit-report
+          path: build/quality-audit-report.json
+
+  quality-audit-contract:
+    name: Quality audit contract
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify blocking failure behavior
+        run: |
+          set -euo pipefail
+
+          tmp_dir="$(mktemp -d)"
+          trap 'rm -rf "$tmp_dir"' EXIT
+
+          mkdir -p "$tmp_dir/src"
+          cat > "$tmp_dir/src/long_line.cpp" <<'CPP'
+          int main(){ return 0; } // 12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+          CPP
+
+          git -C "$tmp_dir" init >/dev/null
+          git -C "$tmp_dir" add src/long_line.cpp
+
+          python3 scripts/quality_audit.py --repo-root "$tmp_dir" --format json --out "$tmp_dir/report.json"
+
+          set +e
+          export TMP_DIR="$tmp_dir"
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          path = os.path.join(os.environ["TMP_DIR"], "report.json")
+          report = json.load(open(path, encoding="utf-8"))
+          errors = 0
+          for file_entry in report.get("files", []):
+            for violation in file_entry.get("violations", []):
+              if violation.get("severity") == "error":
+                errors += 1
+          sys.exit(1 if errors > 0 else 0)
+          PY
+          rc=$?
+          set -e
+
+          if [[ "$rc" -eq 0 ]]; then
+            echo "expected blocking-policy evaluator to fail when error-severity violations exist"
+            exit 1
+          fi
