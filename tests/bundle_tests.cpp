@@ -68,7 +68,7 @@ int main()
 
         Bundle bundle;
         bundle.manifest.format_version = kBundleFormatVersion;
-        bundle.manifest.capabilities = {"io:stdout", "net:none"};
+        bundle.manifest.capabilities = {"io.stdout", "net:none"};
         bundle.manifest.imports = {ImportPin{.path = "stdlib.math", .hash = "deadbeef"}};
         bundle.manifest.proof = "proof-v1";
         bundle.bytecode = {0x01, 0x02, 0x03, 0x04};
@@ -324,7 +324,7 @@ int main()
                                             std::to_string(kBundleFormatVersion) + "\n" +
                                             "bytecode_hash=" + hash_bytes(empty_bytes) + "\n" +
                                             "imports=stdlib.math:deadbeef\n" +
-                                            "capabilities=,io:stdout,,net:none,\n" +
+                                            "capabilities=,io.stdout,,net:none,\n" +
                                             "proof=hello\n" + "bytecode=   \t \n");
         expect_read_ok(whitespace_b64);
         std::filesystem::remove(whitespace_b64);
@@ -416,7 +416,7 @@ int main()
         out << "CURLEE_BUNDLE_V1\n";
         out << "version=" << kBundleFormatVersion << "\n";
         out << "bytecode_hash=deadbeef\n";
-        out << "capabilities=io:stdout\n";
+        out << "capabilities=io.stdout\n";
         out << "imports=stdlib.math:bead\n";
         out << "proof=\n";
         out << "bytecode=AQIDBA==\n";
@@ -463,7 +463,7 @@ int main()
 
         Bundle bundle_1;
         bundle_1.manifest.format_version = kBundleFormatVersion;
-        bundle_1.manifest.capabilities = {"io:stdout"};
+        bundle_1.manifest.capabilities = {"io.stdout"};
         bundle_1.manifest.imports = {ImportPin{.path = "a", .hash = "b"},
                                      ImportPin{.path = "c", .hash = "d"}};
         bundle_1.bytecode = {0xFF};

@@ -97,7 +97,7 @@ int main()
     fs::remove(missing_path);
 
     Bundle bundle;
-    bundle.manifest.capabilities = {"io:stdout", "net:none"};
+    bundle.manifest.capabilities = {"io.stdout", "net:none"};
     bundle.manifest.imports = {ImportPin{.path = "stdlib.math", .hash = "deadbeef"}};
     bundle.manifest.proof = "proof-v1";
     bundle.bytecode = curlee::vm::encode_chunk(make_return_int_chunk(0));
@@ -160,7 +160,7 @@ int main()
                                      "bytecode_hash: " +
                                      expected_hash +
                                      "\n"
-                                     "capabilities: io:stdout,net:none\n"
+                                     "capabilities: io.stdout,net:none\n"
                                      "imports: stdlib.math:deadbeef\n"
                                      "proof: present\n";
 
@@ -173,7 +173,7 @@ int main()
     // bundle info: multi-import pins + proof absence are formatted deterministically.
     {
         Bundle bundle;
-        bundle.manifest.capabilities = {"io:stdout", "net:none"};
+        bundle.manifest.capabilities = {"io.stdout", "net:none"};
         bundle.manifest.imports = {ImportPin{.path = "stdlib.math", .hash = "deadbeef"},
                                    ImportPin{.path = "stdlib.io", .hash = "bead"}};
         bundle.manifest.proof = std::nullopt;
@@ -203,7 +203,7 @@ int main()
                                      "bytecode_hash: " +
                                      expected_hash +
                                      "\n"
-                                     "capabilities: io:stdout,net:none\n"
+                                     "capabilities: io.stdout,net:none\n"
                                      "imports: stdlib.math:deadbeef,stdlib.io:bead\n"
                                      "proof: none\n";
 
@@ -232,14 +232,14 @@ int main()
     // with manifest fields should fail verification.
     {
         std::string contents = slurp(ok_path);
-        const std::string needle = "capabilities=io:stdout,net:none\n";
+        const std::string needle = "capabilities=io.stdout,net:none\n";
         const auto pos = contents.find(needle);
         if (pos == std::string::npos)
         {
             fail("expected bundle to contain capabilities line for tamper test");
         }
 
-        contents.replace(pos, needle.size(), "capabilities=io:stdout,net:all\n");
+        contents.replace(pos, needle.size(), "capabilities=io.stdout,net:all\n");
         write_all(ok_path, contents);
 
         std::string out;
@@ -284,7 +284,7 @@ int main()
         out << "CURLEE_BUNDLE_V1\n";
         out << "version=" << kBundleFormatVersion << "\n";
         out << "bytecode_hash=deadbeef\n";
-        out << "capabilities=io:stdout\n";
+        out << "capabilities=io.stdout\n";
         out << "imports=stdlib.math:bead\n";
         out << "proof=\n";
         out << "bytecode=AQIDBA==\n";
@@ -417,7 +417,7 @@ int main()
         }
 
         Bundle bundle;
-        bundle.manifest.capabilities = {"python:ffi"};
+        bundle.manifest.capabilities = {"python.ffi"};
         bundle.manifest.imports = {};
         bundle.bytecode = curlee::vm::encode_chunk(make_return_int_chunk(0));
 
@@ -437,7 +437,7 @@ int main()
             {
                 fail("expected run to fail when bundle capability is not granted");
             }
-            if (err.find("missing capability required by bundle: python:ffi") == std::string::npos)
+            if (err.find("missing capability required by bundle: python.ffi") == std::string::npos)
             {
                 fail("expected stderr to mention missing capability required by bundle");
             }
@@ -447,7 +447,7 @@ int main()
         {
             std::string out;
             std::string err;
-            const int rc = run_cli({"curlee", "run", "--cap", "python:ffi", "--bundle",
+            const int rc = run_cli({"curlee", "run", "--cap", "python.ffi", "--bundle",
                                     bundle_path.string(), entry.string()},
                                    out, err);
             if (rc != 0)

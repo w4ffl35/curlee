@@ -222,7 +222,7 @@ int main()
         std::string out;
         std::string err;
         const int rc = run_cli_capture(
-            {"curlee", "run", "--capability", "io:stdout", "--fuel", "0"}, out, err);
+            {"curlee", "run", "--capability", "io.stdout", "--fuel", "0"}, out, err);
         if (rc != 2)
         {
             fail("expected usage exit code for missing run file (with --capability)");
@@ -247,7 +247,7 @@ int main()
         std::string out;
         std::string err;
         const int rc =
-            run_cli_capture({"curlee", "run", "--cap=io:stdout", "--fuel", "0"}, out, err);
+            run_cli_capture({"curlee", "run", "--cap=io.stdout", "--fuel", "0"}, out, err);
         if (rc != 2)
         {
             fail("expected usage exit code for missing run file (with --cap=)");
@@ -457,7 +457,7 @@ int main()
         fs::remove(bundle_path);
 
         curlee::bundle::Bundle bundle;
-        bundle.manifest.capabilities = {"io:stdout"};
+        bundle.manifest.capabilities = {"io.stdout"};
         bundle.manifest.imports = {};
         bundle.manifest.proof = std::nullopt;
         bundle.bytecode = {0x01, 0x02, 0x03, 0x04};

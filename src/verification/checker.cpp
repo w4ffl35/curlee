@@ -267,6 +267,14 @@ class Verifier
 
     std::optional<TypeKind> supported_type(const curlee::parser::TypeName& name)
     {
+        // Capability types (e.g. `cap io.stdout`) are not part of the verification logic
+        // fragment. They are treated as uninterpreted values and must not block verification
+        // unless used inside predicates (which are Int/Bool-only in the MVP scope).
+        if (name.is_capability)
+        {
+            return TypeKind::Unit;
+        }
+
         auto t = curlee::types::core_type_from_name(name.name);
         if (!t.has_value())
         {
@@ -606,6 +614,15 @@ class Verifier
         if (sig.decl == nullptr)
         {
             return;
+        }
+
+        // MVP: only reason about calls whose arguments are entirely Int/Bool.
+        for (const auto k : sig.params)
+        {
+            if (k != TypeKind::Int && k != TypeKind::Bool)
+            {
+                return;
+            }
         }
 
         if (call.args.size() != sig.params.size())

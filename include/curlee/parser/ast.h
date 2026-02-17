@@ -23,6 +23,7 @@ namespace curlee::parser
 struct TypeName
 {
     curlee::source::Span span;
+    bool is_capability = false;
     std::string_view name;
 };
 

@@ -45,6 +45,62 @@ int main()
 {
     using namespace curlee;
 
+    // include/curlee/types/type.h: Type equality and stringify helpers.
+    {
+        using curlee::types::Type;
+        using curlee::types::TypeKind;
+
+        if (!(Type{.kind = TypeKind::Int} == Type{.kind = TypeKind::Int}))
+        {
+            fail("expected Int == Int");
+        }
+        if (Type{.kind = TypeKind::Int} == Type{.kind = TypeKind::Bool})
+        {
+            fail("expected Int != Bool");
+        }
+
+        if (!(Type{.kind = TypeKind::Capability, .name = "io.stdout"} ==
+              Type{.kind = TypeKind::Capability, .name = "io.stdout"}))
+        {
+            fail("expected cap io.stdout == cap io.stdout");
+        }
+        if (Type{.kind = TypeKind::Capability, .name = "io.stdout"} ==
+            Type{.kind = TypeKind::Capability, .name = "io.stdin"})
+        {
+            fail("expected different cap names to compare unequal");
+        }
+
+        if (curlee::types::to_string(static_cast<TypeKind>(999)) != "<unknown>")
+        {
+            fail("expected to_string(unknown TypeKind) to return <unknown>");
+        }
+
+        // Cover remaining switch cases at runtime (avoid constexpr folding).
+        const TypeKind kinds[] = {
+            TypeKind::Int,
+            TypeKind::Bool,
+            TypeKind::String,
+            TypeKind::Unit,
+            TypeKind::Capability,
+            TypeKind::Struct,
+            TypeKind::Enum,
+        };
+        for (std::size_t i = 0; i < (sizeof(kinds) / sizeof(kinds[0])); ++i)
+        {
+            const TypeKind k = kinds[i];
+            const auto s = curlee::types::to_string(k);
+            if (s.empty())
+            {
+                fail("expected to_string(TypeKind) to be non-empty");
+            }
+        }
+        if (curlee::types::to_string(Type{.kind = TypeKind::Capability, .name = "python.ffi"}) !=
+            "python.ffi")
+        {
+            fail("expected to_string(Type{cap python.ffi}) to return python.ffi");
+        }
+    }
+
     // duplicate type names (struct/struct and struct/enum)
     {
         const std::string src =
@@ -165,7 +221,7 @@ int main()
 
     // python_ffi.call requires unsafe context
     {
-        const std::string src = "fn main() -> Unit { python_ffi.call(); }";
+        const std::string src = "fn main(p: cap python.ffi) -> Unit { python_ffi.call(); }";
         const auto lexed = lexer::lex(src);
         if (std::holds_alternative<diag::Diagnostic>(lexed))
             fail("lex failed");
@@ -191,7 +247,8 @@ int main()
 
     // python_ffi.call stubbed args inside unsafe
     {
-        const std::string src = "fn main() -> Unit { unsafe { python_ffi.call(1); } }";
+        const std::string src =
+            "fn main(p: cap python.ffi) -> Unit { unsafe { python_ffi.call(1); } }";
         const auto lexed = lexer::lex(src);
         if (std::holds_alternative<diag::Diagnostic>(lexed))
             fail("lex failed");
@@ -202,9 +259,22 @@ int main()
         expect_diag(res, "python_ffi.call is stubbed and currently takes 0 arguments");
     }
 
+    // capability types: accept cap names without dots (is_capability=true path)
+    {
+        const std::string src = "fn main(p: cap foo) -> Unit { return; }";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_ok(res);
+    }
+
     // print() argument arity and type
     {
-        const std::string src = "fn main() -> Unit { print(); }";
+        const std::string src = "fn main(p: cap io.stdout) -> Unit { print(); }";
         const auto lexed = lexer::lex(src);
         if (std::holds_alternative<diag::Diagnostic>(lexed))
             fail("lex failed");
@@ -216,8 +286,8 @@ int main()
     }
 
     {
-        const std::string src =
-            "struct T { x: Int; } fn main() -> Unit { let t: T = T{ x: 1 }; print(t); }";
+        const std::string src = "struct T { x: Int; } fn main(p: cap io.stdout) -> Unit { let t: T "
+                                "= T{ x: 1 }; print(t); }";
         const auto lexed = lexer::lex(src);
         if (std::holds_alternative<diag::Diagnostic>(lexed))
             fail("lex failed");
@@ -230,7 +300,7 @@ int main()
 
     // print: Bool and String are accepted (exercise short-circuit paths)
     {
-        const std::string src = "fn main() -> Unit { print(true); return; }";
+        const std::string src = "fn main(p: cap io.stdout) -> Unit { print(true); return; }";
         const auto lexed = lexer::lex(src);
         if (std::holds_alternative<diag::Diagnostic>(lexed))
             fail("lex failed");
@@ -242,7 +312,7 @@ int main()
     }
 
     {
-        const std::string src = "fn main() -> Unit { print(\"a\"); return; }";
+        const std::string src = "fn main(p: cap io.stdout) -> Unit { print(\"a\"); return; }";
         const auto lexed = lexer::lex(src);
         if (std::holds_alternative<diag::Diagnostic>(lexed))
             fail("lex failed");
@@ -871,7 +941,7 @@ int main()
 
     // print: ok + error when arg fails to type-check
     {
-        const std::string src = "fn main() -> Unit { print(1); return; }";
+        const std::string src = "fn main(p: cap io.stdout) -> Unit { print(1); return; }";
         const auto lexed = lexer::lex(src);
         if (std::holds_alternative<diag::Diagnostic>(lexed))
             fail("lex failed");
@@ -882,8 +952,36 @@ int main()
         expect_ok(res);
     }
 
+    // print: exercise require_capability multiple times to cover vector growth/non-growth.
     {
-        const std::string src = "fn main() -> Unit { print(nope); return; }";
+        const std::string src =
+            "fn main(p: cap io.stdout) -> Unit { print(1); print(2); print(3); print(4); return; }";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_ok(res);
+    }
+
+    // print: missing capability value path (covers has_capability_value + require_capability error
+    // branch)
+    {
+        const std::string src = "fn main(p: cap other) -> Unit { print(true); return; }";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_diag(res, "missing capability value 'io.stdout'");
+    }
+
+    {
+        const std::string src = "fn main(p: cap io.stdout) -> Unit { print(nope); return; }";
         const auto lexed = lexer::lex(src);
         if (std::holds_alternative<diag::Diagnostic>(lexed))
             fail("lex failed");

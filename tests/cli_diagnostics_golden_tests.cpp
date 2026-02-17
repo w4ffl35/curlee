@@ -473,7 +473,7 @@ static bool run_run_success_with_cap_case(const fs::path& out_golden_path,
 
     const std::string rel_path = "tests/fixtures/run_success.curlee";
 
-    std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python:ffi", rel_path};
+    std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python.ffi", rel_path};
     std::vector<char*> argv;
     argv.reserve(argv_storage.size());
     for (auto& s : argv_storage)
@@ -965,7 +965,7 @@ int main(int argc, char** argv)
 
         {
             const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
-            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python:ffi",
+            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python.ffi",
                                                            rel_path};
             if (!run_run_python_ffi_case(argv_storage, run_python_ffi_not_implemented_out_golden,
                                          run_python_ffi_not_implemented_err_golden,
@@ -980,7 +980,7 @@ int main(int argc, char** argv)
             (void)setenv("CURLEE_PYTHON_RUNNER", fake_runner_error.c_str(), 1);
 
             const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
-            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python:ffi",
+            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python.ffi",
                                                            rel_path};
             if (!run_run_python_ffi_case(argv_storage, run_python_ffi_runner_error_out_golden,
                                          run_python_ffi_runner_error_err_golden,
@@ -997,7 +997,7 @@ int main(int argc, char** argv)
             (void)setenv("CURLEE_PYTHON_RUNNER", fake_runner_hang.c_str(), 1);
 
             const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
-            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python:ffi",
+            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python.ffi",
                                                            rel_path};
             if (!run_run_python_ffi_case(argv_storage, run_python_ffi_runner_timeout_out_golden,
                                          run_python_ffi_runner_timeout_err_golden,
@@ -1014,7 +1014,7 @@ int main(int argc, char** argv)
             (void)setenv("CURLEE_PYTHON_RUNNER", fake_runner_spam.c_str(), 1);
 
             const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
-            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python:ffi",
+            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python.ffi",
                                                            rel_path};
             if (!run_run_python_ffi_case(argv_storage,
                                          run_python_ffi_runner_output_limit_out_golden,
@@ -1033,7 +1033,7 @@ int main(int argc, char** argv)
             (void)setenv("CURLEE_PYTHON_RUNNER", fake_runner_env_check.c_str(), 1);
 
             const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
-            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python:ffi",
+            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python.ffi",
                                                            rel_path};
             if (!run_run_python_ffi_case(argv_storage,
                                          run_python_ffi_runner_env_sanitized_out_golden,
@@ -1059,7 +1059,7 @@ int main(int argc, char** argv)
             // Without the sandbox capability, this should fail.
             {
                 const std::vector<std::string> argv_storage = {"curlee", "run", "--cap",
-                                                               "python:ffi", rel_path};
+                                                               "python.ffi", rel_path};
                 if (!run_run_python_ffi_case(argv_storage,
                                              run_python_ffi_sandbox_required_out_golden,
                                              run_python_ffi_sandbox_required_err_golden,
@@ -1072,7 +1072,7 @@ int main(int argc, char** argv)
             // With the sandbox capability, the fake bwrap wrapper makes the runner succeed.
             {
                 const std::vector<std::string> argv_storage = {
-                    "curlee", "run", "--cap", "python:ffi", "--cap", "python:sandbox", rel_path};
+                    "curlee", "run", "--cap", "python.ffi", "--cap", "python.sandbox", rel_path};
                 if (!run_run_python_ffi_case(argv_storage, run_python_ffi_sandboxed_out_golden,
                                              run_python_ffi_sandboxed_err_golden,
                                              "run-python-ffi-sandboxed", 0))
@@ -1089,7 +1089,7 @@ int main(int argc, char** argv)
                 (void)setenv("CURLEE_BWRAP", missing_bwrap.c_str(), 1);
 
                 const std::vector<std::string> argv_storage = {
-                    "curlee", "run", "--cap", "python:ffi", "--cap", "python:sandbox", rel_path};
+                    "curlee", "run", "--cap", "python.ffi", "--cap", "python.sandbox", rel_path};
                 if (!run_run_python_ffi_case(argv_storage,
                                              run_python_ffi_sandbox_exec_failed_out_golden,
                                              run_python_ffi_sandbox_exec_failed_err_golden,

@@ -1,4 +1,5 @@
-tests/fixtures/run_python_ffi.curlee:2:12: error: python capability required
+tests/fixtures/run_python_ffi.curlee:2:12: error: capability not granted: python.ffi
   |
   |   unsafe { python_ffi.call(); }
   |            ^^^^^^^^^^^^^^^^^
+note: grant it with: curlee run --cap python.ffi <file.curlee>

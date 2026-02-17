@@ -406,9 +406,9 @@ int main(int argc, char** argv)
 
         // Denied by default (no capabilities).
         const auto denied = vm.run(chunk);
-        if (denied.ok || denied.error != "missing capability io:stdout")
+        if (denied.ok || denied.error != "missing capability io.stdout")
         {
-            fail("expected print to be denied without io:stdout capability");
+            fail("expected print to be denied without io.stdout capability");
         }
         if (!denied.error_span.has_value() || denied.error_span->start != span.start ||
             denied.error_span->end != span.end)
@@ -418,11 +418,11 @@ int main(int argc, char** argv)
 
         // Allowed when capability present.
         VM::Capabilities caps;
-        caps.insert("io:stdout");
+        caps.insert("io.stdout");
         const auto allowed = vm.run(chunk, caps);
         if (!allowed.ok || !(allowed.value == Value::int_v(1)))
         {
-            fail("expected print to succeed with io:stdout capability");
+            fail("expected print to succeed with io.stdout capability");
         }
     }
 
@@ -1107,7 +1107,7 @@ int main(int argc, char** argv)
 
         VM vm;
         VM::Capabilities caps;
-        caps.insert("io:stdout");
+        caps.insert("io.stdout");
         const auto res = vm.run(chunk, caps);
         if (!res.ok || res.value.kind != ValueKind::Unit)
         {
@@ -1465,7 +1465,7 @@ int main(int argc, char** argv)
 
         VM vm;
         VM::Capabilities caps;
-        caps.insert("io:stdout");
+        caps.insert("io.stdout");
         const auto res = vm.run(chunk, caps);
         if (res.ok || res.error != "stack underflow")
         {
@@ -1504,7 +1504,7 @@ int main(int argc, char** argv)
 
         VM vm;
         VM::Capabilities caps;
-        caps.insert("python:ffi");
+        caps.insert("python.ffi");
 
         runner.set("/bin/true");
 
@@ -1568,7 +1568,7 @@ int main(int argc, char** argv)
 
         VM vm;
         VM::Capabilities caps;
-        caps.insert("python:ffi");
+        caps.insert("python.ffi");
 
         // Non-sandbox exec failure path.
         (void)setenv("CURLEE_PYTHON_RUNNER", "/no/such/curlee_python_runner_missing", 1);
@@ -1584,7 +1584,7 @@ int main(int argc, char** argv)
         // and execve fails deterministically (no PATH search).
         {
             VM::Capabilities sandbox_caps = caps;
-            sandbox_caps.insert("python:sandbox");
+            sandbox_caps.insert("python.sandbox");
 
             (void)unsetenv("CURLEE_BWRAP");
             (void)setenv("CURLEE_PYTHON_RUNNER", runner_plain_fail.c_str(), 1);
@@ -1600,7 +1600,7 @@ int main(int argc, char** argv)
         // `env != nullptr && *env != '\0'`.
         {
             VM::Capabilities sandbox_caps = caps;
-            sandbox_caps.insert("python:sandbox");
+            sandbox_caps.insert("python.sandbox");
 
             (void)setenv("CURLEE_BWRAP", "", 1);
             (void)setenv("CURLEE_PYTHON_RUNNER", runner_plain_fail.c_str(), 1);
@@ -1616,7 +1616,7 @@ int main(int argc, char** argv)
         // the fallback path, but bwrap exec still fails so the runner is never executed.
         {
             VM::Capabilities sandbox_caps = caps;
-            sandbox_caps.insert("python:sandbox");
+            sandbox_caps.insert("python.sandbox");
 
             (void)unsetenv("CURLEE_PYTHON_RUNNER");
             (void)unsetenv("CURLEE_BWRAP");
@@ -1632,7 +1632,7 @@ int main(int argc, char** argv)
         // `env != nullptr && *env != '\0'`.
         {
             VM::Capabilities sandbox_caps = caps;
-            sandbox_caps.insert("python:sandbox");
+            sandbox_caps.insert("python.sandbox");
 
             (void)setenv("CURLEE_PYTHON_RUNNER", "", 1);
             (void)unsetenv("CURLEE_BWRAP");
@@ -1689,7 +1689,7 @@ int main(int argc, char** argv)
             RenameGuard guard(from, to);
 
             VM::Capabilities sandbox_caps = caps;
-            sandbox_caps.insert("python:sandbox");
+            sandbox_caps.insert("python.sandbox");
             (void)unsetenv("CURLEE_PYTHON_RUNNER");
             (void)unsetenv("CURLEE_BWRAP");
 
@@ -1883,8 +1883,8 @@ int main(int argc, char** argv)
         (void)setenv("CURLEE_BWRAP", bwrap_fake.c_str(), 1);
         {
             VM::Capabilities sandbox_caps;
-            sandbox_caps.insert("python:ffi");
-            sandbox_caps.insert("python:sandbox");
+            sandbox_caps.insert("python.ffi");
+            sandbox_caps.insert("python.sandbox");
             const auto res = vm.run(chunk, sandbox_caps);
             if (!res.ok || !(res.value == Value::unit_v()))
             {
@@ -1897,8 +1897,8 @@ int main(int argc, char** argv)
         (void)setenv("CURLEE_BWRAP", bwrap_fake.c_str(), 1);
         {
             VM::Capabilities sandbox_caps;
-            sandbox_caps.insert("python:ffi");
-            sandbox_caps.insert("python:sandbox");
+            sandbox_caps.insert("python.ffi");
+            sandbox_caps.insert("python.sandbox");
             const auto res = vm.run(chunk, sandbox_caps);
             if (res.ok || res.error != "python sandbox failed")
             {
@@ -1911,8 +1911,8 @@ int main(int argc, char** argv)
         (void)setenv("CURLEE_BWRAP", "/no/such/bwrap", 1);
         {
             VM::Capabilities sandbox_caps;
-            sandbox_caps.insert("python:ffi");
-            sandbox_caps.insert("python:sandbox");
+            sandbox_caps.insert("python.ffi");
+            sandbox_caps.insert("python.sandbox");
             const auto res = vm.run(chunk, sandbox_caps);
             if (res.ok || res.error != "python sandbox exec failed")
             {

@@ -198,6 +198,15 @@ target_include_directories(curlee_header_smoke_tests PRIVATE include)
 
 add_test(NAME curlee_header_smoke_tests COMMAND curlee_header_smoke_tests)
 
+add_executable(curlee_readme_claims_tests
+  tests/readme_claims_tests.cpp
+)
+
+add_test(
+  NAME curlee_readme_claims_tests
+  COMMAND curlee_readme_claims_tests ${CMAKE_SOURCE_DIR}/README.md
+)
+
 add_executable(curlee_chunk_codec_tests
   tests/chunk_codec_tests.cpp
   src/vm/chunk_codec.cpp

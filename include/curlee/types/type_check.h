@@ -27,6 +27,14 @@ struct TypeInfo
 {
     std::unordered_map<std::size_t, Type> expr_types;
 
+    struct RequiredCapability
+    {
+        std::string_view name;
+        curlee::source::Span span;
+    };
+
+    std::vector<RequiredCapability> required_capabilities;
+
     [[nodiscard]] std::optional<Type> type_of(std::size_t expr_id) const
     {
         const auto it = expr_types.find(expr_id);

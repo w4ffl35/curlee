@@ -222,9 +222,9 @@ static void vm_should_fail_print_missing_capability()
     chunk.emit(OpCode::Return);
     VM vm;
     const auto res = vm.run(chunk);
-    if (res.ok || res.error != "missing capability io:stdout")
+    if (res.ok || res.error != "missing capability io.stdout")
     {
-        fail("expected missing capability io:stdout");
+        fail("expected missing capability io.stdout");
     }
 }
 

@@ -15,7 +15,7 @@ int main()
 
     {
         curlee::runtime::Capabilities caps;
-        caps.insert("io:stdout");
+        caps.insert("io.stdout");
 
         const auto res = call_python(caps, "math", "sqrt", {"4"});
         if (!std::holds_alternative<PythonFfiError>(res))
@@ -31,7 +31,7 @@ int main()
 
     {
         curlee::runtime::Capabilities caps;
-        caps.insert("python:ffi");
+        caps.insert("python.ffi");
 
         const auto res = call_python(caps, "math", "sqrt", {"4"});
         if (!std::holds_alternative<PythonFfiError>(res))
