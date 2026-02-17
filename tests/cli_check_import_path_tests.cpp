@@ -256,7 +256,7 @@ int main()
         {
             die("expected check to fail when stdlib python_ffi usage is not inside unsafe");
         }
-        expect_contains(run.err, "python_ffi.call requires an unsafe context");
+        expect_contains(run.err, "python_ffi is not part of the Curlee v1 surface");
     }
 
     return 0;

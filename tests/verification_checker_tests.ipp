@@ -585,16 +585,22 @@ int main()
     }
 
     {
-        // python_ffi.call(...) should not be treated as a verifier-checked call.
+        // python_ffi surface is de-scoped from v1 and should fail at type-checking.
         const std::string source = "fn main(p: cap python.ffi) -> Int {\n"
                                    "  unsafe { python_ffi.call(); }\n"
                                    "  return 0;\n"
                                    "}\n";
 
-        const auto verified = verify_program(source, "python_ffi.call skip call-site check");
-        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        auto program = parse_program_or_fail(source, "python_ffi de-scoped v1 surface");
+        const auto typed = curlee::types::type_check(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(typed))
         {
-            fail("expected verification to succeed for python_ffi.call skip call-site check");
+            fail("expected type checking to fail for python_ffi de-scoped v1 surface");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(typed);
+        if (!has_message_substr(diags, "python_ffi is not part of the Curlee v1 surface"))
+        {
+            fail("expected python_ffi unsupported-surface diagnostic");
         }
     }
 

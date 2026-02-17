@@ -379,7 +379,7 @@ fn main() -> Unit {
     }
 
     {
-        // python_ffi.call requires an unsafe context.
+        // python_ffi.call is not part of the v1 surface.
         const std::string src = R"(fn main() -> Unit {
   python_ffi.call();
   return 0;
@@ -389,36 +389,35 @@ fn main() -> Unit {
             resolve_with_source(src, "tests/fixtures/resolve_ffi_unsafe_required.curlee");
         if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
         {
-            fail("expected resolver error for python_ffi.call outside unsafe");
+            fail("expected resolver error for python_ffi.call in v1");
         }
     }
 
     {
-        // python_ffi.call inside unsafe should not emit the unsafe-context diagnostic.
+        // python_ffi.call inside unsafe is still unsupported in v1.
         const std::string src = R"(fn main() -> Unit {
   unsafe { python_ffi.call(); }
   return 0;
 })";
 
         const auto res = resolve_with_source(src, "tests/fixtures/resolve_ffi_unsafe_ok.curlee");
-        if (!std::holds_alternative<resolver::Resolution>(res))
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
         {
-            fail("expected resolver success for python_ffi.call inside unsafe");
+            fail("expected resolver error for python_ffi.call inside unsafe");
         }
     }
 
     {
-        // python_ffi.<not-call> is treated as a builtin module reference but should not trip the
-        // unsafe-context check.
+        // python_ffi.<not-call> is also unsupported in v1.
         const std::string src = R"(fn main() -> Unit {
   python_ffi.other();
   return 0;
 })";
 
         const auto res = resolve_with_source(src, "tests/fixtures/resolve_ffi_other.curlee");
-        if (!std::holds_alternative<resolver::Resolution>(res))
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
         {
-            fail("expected resolver success for python_ffi.other()");
+            fail("expected resolver error for python_ffi.other()");
         }
     }
 

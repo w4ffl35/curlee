@@ -143,7 +143,6 @@ class Checker
     std::vector<Scope> scopes_;
     std::vector<Diagnostic> diags_;
     TypeInfo info_;
-    int unsafe_depth_ = 0;
 
     struct StructInfo
     {
@@ -248,6 +247,9 @@ class Checker
         }
         return base_name->name == "python_ffi" && member->member == "call";
     }
+
+    static constexpr std::string_view kPythonFfiUnsupportedMessage =
+        "python_ffi is not part of the Curlee v1 surface (see Python-Interop-(Future))";
 
     void push_scope() { scopes_.push_back(Scope{}); }
     void pop_scope() { scopes_.pop_back(); }
@@ -459,14 +461,12 @@ class Checker
 
     void check_stmt_node(const UnsafeStmt& s, Span, Type expected_return)
     {
-        ++unsafe_depth_;
         push_scope();
         for (const auto& stmt : s.body->stmts)
         {
             check_stmt(stmt, expected_return);
         }
         pop_scope();
-        --unsafe_depth_;
     }
 
     void check_stmt_node(const IfStmt& s, Span, Type expected_return)
@@ -743,21 +743,8 @@ class Checker
     {
         if (is_python_ffi_call(*e.callee))
         {
-            if (unsafe_depth_ == 0)
-            {
-                error_at(span, "python_ffi.call requires an unsafe context");
-                return std::nullopt;
-            }
-
-            require_capability("python.ffi", span);
-
-            if (!e.args.empty())
-            {
-                error_at(span, "python_ffi.call is stubbed and currently takes 0 arguments");
-                return std::nullopt;
-            }
-
-            return Type{.kind = TypeKind::Unit};
+            error_at(span, std::string(kPythonFfiUnsupportedMessage));
+            return std::nullopt;
         }
 
         if (const auto* callee_name = std::get_if<NameExpr>(&e.callee->node); callee_name != nullptr)
@@ -890,6 +877,12 @@ class Checker
 
             const std::string_view member = parts.back();
             const std::vector<std::string_view> qualifier(parts.begin(), parts.end() - 1);
+
+            if (qualifier.size() == 1 && qualifier.front() == "python_ffi")
+            {
+                error_at(span, std::string(kPythonFfiUnsupportedMessage));
+                return std::nullopt;
+            }
 
             bool qualifier_ok = false;
             if (qualifier.size() == 1)

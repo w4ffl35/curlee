@@ -49,7 +49,7 @@ struct Value
             .variant_name = {},
             .payload = nullptr,
         };
-    }
+    } // GCOVR_EXCL_LINE
 
     static Value bool_v(bool v)
     {
@@ -88,7 +88,7 @@ struct Value
             out.payload = std::make_shared<Value>(std::move(*payload));
         }
         return out;
-    }
+    } // GCOVR_EXCL_LINE
 };
 
 /** @brief Equality comparison for values. */

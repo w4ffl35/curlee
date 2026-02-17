@@ -20,7 +20,7 @@ PythonFfiResult call_python(const curlee::runtime::Capabilities& capabilities,
         return PythonFfiError{"python capability required"};
     }
 
-    return PythonFfiError{"python interop not implemented"};
+    return PythonFfiError{"python interop is unavailable in Curlee v1"};
 }
 
 } // namespace curlee::interop

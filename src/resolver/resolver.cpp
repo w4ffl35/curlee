@@ -113,7 +113,6 @@ class Resolver
     std::optional<std::filesystem::path> base_path_;
     std::optional<std::filesystem::path> entry_dir_;
     std::vector<std::filesystem::path> stdlib_roots_;
-    int unsafe_depth_ = 0;
     bool resolving_ensures_ = false;
 
     struct ModuleInfo
@@ -129,26 +128,8 @@ class Resolver
     // alias name (e.g. "baz") -> module path key in modules_by_path_
     std::unordered_map<std::string_view, std::string> module_aliases_;
 
-    static bool is_python_ffi_call(const Expr& callee)
-    {
-        const auto* member = std::get_if<MemberExpr>(&callee.node);
-        if (member == nullptr)
-        {
-            return false;
-        }
-        if (member->base == nullptr) // GCOVR_EXCL_LINE
-        {
-            return false; // GCOVR_EXCL_LINE
-        }
-
-        const auto* base_name = std::get_if<NameExpr>(&member->base->node);
-        if (base_name == nullptr)
-        {
-            return false;
-        }
-
-        return base_name->name == "python_ffi" && member->member == "call";
-    }
+    static constexpr std::string_view kPythonFfiUnsupportedMessage =
+        "python_ffi is not part of the Curlee v1 surface (see Python-Interop-(Future))";
 
     static bool is_builtin_call_name(std::string_view name)
     {
@@ -401,14 +382,12 @@ class Resolver
 
     void resolve_stmt_node(const UnsafeStmt& s, Span)
     {
-        ++unsafe_depth_;
         push_scope();
         for (const auto& stmt : s.body->stmts)
         {
             resolve_stmt(stmt);
         }
         pop_scope();
-        --unsafe_depth_;
     }
 
     void resolve_stmt_node(const IfStmt& s, Span)
@@ -466,15 +445,6 @@ class Resolver
 
     void resolve_expr_node(const CallExpr& e, Span)
     {
-        if (is_python_ffi_call(*e.callee) && unsafe_depth_ == 0)
-        {
-            Diagnostic d;
-            d.severity = Severity::Error;
-            d.message = "python_ffi.call requires an unsafe context";
-            d.span = e.callee->span;
-            diagnostics_.push_back(std::move(d));
-        }
-
         bool resolve_callee = true;
         if (const auto* callee_name = std::get_if<NameExpr>(&e.callee->node); callee_name != nullptr)
         {
@@ -505,7 +475,11 @@ class Resolver
         if (const auto* base_name = std::get_if<NameExpr>(&e.base->node);
             base_name != nullptr && base_name->name == "python_ffi")
         {
-            // Builtin module name used for interop. Do not require declaration.
+            Diagnostic d;
+            d.severity = Severity::Error;
+            d.message = std::string(kPythonFfiUnsupportedMessage);
+            d.span = span;
+            diagnostics_.push_back(std::move(d));
             return;
         }
 

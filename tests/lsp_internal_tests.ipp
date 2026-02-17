@@ -588,8 +588,7 @@ int main()
             "enum E { V; } "
             "fn foo(x: Int where true) -> Int [ requires true; requires true; ] { return 0; } "
             "fn bar() -> Int { return 0; } "
-            "fn main(p: cap python.ffi) -> Int { let e: E = E::V(); let z: Int = foo(0); unsafe { "
-            "python_ffi.call(); } return bar(); }";
+            "fn main() -> Int { let e: E = E::V(); let z: Int = foo(0); return bar(); }";
         const std::string did_change_ok =
             std::string("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
                         "didChange\",\"params\":{\"textDocument\":{\"uri\":\"") +

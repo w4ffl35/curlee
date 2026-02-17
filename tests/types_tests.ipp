@@ -878,7 +878,7 @@ int main()
     }
 
     {
-        // python_ffi.call requires unsafe, and is stubbed to 0 arguments.
+        // python_ffi surface is de-scoped from v1.
         const std::string source_requires_unsafe = "fn main() -> Unit { python_ffi.call(); }";
         {
             const auto diags =
@@ -886,7 +886,7 @@ int main()
             bool saw = false;
             for (const auto& d : diags)
             {
-                if (d.message.find("python_ffi.call requires an unsafe context") !=
+                if (d.message.find("python_ffi is not part of the Curlee v1 surface") !=
                     std::string::npos)
                 {
                     saw = true;
@@ -894,7 +894,7 @@ int main()
             }
             if (!saw)
             {
-                fail("expected python_ffi.call requires unsafe diagnostic");
+                fail("expected python_ffi unsupported-surface diagnostic");
             }
         }
 
@@ -904,14 +904,15 @@ int main()
             bool saw = false;
             for (const auto& d : diags)
             {
-                if (d.message.find("python_ffi.call is stubbed") != std::string::npos)
+                if (d.message.find("python_ffi is not part of the Curlee v1 surface") !=
+                    std::string::npos)
                 {
                     saw = true;
                 }
             }
             if (!saw)
             {
-                fail("expected python_ffi.call stubbed-args diagnostic");
+                fail("expected python_ffi unsupported-surface diagnostic");
             }
         }
     }

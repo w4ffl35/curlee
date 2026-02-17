@@ -307,7 +307,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                     std::cerr << diag::render(d, stable_file);
                     visiting.erase(key);
                     return false;
-                }
+                } // GCOVR_EXCL_LINE
             }
 
             for (const auto& imp : mod_program.imports)
@@ -318,7 +318,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                     std::cerr << diag::render(*d, stable_file);
                     visiting.erase(key);
                     return false;
-                }
+                } // GCOVR_EXCL_LINE
 
                 const auto& dep_ok = std::get<ImportLoadResult>(dep_loaded);
                 if (visiting.contains(dep_ok.key))
@@ -1008,7 +1008,7 @@ int run(int argc, char** argv)
                     stdlib_roots.push_back(std::string(root_value)); // GCOVR_EXCL_LINE
                     ++i; // GCOVR_EXCL_LINE
                     continue; // GCOVR_EXCL_LINE
-                }
+                } // GCOVR_EXCL_LINE
 
                 if (a == "--cap" || a == "--capability") // GCOVR_EXCL_LINE
                 {
@@ -1035,7 +1035,7 @@ int run(int argc, char** argv)
                     caps.insert(std::string(cap)); // GCOVR_EXCL_LINE
                     ++i; // GCOVR_EXCL_LINE
                     continue; // GCOVR_EXCL_LINE
-                }
+                } // GCOVR_EXCL_LINE
 
                 if (a.starts_with('-'))
                 {

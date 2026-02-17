@@ -384,7 +384,7 @@ int main()
         expect_diag(res, "unknown name 'nope'");
     }
 
-    // python_ffi.call requires unsafe context
+    // python_ffi.call is not part of the v1 surface
     {
         const std::string src = "fn main(p: cap python.ffi) -> Unit { python_ffi.call(); }";
         const auto lexed = lexer::lex(src);
@@ -394,10 +394,10 @@ int main()
         if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
             fail("parse failed");
         const auto res = types::type_check(std::get<parser::Program>(parsed));
-        expect_diag(res, "python_ffi.call requires an unsafe context");
+        expect_diag(res, "python_ffi is not part of the Curlee v1 surface");
     }
 
-    // python_ffi.<not-call>(...) should not be treated as python_ffi.call
+    // python_ffi.<not-call>(...) is also de-scoped from v1
     {
         const std::string src = "fn main() -> Unit { python_ffi.nope(); return; }";
         const auto lexed = lexer::lex(src);
@@ -407,10 +407,10 @@ int main()
         if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
             fail("parse failed");
         const auto res = types::type_check(std::get<parser::Program>(parsed));
-        expect_diag(res, "unknown module qualifier in call: 'python_ffi'");
+        expect_diag(res, "python_ffi is not part of the Curlee v1 surface");
     }
 
-    // python_ffi.call stubbed args inside unsafe
+    // python_ffi.call inside unsafe is still unsupported in v1
     {
         const std::string src =
             "fn main(p: cap python.ffi) -> Unit { unsafe { python_ffi.call(1); } }";
@@ -421,7 +421,7 @@ int main()
         if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
             fail("parse failed");
         const auto res = types::type_check(std::get<parser::Program>(parsed));
-        expect_diag(res, "python_ffi.call is stubbed and currently takes 0 arguments");
+        expect_diag(res, "python_ffi is not part of the Curlee v1 surface");
     }
 
     // capability types: accept cap names without dots (is_capability=true path)
