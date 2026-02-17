@@ -60,3 +60,22 @@ jobs:
       - name: Coverage
         run: |
           bash scripts/coverage.sh --fail-under 100 --fail-under-branch 100 --fail-under-function 100
+
+  release-workflow-contract:
+    name: Release workflow contract
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify release preflight contract
+        run: |
+          set -euo pipefail
+          file=".github/workflows/release.yml"
+
+          grep -q "release-preflight:" "$file"
+          grep -q "needs: \[release-preflight\]" "$file"
+          grep -q "ctest --preset linux-debug --output-on-failure" "$file"
+          grep -q "bash scripts/smoke.sh --both" "$file"
+          grep -q "bash scripts/coverage.sh --fail-under 100 --fail-under-branch 100 --fail-under-function 100" "$file"
