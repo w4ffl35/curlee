@@ -1,6 +1,6 @@
+#include <cerrno>
 #include <cstdlib>
 #include <curlee/cli/cli.h>
-#include <cerrno>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -72,8 +72,11 @@ static CliRun run_check_command(const fs::path& entry_file)
     return run;
 }
 
-static void require_contains_text(const std::string& text, std::string_view needle,
-                                  std::string_view channel_name)
+static void require_contains_text(
+    const std::string& text,
+    std::string_view needle,
+    std::string_view channel_name
+)
 {
     if (text.find(needle) == std::string::npos)
     {

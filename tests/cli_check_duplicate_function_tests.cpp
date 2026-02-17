@@ -50,8 +50,11 @@ static CapturedRun run_cli_capture(const std::vector<std::string>& args_in)
     return result;
 }
 
-static void expect_contains(const std::string& haystack, const std::string& needle,
-                            const std::string& what)
+static void expect_contains(
+    const std::string& haystack,
+    const std::string& needle,
+    const std::string& what
+)
 {
     if (haystack.find(needle) == std::string::npos)
     {
@@ -98,8 +101,10 @@ int main()
             fs::temp_directory_path() / ("curlee_cli_dup_fn_" + std::to_string(pid));
 
         // Entry imports a and b; both define foo().
-        write_file(dir / "entry.curlee",
-                   "import a;\nimport b;\n\nfn main() -> Int {\n  return 0;\n}\n");
+        write_file(
+            dir / "entry.curlee",
+            "import a;\nimport b;\n\nfn main() -> Int {\n  return 0;\n}\n"
+        );
 
         write_file(dir / "a.curlee", "fn foo() -> Int {\n  return 1;\n}\n");
         write_file(dir / "b.curlee", "fn foo() -> Int {\n  return 2;\n}\n");

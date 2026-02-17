@@ -63,8 +63,11 @@ class CliTestFixture
         fail("expected " + std::string(label) + " to be empty");
     }
 
-    static void require_contains(const std::string& haystack, std::string_view needle,
-                                 std::string_view label)
+    static void require_contains(
+        const std::string& haystack,
+        std::string_view needle,
+        std::string_view label
+    )
     {
         if (haystack.find(needle) != std::string::npos)
         {
@@ -104,16 +107,22 @@ int main()
             fs::temp_directory_path() / ("curlee_cli_cycle_" + std::to_string(pid));
 
         // entry imports a
-        CliTestFixture::write_file(dir / "entry.curlee",
-                       "import a;\n\nfn main() -> Int {\n  return 0;\n}\n");
+        CliTestFixture::write_file(
+            dir / "entry.curlee",
+            "import a;\n\nfn main() -> Int {\n  return 0;\n}\n"
+        );
 
         // a imports b
-        CliTestFixture::write_file(dir / "a.curlee",
-                       "import b;\n\nfn f() -> Int {\n  return 0;\n}\n");
+        CliTestFixture::write_file(
+            dir / "a.curlee",
+            "import b;\n\nfn f() -> Int {\n  return 0;\n}\n"
+        );
 
         // b imports a (cycle)
-        CliTestFixture::write_file(dir / "b.curlee",
-                                   "import a;\n\nfn g() -> Int {\n  return 0;\n}\n");
+        CliTestFixture::write_file(
+            dir / "b.curlee",
+            "import a;\n\nfn g() -> Int {\n  return 0;\n}\n"
+        );
 
         const auto run = CliTestFixture::run({"curlee", "check", (dir / "entry.curlee").string()});
         if (run.rc != 1)
