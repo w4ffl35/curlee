@@ -1,0 +1,9 @@
+fn check_positive(x: Int) -> Int [
+  requires x > 0;
+] {
+  return x;
+}
+
+fn main() -> Int {
+  return check_positive(-1);
+}

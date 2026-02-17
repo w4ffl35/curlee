@@ -77,11 +77,12 @@ flowchart LR
 Example (intended syntax):
 
 ```curlee
-fn divide(numerator: Int, denominator: Int) -> Int
-  [ requires denominator != 0;
-    ensures result * denominator == numerator; ]
+fn add(a: Int, b: Int) -> Int
+  [ requires a > 0;
+    requires b > 0;
+    ensures result > a && result > b; ]
 {
-  return numerator / denominator;
+  return a + b;
 }
 ```
 
@@ -255,7 +256,7 @@ Then:
 These fixtures are in the repo and should produce a diagnostic:
 
 ```bash
-./build/linux-debug/curlee check tests/fixtures/check_requires_divide.curlee
+./build/linux-debug/curlee check tests/fixtures/check_requires_fail.curlee
 ./build/linux-debug/curlee check tests/fixtures/check_ensures_fail.curlee
 ```
 

@@ -1,0 +1,15 @@
+fn add(a: Int, b: Int) -> Int
+  [ requires a > 0;
+    requires b > 0;
+    ensures result > a && result > b; ]
+{
+  return a + b;
+}
+
+fn main() -> Int {
+  let res: Int = add(10, 2);
+  if (res != 12) {
+     return 1; // fail
+  }
+  return 0; // success
+}
