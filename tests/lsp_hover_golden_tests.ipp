@@ -459,6 +459,81 @@ static std::size_t count_substring(std::string_view haystack, std::string_view n
     return count;
 }
 
+static bool run_initialize_capabilities_golden_case(const fs::path& data_dir,
+                                                    const std::string& lsp_exe)
+{
+    const std::string expected = slurp(data_dir / "initialize_capabilities.expected");
+
+    const std::string init =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}";
+    const std::string shutdown =
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"shutdown\",\"params\":{}}";
+    const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
+
+    std::string stdin_data;
+    stdin_data += lsp_frame(init);
+    stdin_data += lsp_frame(shutdown);
+    stdin_data += lsp_frame(exit);
+
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+
+    const auto payloads = split_lsp_frames(result.out);
+    std::optional<std::string> init_response;
+    for (const auto& p : payloads)
+    {
+        if (p.find("\"id\":1") == std::string::npos)
+        {
+            continue;
+        }
+        init_response = p;
+        break;
+    }
+
+    if (!init_response.has_value())
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("did not find initialize response (id=1)");
+    }
+
+    std::string got;
+    got += "textDocumentSync=";
+    got += (init_response->find("\"textDocumentSync\":1") != std::string::npos) ? "1" : "<missing>";
+    got += "\n";
+
+    got += "definitionProvider=";
+    got += (init_response->find("\"definitionProvider\":true") != std::string::npos)
+               ? "true"
+               : "<missing>";
+    got += "\n";
+
+    got += "hoverProvider=";
+    got += (init_response->find("\"hoverProvider\":true") != std::string::npos) ? "true" : "<missing>";
+    got += "\n";
+
+    got += "completionProvider=";
+    got += (init_response->find("\"completionProvider\"") != std::string::npos) ? "present" : "absent";
+    got += "\n";
+
+    got += "renameProvider=";
+    got += (init_response->find("\"renameProvider\"") != std::string::npos) ? "present" : "absent";
+    got += "\n";
+
+    if (got != expected)
+    {
+        std::cerr << "GOLDEN MISMATCH: initialize_capabilities.expected\n";
+        std::cerr << "--- expected ---\n" << expected << "\n";
+        std::cerr << "--- got ---\n" << got << "\n";
+        return false;
+    }
+
+    return true;
+}
+
 static bool run_hover_call_case(const fs::path& data_dir, const std::string& lsp_exe)
 {
     const fs::path fixture_path = fs::path("tests/fixtures/lsp_hover_call.curlee");
@@ -777,6 +852,73 @@ static bool run_publish_diagnostics_nonempty_case(const std::string& lsp_exe)
     {
         std::cerr << "LSP stdout:\n" << result.out << "\n";
         fail("expected a non-empty publishDiagnostics diagnostics array for invalid source");
+    }
+
+    return true;
+}
+
+static bool run_publish_diagnostics_message_golden_case(const fs::path& data_dir,
+                                                        const std::string& lsp_exe)
+{
+    const std::string bad_text = "fn main() -> Int { let x: Int = ; return 0; }";
+    const std::string expected = slurp(data_dir / "publish_diagnostics_message.expected");
+    const std::string uri =
+        "file://" + (fs::current_path() / "tests/fixtures" / "hello.curlee").string();
+
+    const std::string init =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}";
+
+    const std::string did_open = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                                 "didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                                 json_escape(uri) +
+                                 "\",\"languageId\":\"curlee\",\"version\":1,\"text\":\"" +
+                                 json_escape(bad_text) + "\"}}}";
+
+    const std::string shutdown =
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"shutdown\",\"params\":{}}";
+    const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
+
+    std::string stdin_data;
+    stdin_data += lsp_frame(init);
+    stdin_data += lsp_frame(did_open);
+    stdin_data += lsp_frame(shutdown);
+    stdin_data += lsp_frame(exit);
+
+    const ProcResult result = run_proc(lsp_exe, stdin_data);
+    if (result.exit_code != 0)
+    {
+        std::cerr << "curlee_lsp stderr:\n" << result.err << "\n";
+        fail("curlee_lsp exited non-zero: " + std::to_string(result.exit_code));
+    }
+
+    const auto payloads = split_lsp_frames(result.out);
+    std::optional<std::string> message;
+    for (const auto& p : payloads)
+    {
+        if (p.find("\"method\":\"textDocument/publishDiagnostics\"") == std::string::npos)
+        {
+            continue;
+        }
+        message = extract_json_string_value(p, "message");
+        if (message.has_value())
+        {
+            break;
+        }
+    }
+
+    if (!message.has_value())
+    {
+        std::cerr << "LSP stdout:\n" << result.out << "\n";
+        fail("did not find publishDiagnostics message");
+    }
+
+    const std::string got = *message + "\n";
+    if (got != expected)
+    {
+        std::cerr << "GOLDEN MISMATCH: publish_diagnostics_message.expected\n";
+        std::cerr << "--- expected ---\n" << expected << "\n";
+        std::cerr << "--- got ---\n" << got << "\n";
+        return false;
     }
 
     return true;
@@ -2118,6 +2260,11 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    if (!run_initialize_capabilities_golden_case(data_dir, lsp_exe))
+    {
+        return 1;
+    }
+
     if (!run_definition_call_case(data_dir, lsp_exe))
     {
         return 1;
@@ -2134,6 +2281,11 @@ int main(int argc, char** argv)
     }
 
     if (!run_publish_diagnostics_nonempty_case(lsp_exe))
+    {
+        return 1;
+    }
+
+    if (!run_publish_diagnostics_message_golden_case(data_dir, lsp_exe))
     {
         return 1;
     }
