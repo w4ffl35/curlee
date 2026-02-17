@@ -135,6 +135,7 @@ User-facing documentation lives in the GitHub wiki:
 
 - https://github.com/w4ffl35/curlee/wiki
 - Supported fragment + stability: https://github.com/w4ffl35/curlee/wiki/Stability-and-Supported-Fragment
+- C++23 code quality standards: https://github.com/w4ffl35/curlee/wiki/C%2B%2B23-Code-Quality-Standards
 
 ## Datasets
 
