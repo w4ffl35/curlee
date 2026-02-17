@@ -176,3 +176,16 @@ jobs:
             echo "expected blocking-policy evaluator to fail when error-severity violations exist"
             exit 1
           fi
+
+  orphan-golden-check:
+    name: Orphan golden check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect orphan golden/expected files
+        run: |
+          set -euo pipefail
+          python3 scripts/check_orphan_goldens.py --format text

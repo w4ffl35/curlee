@@ -10,3 +10,18 @@ These are intentionally separate from `tests/diagnostics/` (renderer unit tests)
 - `run_success.stdout.golden`: expected stdout for `curlee run tests/fixtures/run_success.curlee`.
 - `run_success.stderr.golden`: expected stderr for `curlee run tests/fixtures/run_success.curlee` (empty on success).
 - Tests run with working directory set to the repo root so relative paths are stable.
+
+## Ownership conventions
+
+- Every `*.golden` / `*.expected` file under `tests/` must be owned by a test harness.
+- Ownership is recognized by either:
+	- explicit reference from a `tests/*.cpp` or `tests/*.ipp` file, or
+	- the diagnostics convention (`tests/diagnostics/<name>.golden` paired with
+		`tests/diagnostics/<name>.curlee`).
+- Unowned assets are considered stale and should be removed or wired into a harness.
+
+Check locally:
+
+```bash
+python3 scripts/check_orphan_goldens.py --format text
+```
