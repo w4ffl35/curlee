@@ -53,6 +53,9 @@ int main(int argc, char** argv)
     expect_contains(readme, "No proof, no run.", "core motto");
     expect_contains(readme, "https://github.com/w4ffl35/curlee/wiki", "wiki link");
     expect_contains(readme, "Stability-and-Supported-Fragment", "supported fragment link");
+    expect_contains(readme, "production-readiness stabilization", "status positioning");
+    expect_contains(readme, "Production support matrix", "support policy anchor");
+    expect_contains(readme, "Exit-alpha criteria", "exit-alpha policy anchor");
 
     // Guard against a few known-stale claims.
     expect_not_contains(readme, "Calls: simple **no-arg** calls", "no-arg calls limitation");

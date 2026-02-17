@@ -1,6 +1,6 @@
 # Curlee
 
-![status: alpha](https://img.shields.io/badge/status-alpha-lightgrey)
+![status: production-readiness](https://img.shields.io/badge/status-production--readiness-blue)
 
 Curlee is an experimental **verification-first programming language** and C++23 compiler/runtime.
 
@@ -97,14 +97,25 @@ The MVP logic fragment is intentionally small and decidable.
 
 ## Project status
 
-This repository is early-stage (alpha research prototype).
+Curlee is in **production-readiness stabilization**.
 
-Expectations:
+Current expectations:
 
 - The language and bytecode are not stable yet.
 - Diagnostics, CLI output, and tests are expected to evolve.
 - Verification is intentionally limited to a small fragment; out-of-scope contracts are rejected.
 - If Curlee cannot prove a contract, it will not run the program.
+
+### Production support policy (v1 target)
+
+The production support matrix and exit-alpha criteria are tracked in the wiki:
+
+- https://github.com/w4ffl35/curlee/wiki/Release-Checklist-and-Versioning
+
+Canonical policy anchors:
+
+- `Production support matrix`
+- `Exit-alpha criteria`
 
 ### MVP scope (current)
 
