@@ -1,3 +1,4 @@
+#include <array>
 #include <cstdlib>
 #include <curlee/cli/cli.h>
 #include <filesystem>
@@ -13,58 +14,100 @@ namespace fs = std::filesystem;
 
 [[noreturn]] static void fail(const std::string& msg)
 {
-    std::cerr << "FAIL: " << msg << "\n";
+    std::cerr << "CLI IMPORT ERROR TEST FAILURE: " << msg << "\n";
     std::exit(1);
 }
 
-static int run_cli_capture(const std::vector<std::string>& argv_storage, std::string& out,
-                           std::string& err)
+struct CapturedRun
+{
+    int rc = 0;
+    std::string out;
+    std::string err;
+};
+
+static CapturedRun run_check_capture(const std::string& entry_arg)
 {
     std::ostringstream captured_out;
     std::ostringstream captured_err;
 
-    auto* old_out = std::cout.rdbuf(captured_out.rdbuf());
-    auto* old_err = std::cerr.rdbuf(captured_err.rdbuf());
+    std::streambuf* old_out = std::cout.rdbuf(captured_out.rdbuf());
+    std::streambuf* old_err = std::cerr.rdbuf(captured_err.rdbuf());
 
-    std::vector<std::string> args = argv_storage;
-    std::vector<char*> argv;
-    argv.reserve(args.size());
-    for (auto& s : args)
-    {
-        argv.push_back(s.data());
-    }
+    std::string command = "curlee";
+    std::string subcommand = "check";
+    std::string path = entry_arg;
+    std::array<char*, 3> argv = {command.data(), subcommand.data(), path.data()};
 
-    const int rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
+    CapturedRun run;
+    run.rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
 
     std::cout.rdbuf(old_out);
     std::cerr.rdbuf(old_err);
 
-    out = captured_out.str();
-    err = captured_err.str();
-    return rc;
+    run.out = captured_out.str();
+    run.err = captured_err.str();
+    return run;
 }
 
-static void expect_contains(const std::string& haystack, const std::string& needle,
-                            const std::string& what)
+static void expect_contains(
+    const std::string& haystack,
+    std::string_view needle,
+    std::string_view what
+)
 {
-    if (haystack.find(needle) == std::string::npos)
+    const bool found = haystack.find(needle) != std::string::npos;
+    if (found)
     {
-        fail("expected " + what + " to contain '" + needle + "'\n---\n" + haystack + "\n---");
+        return;
     }
+    fail("expected " + std::string(what) + " to contain '" + std::string(needle) +
+         "'\n---\n" + haystack + "\n---");
 }
 
 static void expect_empty(const std::string& s, const std::string& what)
 {
-    if (!s.empty())
+    if (s.empty())
     {
-        fail("expected " + what + " to be empty\n---\n" + s + "\n---");
+        return;
     }
+    fail("expected " + what + " to be empty\n---\n" + s + "\n---");
+}
+
+static void expect_check_exit(const CapturedRun& run, int expected_rc, const std::string& context)
+{
+    if (run.rc != expected_rc)
+    {
+        fail("unexpected exit code for " + context + ": expected " + std::to_string(expected_rc) +
+             ", got " + std::to_string(run.rc) + "; stderr: " + run.err);
+    }
+}
+
+static void expect_check_failure_contains(const std::string& entry_arg,
+                                          const std::string& context,
+                                          std::initializer_list<std::string> needles)
+{
+    const CapturedRun run = run_check_capture(entry_arg);
+    expect_check_exit(run, 1, context);
+    expect_empty(run.out, "stdout");
+    for (const std::string& needle : needles)
+    {
+        expect_contains(run.err, needle, "stderr");
+    }
+}
+
+static void expect_check_success_clean(const std::string& entry_arg, const std::string& context)
+{
+    const CapturedRun run = run_check_capture(entry_arg);
+    expect_check_exit(run, 0, context);
+    expect_empty(run.out, "stdout");
+    expect_empty(run.err, "stderr");
 }
 
 static fs::path write_temp_curlee(const std::string& stem, const std::string& contents)
 {
-    const auto pid = static_cast<unsigned long>(::getpid());
-    const fs::path dir = fs::temp_directory_path() / "curlee_cli_tests";
+    const unsigned long pid = static_cast<unsigned long>(::getpid());
+    const fs::path base_dir = fs::temp_directory_path();
+    const fs::path dir = base_dir / "curlee_cli_tests";
 
     std::error_code ec;
     fs::create_directories(dir, ec);
@@ -124,20 +167,21 @@ static fs::path make_rel_dir(const std::string& stem)
 
 static void write_file(const fs::path& path, std::string_view contents)
 {
-    std::error_code ec;
-    fs::create_directories(path.parent_path(), ec);
-    if (ec)
+    const fs::path parent = path.parent_path();
+    std::error_code mkdir_ec;
+    fs::create_directories(parent, mkdir_ec);
+    if (mkdir_ec)
     {
-        fail("failed to create dirs for: " + path.string() + ": " + ec.message());
+        fail("failed to create dirs for: " + parent.string() + ": " + mkdir_ec.message());
     }
 
-    std::ofstream f(path, std::ios::binary | std::ios::trunc);
-    if (!f)
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output)
     {
         fail("failed to open temp file: " + path.string());
     }
-    f << contents;
-    if (!f)
+    output << contents;
+    if (!output.good())
     {
         fail("failed to write temp file: " + path.string());
     }
@@ -154,34 +198,20 @@ int main()
 
         const fs::path expected = entry.parent_path() / "missing" / "module.curlee";
 
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
-        if (rc != 1)
-        {
-            fail("expected error exit code for check import failure");
-        }
-
-        expect_empty(out, "stdout");
-        expect_contains(err, "error:", "stderr");
-        expect_contains(err, "import not found: '" + import_path + "'", "stderr");
-        expect_contains(err, "expected module at " + expected.string(), "stderr");
+        expect_check_failure_contains(entry.string(),
+                                      "check import failure",
+                                      {
+                                          "error:",
+                                          "import not found: '" + import_path + "'",
+                                          "expected module at " + expected.string(),
+                                      });
     }
 
     // check: entry lex errors are surfaced via CLI.
     {
         const fs::path entry = write_temp_curlee("check_entry_lex_error", "@\n");
 
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
-        if (rc != 1)
-        {
-            fail("expected error exit code for entry lex error");
-        }
-
-        expect_empty(out, "stdout");
-        expect_contains(err, "error:", "stderr");
+        expect_check_failure_contains(entry.string(), "entry lex error", {"error:"});
     }
 
     // check: import resolves to an existing path that cannot be loaded as a file.
@@ -207,20 +237,14 @@ int main()
 
         write_file(entry, "import foo.bad;\n\nfn main() -> Int {\n  return 0;\n}\n");
 
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
+        const CapturedRun run = run_check_capture(entry.string());
 
         std::error_code restore_ec;
         fs::permissions(bad_module, fs::perms::owner_read, fs::perm_options::add, restore_ec);
 
-        if (rc != 1)
-        {
-            fail("expected error exit code for import load failure");
-        }
-
-        expect_empty(out, "stdout");
-        expect_contains(err, "failed to load imported module:", "stderr");
+        expect_check_exit(run, 1, "import load failure");
+        expect_empty(run.out, "stdout");
+        expect_contains(run.err, "failed to load imported module:", "stderr");
     }
 
     // check: importing yourself is an import cycle (entry file is already in the visiting set).
@@ -230,16 +254,9 @@ int main()
 
         write_file(entry, "import main;\n\nfn main() -> Int {\n  return 0;\n}\n");
 
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
-        if (rc != 1)
-        {
-            fail("expected error exit code for self import cycle");
-        }
-
-        expect_empty(out, "stdout");
-        expect_contains(err, "import cycle detected", "stderr");
+        expect_check_failure_contains(entry.string(),
+                                      "self import cycle",
+                                      {"import cycle detected"});
     }
 
     // check: same as above, but using relative paths (exercises different filesystem/string paths).
@@ -249,17 +266,10 @@ int main()
 
         write_file(entry, "import main;\n\nfn main() -> Int {\n  return 0;\n}\n");
 
-        std::string out;
-        std::string err;
         const std::string entry_arg = (fs::path(".") / entry).string();
-        const int rc = run_cli_capture({"curlee", "check", entry_arg}, out, err);
-        if (rc != 1)
-        {
-            fail("expected error exit code for self import cycle (relative)");
-        }
-
-        expect_empty(out, "stdout");
-        expect_contains(err, "import cycle detected", "stderr");
+        expect_check_failure_contains(entry_arg,
+                                      "self import cycle (relative)",
+                                      {"import cycle detected"});
 
         std::error_code ec;
         fs::remove_all(dir, ec);
@@ -274,16 +284,7 @@ int main()
         write_file(entry, "import foo.bar;\n\nfn main() -> Int { return 0; }\n");
         write_file(dep, "@\n");
 
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
-        if (rc != 1)
-        {
-            fail("expected error exit code for module lex error");
-        }
-
-        expect_empty(out, "stdout");
-        expect_contains(err, "error:", "stderr");
+        expect_check_failure_contains(entry.string(), "module lex error", {"error:"});
     }
 
     // check: module parse errors are surfaced (covers vector diagnostics rendering).
@@ -295,16 +296,7 @@ int main()
         write_file(entry, "import foo.bar;\n\nfn main() -> Int { return 0; }\n");
         write_file(dep, "fn\n");
 
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
-        if (rc != 1)
-        {
-            fail("expected error exit code for module parse error");
-        }
-
-        expect_empty(out, "stdout");
-        expect_contains(err, "error:", "stderr");
+        expect_check_failure_contains(entry.string(), "module parse error", {"error:"});
     }
 
     // check: imported modules must not define main.
@@ -316,16 +308,9 @@ int main()
         write_file(entry, "import dep;\n\nfn main() -> Int { return 0; }\n");
         write_file(dep, "fn main() -> Int { return 123; }\n");
 
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
-        if (rc != 1)
-        {
-            fail("expected error exit code for imported main");
-        }
-
-        expect_empty(out, "stdout");
-        expect_contains(err, "imported modules must not define 'main'", "stderr");
+        expect_check_failure_contains(entry.string(),
+                                      "imported main",
+                                      {"imported modules must not define 'main'"});
     }
 
     // check: module imports that fail to load produce an error anchored at the importing module.
@@ -337,16 +322,9 @@ int main()
         write_file(entry, "import dep;\n\nfn main() -> Int { return 0; }\n");
         write_file(dep, "import missing;\n\nfn foo() -> Int { return 1; }\n");
 
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
-        if (rc != 1)
-        {
-            fail("expected error exit code for module import load failure");
-        }
-
-        expect_empty(out, "stdout");
-        expect_contains(err, "import not found", "stderr");
+        expect_check_failure_contains(entry.string(),
+                                      "module import load failure",
+                                      {"import not found"});
     }
 
     // check: nested module failures propagate without emitting a second diagnostic.
@@ -360,16 +338,7 @@ int main()
         write_file(a, "import b;\n\nfn foo() -> Int { return 1; }\n");
         write_file(b, "@\n");
 
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
-        if (rc != 1)
-        {
-            fail("expected error exit code for nested import failure");
-        }
-
-        expect_empty(out, "stdout");
-        expect_contains(err, "error:", "stderr");
+        expect_check_failure_contains(entry.string(), "nested import failure", {"error:"});
     }
 
     // check: resolver errors in imported modules are rendered.
@@ -381,16 +350,9 @@ int main()
         write_file(entry, "import dep;\n\nfn main() -> Int { return 0; }\n");
         write_file(dep, "fn foo() -> Int { return x; }\n");
 
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
-        if (rc != 1)
-        {
-            fail("expected error exit code for resolver error in module");
-        }
-
-        expect_empty(out, "stdout");
-        expect_contains(err, "error:", "stderr");
+        expect_check_failure_contains(entry.string(),
+                                      "resolver error in module",
+                                      {"error:"});
     }
 
     // check: type errors in imported modules are rendered.
@@ -402,16 +364,7 @@ int main()
         write_file(entry, "import dep;\n\nfn main() -> Int { return 0; }\n");
         write_file(dep, "fn foo() -> Int { return true; }\n");
 
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
-        if (rc != 1)
-        {
-            fail("expected error exit code for type error in module");
-        }
-
-        expect_empty(out, "stdout");
-        expect_contains(err, "error:", "stderr");
+        expect_check_failure_contains(entry.string(), "type error in module", {"error:"});
     }
 
     // check: verification errors in imported modules are rendered.
@@ -423,16 +376,9 @@ int main()
         write_file(entry, "import dep;\n\nfn main() -> Int { return 0; }\n");
         write_file(dep, "fn foo() -> Int [\n  ensures result > 0;\n] {\n  return 0;\n}\n");
 
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
-        if (rc != 1)
-        {
-            fail("expected error exit code for verification error in module");
-        }
-
-        expect_empty(out, "stdout");
-        expect_contains(err, "ensures clause not satisfied", "stderr");
+        expect_check_failure_contains(entry.string(),
+                                      "verification error in module",
+                                      {"ensures clause not satisfied"});
     }
 
     // check: duplicate function names across modules are rejected during merge.
@@ -446,17 +392,12 @@ int main()
             "import dep;\n\nfn foo() -> Int { return 1; }\n\nfn main() -> Int { return 0; }\n");
         write_file(dep, "fn foo() -> Int { return 2; }\n");
 
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
-        if (rc != 1)
-        {
-            fail("expected error exit code for duplicate function across modules");
-        }
-
-        expect_empty(out, "stdout");
-        expect_contains(err, "duplicate function across modules: 'foo'", "stderr");
-        expect_contains(err, "conflict while importing", "stderr");
+        expect_check_failure_contains(entry.string(),
+                                      "duplicate function across modules",
+                                      {
+                                          "duplicate function across modules: 'foo'",
+                                          "conflict while importing",
+                                      });
     }
 
     // check: duplicate function across modules (relative paths variant).
@@ -470,18 +411,13 @@ int main()
             "import dep;\n\nfn foo() -> Int { return 1; }\n\nfn main() -> Int { return 0; }\n");
         write_file(dep, "fn foo() -> Int { return 2; }\n");
 
-        std::string out;
-        std::string err;
         const std::string entry_arg = (fs::path(".") / entry).string();
-        const int rc = run_cli_capture({"curlee", "check", entry_arg}, out, err);
-        if (rc != 1)
-        {
-            fail("expected error exit code for duplicate function across modules (relative)");
-        }
-
-        expect_empty(out, "stdout");
-        expect_contains(err, "duplicate function across modules: 'foo'", "stderr");
-        expect_contains(err, "conflict while importing", "stderr");
+        expect_check_failure_contains(entry_arg,
+                                      "duplicate function across modules (relative)",
+                                      {
+                                          "duplicate function across modules: 'foo'",
+                                          "conflict while importing",
+                                      });
 
         std::error_code ec;
         fs::remove_all(dir, ec);
@@ -499,18 +435,12 @@ int main()
         write_file(shared, "fn helper() -> Int { return 2; }\n");
 
         ::setenv("CURLEE_DEBUG_IMPORTS", "1", 1);
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
+        const CapturedRun run = run_check_capture(entry.string());
         ::unsetenv("CURLEE_DEBUG_IMPORTS");
 
-        if (rc != 0)
-        {
-            fail("expected check to succeed with debug imports enabled; stderr: " + err);
-        }
-
-        expect_contains(err, "[import] trying ", "stderr");
-        expect_contains(err, "[import] ok: ", "stderr");
+        expect_check_exit(run, 0, "debug imports enabled");
+        expect_contains(run.err, "[import] trying ", "stderr");
+        expect_contains(run.err, "[import] ok: ", "stderr");
     }
 
     // check: CURLEE_DEBUG_IMPORTS also logs per-root load failures.
@@ -521,20 +451,14 @@ int main()
         write_file(entry, "import missing.module;\n\nfn main() -> Int { return 0; }\n");
 
         ::setenv("CURLEE_DEBUG_IMPORTS", "1", 1);
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
+        const CapturedRun run = run_check_capture(entry.string());
         ::unsetenv("CURLEE_DEBUG_IMPORTS");
 
-        if (rc != 1)
-        {
-            fail("expected check to fail for missing module with debug imports enabled");
-        }
-
-        expect_empty(out, "stdout");
-        expect_contains(err, "[import] trying ", "stderr");
-        expect_contains(err, "[import] failed:", "stderr");
-        expect_contains(err, "import not found:", "stderr");
+        expect_check_exit(run, 1, "debug imports missing module");
+        expect_empty(run.out, "stdout");
+        expect_contains(run.err, "[import] trying ", "stderr");
+        expect_contains(run.err, "[import] failed:", "stderr");
+        expect_contains(run.err, "import not found:", "stderr");
     }
 
     // check: duplicate imports reuse already-loaded module files.
@@ -546,15 +470,7 @@ int main()
         write_file(entry, "import foo.bar;\nimport foo.bar;\n\nfn main() -> Int { return 0; }\n");
         write_file(dep, "fn foo() -> Int { return 7; }\n");
 
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
-        if (rc != 0)
-        {
-            fail("expected check to succeed with duplicate imports; stderr: " + err);
-        }
-        expect_empty(err, "stderr");
-        expect_empty(out, "stdout");
+        expect_check_success_clean(entry.string(), "duplicate imports");
     }
 
     // check: shared modules are only checked once (visited short-circuit inside check_module).
@@ -570,16 +486,7 @@ int main()
         write_file(b, "import shared;\n\nfn fb() -> Int { return 2; }\n");
         write_file(shared, "fn helper() -> Int { return 3; }\n");
 
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
-        if (rc != 0)
-        {
-            fail("expected check to succeed for diamond imports; stderr: " + err);
-        }
-
-        expect_empty(out, "stdout");
-        expect_empty(err, "stderr");
+        expect_check_success_clean(entry.string(), "diamond imports");
     }
 
     return 0;
