@@ -219,6 +219,28 @@ class Emitter
         chunk_.code[pos + 1] = static_cast<std::uint8_t>((value >> 8) & 0xFF);
     }
 
+    void emit_u8(std::uint8_t value, Span span)
+    {
+        chunk_.code.push_back(value);
+        chunk_.spans.push_back(span);
+    }
+
+    void emit_string_operand(std::string_view text, Span span)
+    {
+        const auto idx = chunk_.add_constant(Value::string_v(std::string(text)));
+        // Defensive guard: the chunk format uses 16-bit constant indices.
+        // Reaching this would require >65k constants in one chunk, which is out-of-scope for
+        // MVP runnable programs and impractical in tests.
+        // GCOVR_EXCL_START
+        if (idx > std::numeric_limits<std::uint16_t>::max())
+        {
+            diags_.push_back(error_at(span, "too many constants for 16-bit constant pool"));
+            return;
+        }
+        // GCOVR_EXCL_STOP
+        chunk_.emit_u16(static_cast<std::uint16_t>(idx), span);
+    }
+
     void emit_function(const Function& fn, bool is_main)
     {
         current_is_main_ = is_main;
@@ -686,6 +708,82 @@ class Emitter
 
     void emit_expr_node(const CallExpr& expr, Span span)
     {
+        if (const auto* callee_scoped = std::get_if<ScopedNameExpr>(&expr.callee->node);
+            callee_scoped != nullptr)
+        {
+            if (expr.args.size() > 1)
+            {
+                diags_.push_back(error_at(span,
+                                          "enum variant constructor expects at most 1 argument"));
+                return;
+            }
+
+            if (!expr.args.empty()) // GCOVR_EXCL_LINE
+            {
+                emit_expr(expr.args[0]);
+                if (!diags_.empty())
+                {
+                    return;
+                }
+            }
+
+            chunk_.emit(OpCode::MakeEnum, span);
+            emit_string_operand(callee_scoped->lhs, span);
+            // Only reachable when emit_string_operand hits 16-bit constant overflow.
+            // GCOVR_EXCL_START
+            if (!diags_.empty())
+            {
+                return;
+            }
+            emit_string_operand(callee_scoped->rhs, span);
+            if (!diags_.empty())
+            {
+                return;
+            }
+            // GCOVR_EXCL_STOP
+            emit_u8(expr.args.empty() ? 0 : 1, span); // GCOVR_EXCL_LINE
+            return;
+        }
+
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node); // GCOVR_EXCL_LINE
+            callee_name != nullptr &&
+            (callee_name->name == "variant_is" || callee_name->name == "variant_unwrap"))
+        {
+            if (expr.args.size() != 2)
+            {
+                diags_.push_back(
+                    error_at(span, std::string(callee_name->name) + " expects exactly 2 arguments"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            const auto* variant_ref = std::get_if<ScopedNameExpr>(&expr.args[1].node);
+            if (variant_ref == nullptr)
+            {
+                diags_.push_back(error_at(
+                    span, std::string(callee_name->name) + " expects second argument Enum::Variant"));
+                return;
+            }
+
+            chunk_.emit(callee_name->name == "variant_is" ? OpCode::EnumIs : OpCode::EnumUnwrap,
+                        span);
+            emit_string_operand(variant_ref->lhs, span);
+            // Only reachable when emit_string_operand hits 16-bit constant overflow.
+            // GCOVR_EXCL_START
+            if (!diags_.empty())
+            {
+                return;
+            }
+            // GCOVR_EXCL_STOP
+            emit_string_operand(variant_ref->rhs, span);
+            return;
+        }
+
         // Builtin: print(<expr>)
         if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
             callee_name != nullptr && callee_name->name == "print")

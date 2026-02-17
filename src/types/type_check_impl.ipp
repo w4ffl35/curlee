@@ -700,6 +700,45 @@ class Checker
         return fit->second;
     }
 
+    struct VariantRef
+    {
+        std::string_view enum_name;
+        std::string_view variant_name;
+        const EnumInfo::VariantInfo* info = nullptr;
+    };
+
+    [[nodiscard]] std::optional<VariantRef>
+    parse_variant_ref_arg(const Expr& expr, Span span, std::string_view op_name)
+    {
+        const auto* scoped = std::get_if<ScopedNameExpr>(&expr.node);
+        if (scoped == nullptr)
+        {
+            error_at(span, std::string(op_name) + " expects second argument Enum::Variant");
+            return std::nullopt;
+        }
+
+        const auto enum_it = enums_.find(scoped->lhs);
+        if (enum_it == enums_.end())
+        {
+            error_at(span, "unknown enum type '" + std::string(scoped->lhs) + "'");
+            return std::nullopt;
+        }
+
+        const auto variant_it = enum_it->second.variants.find(scoped->rhs);
+        if (variant_it == enum_it->second.variants.end())
+        {
+            error_at(span, "unknown variant '" + std::string(scoped->rhs) + "' for enum '" +
+                               std::string(scoped->lhs) + "'");
+            return std::nullopt;
+        }
+
+        return VariantRef{
+            .enum_name = scoped->lhs,
+            .variant_name = scoped->rhs,
+            .info = &variant_it->second,
+        };
+    }
+
     [[nodiscard]] std::optional<Type> check_expr_node(const CallExpr& e, Span span)
     {
         if (is_python_ffi_call(*e.callee))
@@ -719,6 +758,67 @@ class Checker
             }
 
             return Type{.kind = TypeKind::Unit};
+        }
+
+        if (const auto* callee_name = std::get_if<NameExpr>(&e.callee->node); callee_name != nullptr)
+        {
+            if (callee_name->name == "variant_is")
+            {
+                if (e.args.size() != 2)
+                {
+                    error_at(span, "variant_is expects exactly 2 arguments");
+                    return std::nullopt;
+                }
+
+                const auto enum_value_t = check_expr(e.args[0]);
+                const auto variant_ref = parse_variant_ref_arg(e.args[1], span, "variant_is");
+                if (!enum_value_t.has_value() || !variant_ref.has_value()) // GCOVR_EXCL_LINE
+                {
+                    return std::nullopt;
+                }
+
+                if (enum_value_t->kind != TypeKind::Enum || enum_value_t->name != variant_ref->enum_name) // GCOVR_EXCL_LINE
+                {
+                    error_at(span,
+                             "variant_is enum mismatch: expected value of type '" +
+                                 std::string(variant_ref->enum_name) + "'");
+                    return std::nullopt;
+                }
+
+                return Type{.kind = TypeKind::Bool};
+            }
+
+            if (callee_name->name == "variant_unwrap")
+            {
+                if (e.args.size() != 2)
+                {
+                    error_at(span, "variant_unwrap expects exactly 2 arguments");
+                    return std::nullopt;
+                }
+
+                const auto enum_value_t = check_expr(e.args[0]);
+                const auto variant_ref = parse_variant_ref_arg(e.args[1], span, "variant_unwrap");
+                if (!enum_value_t.has_value() || !variant_ref.has_value()) // GCOVR_EXCL_LINE
+                {
+                    return std::nullopt;
+                }
+
+                if (enum_value_t->kind != TypeKind::Enum || enum_value_t->name != variant_ref->enum_name) // GCOVR_EXCL_LINE
+                {
+                    error_at(span,
+                             "variant_unwrap enum mismatch: expected value of type '" +
+                                 std::string(variant_ref->enum_name) + "'");
+                    return std::nullopt;
+                }
+
+                if (!variant_ref->info->payload.has_value())
+                {
+                    error_at(span, "variant_unwrap requires a payload-bearing variant");
+                    return std::nullopt;
+                }
+
+                return *variant_ref->info->payload;
+            }
         }
 
         if (const auto* callee_scoped = std::get_if<ScopedNameExpr>(&e.callee->node);

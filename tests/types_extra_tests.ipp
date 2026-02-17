@@ -219,6 +219,171 @@ int main()
         expect_diag(res, "expects exactly 1 payload argument");
     }
 
+    // enum deconstruction: variant_is + variant_unwrap success path
+    {
+        const std::string src =
+            "enum E { A(Int); B; } fn main() -> Int { let e: E = E::A(41); if "
+            "(variant_is(e, E::A)) { return variant_unwrap(e, E::A) + 1; } return 0; }";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_ok(res);
+    }
+
+    // enum deconstruction: variant_is enum mismatch
+    {
+        const std::string src =
+            "enum E { A(Int); } enum F { A(Int); } fn main() -> Bool { let e: E = E::A(1); "
+            "return variant_is(e, F::A); }";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_diag(res, "variant_is enum mismatch");
+    }
+
+    // enum deconstruction: variant_unwrap requires payload-bearing variant
+    {
+        const std::string src =
+            "enum E { A; } fn main() -> Int { let e: E = E::A(); return variant_unwrap(e, E::A); }";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_diag(res, "variant_unwrap requires a payload-bearing variant");
+    }
+
+    // enum deconstruction: second arg must be Enum::Variant
+    {
+        const std::string src =
+            "enum E { A(Int); } fn main() -> Bool { let e: E = E::A(1); return variant_is(e, e); }";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_diag(res, "variant_is expects second argument Enum::Variant");
+    }
+
+    // enum deconstruction: arity checks
+    {
+        const std::string src =
+            "enum E { A(Int); } fn main() -> Bool { let e: E = E::A(1); return variant_is(e); }";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_diag(res, "variant_is expects exactly 2 arguments");
+    }
+
+    {
+        const std::string src =
+            "enum E { A(Int); } fn main() -> Int { let e: E = E::A(1); return variant_unwrap(e); }";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_diag(res, "variant_unwrap expects exactly 2 arguments");
+    }
+
+    // enum deconstruction: unknown enum/variant in scoped reference
+    {
+        const std::string src =
+            "enum E { A(Int); } fn main() -> Bool { let e: E = E::A(1); return variant_is(e, Nope::A); }";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_diag(res, "unknown enum type 'Nope'");
+    }
+
+    {
+        const std::string src =
+            "enum E { A(Int); } fn main() -> Bool { let e: E = E::A(1); return variant_is(e, E::Nope); }";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_diag(res, "unknown variant 'Nope' for enum 'E'");
+    }
+
+    // enum deconstruction: first argument must be enum value
+    {
+        const std::string src =
+            "enum E { A(Int); } fn main() -> Bool { return variant_is(1, E::A); }";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_diag(res, "variant_is enum mismatch");
+    }
+
+    {
+        const std::string src =
+            "enum E { A(Int); } fn main() -> Int { return variant_unwrap(1, E::A); }";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_diag(res, "variant_unwrap enum mismatch");
+    }
+
+    {
+        const std::string src =
+            "enum E { A(Int); } fn main() -> Bool { return variant_is(nope, E::A); }";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_diag(res, "unknown name 'nope'");
+    }
+
+    {
+        const std::string src =
+            "enum E { A(Int); } fn main() -> Int { return variant_unwrap(nope, E::A); }";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_diag(res, "unknown name 'nope'");
+    }
+
     // python_ffi.call requires unsafe context
     {
         const std::string src = "fn main(p: cap python.ffi) -> Unit { python_ffi.call(); }";

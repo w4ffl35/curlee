@@ -70,6 +70,13 @@ static std::vector<curlee::vm::OpCode> decode_ops(const curlee::vm::Chunk& chunk
         case OpCode::Call:
             ip += 2;
             break;
+        case OpCode::MakeEnum:
+            ip += 5;
+            break;
+        case OpCode::EnumIs:
+        case OpCode::EnumUnwrap:
+            ip += 4;
+            break;
         case OpCode::Add:
         case OpCode::Sub:
         case OpCode::Mul:
@@ -352,6 +359,190 @@ int main()
         if (!res.ok || !(res.value == curlee::vm::Value::int_v(0)))
         {
             fail("expected print(...) program to run with io.stdout capability");
+        }
+    }
+
+    {
+        const std::string source =
+            "enum Maybe { Some(Int); None; }"
+            "fn main() -> Int {"
+            "  let m: Maybe = Maybe::Some(41);"
+            "  if (variant_is(m, Maybe::Some)) {"
+            "    return variant_unwrap(m, Maybe::Some) + 1;"
+            "  }"
+            "  return 0;"
+            "}";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto ops = decode_ops(chunk);
+        if (!contains_op(ops, curlee::vm::OpCode::MakeEnum) ||
+            !contains_op(ops, curlee::vm::OpCode::EnumIs) ||
+            !contains_op(ops, curlee::vm::OpCode::EnumUnwrap))
+        {
+            fail("expected enum constructor and variant ops to emit enum opcodes");
+        }
+
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(42)))
+        {
+            fail("expected enum variant test/unwrap path to evaluate to 42");
+        }
+    }
+
+    {
+        const std::string source = "fn main() -> Bool { return variant_is(1, nope); }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for variant_is bad-arg case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for variant_is bad-arg case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for variant_is bad-arg case");
+        }
+
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("variant_is expects second argument Enum::Variant") ==
+                std::string::npos)
+        {
+            fail("expected variant_is second-argument diagnostic");
+        }
+    }
+
+    {
+        const std::string source = "fn main() -> Int { return variant_unwrap(1); }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for variant_unwrap arity case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for variant_unwrap arity case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for variant_unwrap arity case");
+        }
+
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("variant_unwrap expects exactly 2 arguments") ==
+                std::string::npos)
+        {
+            fail("expected variant_unwrap arity diagnostic");
+        }
+    }
+
+    {
+        const std::string source =
+            "enum E { A(Int); } fn main() -> E { return E::A(1, 2); }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for enum constructor arity case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for enum constructor arity case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for enum constructor arity case");
+        }
+
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("enum variant constructor expects at most 1 argument") ==
+                std::string::npos)
+        {
+            fail("expected enum constructor arity diagnostic");
+        }
+    }
+
+    {
+        const std::string source = "enum E { A(Int); } fn main() -> E { return E::A(nope); }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for enum constructor bad-arg name case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for enum constructor bad-arg name case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for enum constructor bad-arg name case");
+        }
+
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+        {
+            fail("expected unknown-name diagnostic for enum constructor argument");
+        }
+    }
+
+    {
+        const std::string source = "fn main() -> Bool { return variant_is(nope, E::A); }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for variant_is bad first arg case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for variant_is bad first arg case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for variant_is bad first arg case");
+        }
+
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+        {
+            fail("expected unknown-name diagnostic for variant_is first argument");
         }
     }
 

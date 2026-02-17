@@ -241,6 +241,386 @@ static void vm_should_fail_no_return_at_end()
     }
 }
 
+static void value_enum_equality_and_to_string()
+{
+    using namespace curlee::vm;
+
+    const Value some1 = Value::enum_v("Maybe", "Some", Value::int_v(1));
+    const Value some1_b = Value::enum_v("Maybe", "Some", Value::int_v(1));
+    const Value some2 = Value::enum_v("Maybe", "Some", Value::int_v(2));
+    const Value none = Value::enum_v("Maybe", "None");
+    const Value other_enum = Value::enum_v("Other", "Some", Value::int_v(1));
+
+    if (!(some1 == some1_b))
+    {
+        fail("expected equal enum values with equal payload");
+    }
+    if (some1 == some2)
+    {
+        fail("expected enum payload mismatch to compare unequal");
+    }
+    if (some1 == Value::enum_v("Maybe", "Some"))
+    {
+        fail("expected enum payload-presence mismatch to compare unequal");
+    }
+    if (some1 == other_enum)
+    {
+        fail("expected enum name mismatch to compare unequal");
+    }
+    if (curlee::vm::to_string(some1) != "Maybe::Some(1)")
+    {
+        fail("expected payload enum string form");
+    }
+    if (curlee::vm::to_string(none) != "Maybe::None")
+    {
+        fail("expected no-payload enum string form");
+    }
+}
+
+static void vm_enum_ops_success_paths()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+
+    const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+    const auto some_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Some")));
+
+    chunk.emit_constant(Value::int_v(7));
+    chunk.emit(OpCode::MakeEnum);
+    chunk.emit_u16(maybe_idx);
+    chunk.emit_u16(some_idx);
+    chunk.code.push_back(1);
+    chunk.spans.push_back({});
+
+    chunk.emit(OpCode::EnumIs);
+    chunk.emit_u16(maybe_idx);
+    chunk.emit_u16(some_idx);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    const auto is_res = vm.run(chunk);
+    if (!is_res.ok || !(is_res.value == Value::bool_v(true)))
+    {
+        fail("expected enum-is true for matching variant");
+    }
+
+    Chunk unwrap_chunk;
+    const auto maybe2_idx =
+        static_cast<std::uint16_t>(unwrap_chunk.add_constant(Value::string_v("Maybe")));
+    const auto some2_idx =
+        static_cast<std::uint16_t>(unwrap_chunk.add_constant(Value::string_v("Some")));
+    unwrap_chunk.emit_constant(Value::int_v(9));
+    unwrap_chunk.emit(OpCode::MakeEnum);
+    unwrap_chunk.emit_u16(maybe2_idx);
+    unwrap_chunk.emit_u16(some2_idx);
+    unwrap_chunk.code.push_back(1);
+    unwrap_chunk.spans.push_back({});
+    unwrap_chunk.emit(OpCode::EnumUnwrap);
+    unwrap_chunk.emit_u16(maybe2_idx);
+    unwrap_chunk.emit_u16(some2_idx);
+    unwrap_chunk.emit(OpCode::Return);
+
+    const auto unwrap_res = vm.run(unwrap_chunk);
+    if (!unwrap_res.ok || !(unwrap_res.value == Value::int_v(9)))
+    {
+        fail("expected enum unwrap to return payload");
+    }
+}
+
+static void vm_enum_ops_error_paths()
+{
+    using namespace curlee::vm;
+
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::MakeEnum);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum constructor enum name")
+        {
+            fail("expected invalid enum constructor enum-name error");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        chunk.emit(OpCode::MakeEnum);
+        chunk.emit_u16(maybe_idx);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum constructor variant name")
+        {
+            fail("expected invalid enum constructor variant-name error");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        const auto some_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Some")));
+        chunk.emit(OpCode::MakeEnum);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(some_idx);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "truncated enum constructor")
+        {
+            fail("expected truncated enum constructor error");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        const auto some_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Some")));
+        chunk.emit(OpCode::MakeEnum);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(some_idx);
+        chunk.code.push_back(1);
+        chunk.spans.push_back({});
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow for payload enum construction");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::EnumIs);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum-is enum name")
+        {
+            fail("expected invalid enum-is enum-name error");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        chunk.emit(OpCode::EnumIs);
+        chunk.emit_u16(maybe_idx);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum-is variant name")
+        {
+            fail("expected invalid enum-is variant-name error");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        const auto some_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Some")));
+        chunk.emit(OpCode::EnumIs);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(some_idx);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow for enum-is");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        const auto some_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Some")));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::EnumIs);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(some_idx);
+        chunk.emit(OpCode::Return);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (!res.ok || !(res.value == Value::bool_v(false)))
+        {
+            fail("expected enum-is to be false on non-enum value");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        const auto some_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Some")));
+        const auto other_enum_idx =
+            static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Other")));
+        chunk.emit(OpCode::MakeEnum);
+        chunk.emit_u16(other_enum_idx);
+        chunk.emit_u16(some_idx);
+        chunk.code.push_back(0);
+        chunk.spans.push_back({});
+        chunk.emit(OpCode::EnumIs);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(some_idx);
+        chunk.emit(OpCode::Return);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (!res.ok || !(res.value == Value::bool_v(false)))
+        {
+            fail("expected enum-is to be false on enum-name mismatch");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        const auto some_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Some")));
+        const auto none_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("None")));
+        chunk.emit(OpCode::MakeEnum);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(none_idx);
+        chunk.code.push_back(0);
+        chunk.spans.push_back({});
+        chunk.emit(OpCode::EnumIs);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(some_idx);
+        chunk.emit(OpCode::Return);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (!res.ok || !(res.value == Value::bool_v(false)))
+        {
+            fail("expected enum-is to be false on variant mismatch");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::EnumIs);
+        chunk.emit_u16(99);
+        chunk.emit_u16(99);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum-is enum name")
+        {
+            fail("expected invalid enum-is enum-name for out-of-range constant index");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto int_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::int_v(1)));
+        const auto some_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Some")));
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::EnumIs);
+        chunk.emit_u16(int_idx);
+        chunk.emit_u16(some_idx);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum-is enum name")
+        {
+            fail("expected invalid enum-is enum-name for non-string constant kind");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        const auto some_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Some")));
+        const auto none_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("None")));
+
+        chunk.emit(OpCode::MakeEnum);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(none_idx);
+        chunk.code.push_back(0);
+        chunk.spans.push_back({});
+
+        chunk.emit(OpCode::EnumUnwrap);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(some_idx);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "enum unwrap variant mismatch")
+        {
+            fail("expected enum unwrap variant mismatch");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        const auto none_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("None")));
+
+        chunk.emit(OpCode::MakeEnum);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(none_idx);
+        chunk.code.push_back(0);
+        chunk.spans.push_back({});
+
+        chunk.emit(OpCode::EnumUnwrap);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(none_idx);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "enum unwrap missing payload")
+        {
+            fail("expected enum unwrap missing payload");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        const auto some_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Some")));
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::EnumUnwrap);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(some_idx);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "enum unwrap variant mismatch")
+        {
+            fail("expected enum unwrap mismatch on non-enum value");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::EnumUnwrap);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum-unwrap enum name")
+        {
+            fail("expected invalid enum-unwrap enum-name error");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        chunk.emit(OpCode::EnumUnwrap);
+        chunk.emit_u16(maybe_idx);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum-unwrap variant name")
+        {
+            fail("expected invalid enum-unwrap variant-name error");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        const auto some_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Some")));
+        chunk.emit(OpCode::EnumUnwrap);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(some_idx);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow for enum-unwrap");
+        }
+    }
+}
+
 int main()
 {
     set_nonblocking_should_ignore_invalid_fd();
@@ -257,6 +637,9 @@ int main()
     vm_should_fail_add_type_error();
     vm_should_fail_print_missing_capability();
     vm_should_fail_no_return_at_end();
+    value_enum_equality_and_to_string();
+    vm_enum_ops_success_paths();
+    vm_enum_ops_error_paths();
 
     std::cout << "OK\n";
     return 0;

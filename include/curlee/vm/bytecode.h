@@ -40,6 +40,9 @@ enum class OpCode : std::uint8_t
     Ret,
     Print,
     PythonCall,
+    MakeEnum,
+    EnumIs,
+    EnumUnwrap,
 };
 
 /** @brief A compiled chunk of bytecode, constants and span map. */

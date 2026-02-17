@@ -279,6 +279,44 @@ fn main() -> Unit {
         }
     }
 
+    // Enum deconstruction calls: variant_is / variant_unwrap with Enum::Variant args.
+    {
+        const std::string src = R"(enum Maybe {
+  Some(Int);
+  None;
+}
+
+fn main() -> Int {
+  let m: Maybe = Maybe::Some(41);
+  if (variant_is(m, Maybe::Some)) {
+    return variant_unwrap(m, Maybe::Some);
+  }
+  return 0;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on enum deconstruction syntax program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on enum deconstruction syntax program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("Maybe::Some(41)") == std::string::npos ||
+            dumped.find("variant_is(m, Maybe::Some)") == std::string::npos ||
+            dumped.find("variant_unwrap(m, Maybe::Some)") == std::string::npos)
+        {
+            fail("dump missing enum deconstruction syntax");
+        }
+    }
+
     // Dumper: group/unary expr + multi-arg call formatting.
     {
         const std::string src = R"(fn main() -> Unit {

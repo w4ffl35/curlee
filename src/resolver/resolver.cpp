@@ -150,6 +150,11 @@ class Resolver
         return base_name->name == "python_ffi" && member->member == "call";
     }
 
+    static bool is_builtin_call_name(std::string_view name)
+    {
+        return name == "print" || name == "variant_is" || name == "variant_unwrap";
+    }
+
     void resolve_imports(const curlee::parser::Program& program)
     {
         for (const auto& imp : program.imports)
@@ -470,7 +475,20 @@ class Resolver
             diagnostics_.push_back(std::move(d));
         }
 
-        resolve_expr(*e.callee);
+        bool resolve_callee = true;
+        if (const auto* callee_name = std::get_if<NameExpr>(&e.callee->node); callee_name != nullptr)
+        {
+            if (is_builtin_call_name(callee_name->name))
+            {
+                resolve_callee = false;
+            }
+        }
+
+        if (resolve_callee)
+        {
+            resolve_expr(*e.callee);
+        }
+
         for (const auto& a : e.args)
         {
             resolve_expr(a);

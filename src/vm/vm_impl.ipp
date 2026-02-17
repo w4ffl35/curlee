@@ -495,6 +495,37 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         const auto span = (op_index < chunk.spans.size())
                               ? std::optional<curlee::source::Span>(chunk.spans[op_index])
                               : std::nullopt;
+
+        auto read_u16_operand = [&]() -> std::optional<std::uint16_t>
+        {
+            if (ip + 1 >= chunk.code.size())
+            {
+                return std::nullopt;
+            }
+            const std::uint16_t lo = chunk.code[ip++];
+            const std::uint16_t hi = chunk.code[ip++];
+            return static_cast<std::uint16_t>(lo | (hi << 8));
+        };
+
+        auto read_string_constant = [&]() -> std::optional<std::string>
+        {
+            const auto idx = read_u16_operand();
+            if (!idx.has_value())
+            {
+                return std::nullopt;
+            }
+            if (*idx >= chunk.constants.size())
+            {
+                return std::nullopt;
+            }
+            const auto& constant = chunk.constants[*idx];
+            if (constant.kind != ValueKind::String)
+            {
+                return std::nullopt;
+            }
+            return constant.string_value;
+        };
+
         switch (op)
         {
         case OpCode::Constant:
@@ -912,6 +943,97 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             }
 
             push(Value::unit_v());
+            break;
+        }
+        case OpCode::MakeEnum:
+        {
+            const auto enum_name = read_string_constant();
+            if (!enum_name.has_value())
+            {
+                return err_result("invalid enum constructor enum name", span);
+            }
+
+            const auto variant_name = read_string_constant();
+            if (!variant_name.has_value())
+            {
+                return err_result("invalid enum constructor variant name", span);
+            }
+
+            if (ip >= chunk.code.size())
+            {
+                return err_result("truncated enum constructor", span);
+            }
+
+            const bool has_payload = chunk.code[ip++] != 0;
+            if (!has_payload)
+            {
+                push(Value::enum_v(*enum_name, *variant_name));
+                break;
+            }
+
+            auto payload = pop();
+            if (!payload.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            push(Value::enum_v(*enum_name, *variant_name, std::move(*payload)));
+            break;
+        }
+        case OpCode::EnumIs:
+        {
+            const auto enum_name = read_string_constant();
+            if (!enum_name.has_value())
+            {
+                return err_result("invalid enum-is enum name", span);
+            }
+
+            const auto variant_name = read_string_constant();
+            if (!variant_name.has_value())
+            {
+                return err_result("invalid enum-is variant name", span);
+            }
+
+            auto value = pop();
+            if (!value.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+
+            const bool matches = value->kind == ValueKind::Enum && value->enum_name == *enum_name &&
+                                 value->variant_name == *variant_name;
+            push(Value::bool_v(matches));
+            break;
+        }
+        case OpCode::EnumUnwrap:
+        {
+            const auto enum_name = read_string_constant();
+            if (!enum_name.has_value())
+            {
+                return err_result("invalid enum-unwrap enum name", span);
+            }
+
+            const auto variant_name = read_string_constant();
+            if (!variant_name.has_value())
+            {
+                return err_result("invalid enum-unwrap variant name", span);
+            }
+
+            auto value = pop();
+            if (!value.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+
+            if (value->kind != ValueKind::Enum || value->enum_name != *enum_name || // GCOVR_EXCL_LINE
+                value->variant_name != *variant_name)
+            {
+                return err_result("enum unwrap variant mismatch", span);
+            }
+            if (value->payload == nullptr)
+            {
+                return err_result("enum unwrap missing payload", span);
+            }
+            push(*value->payload);
             break;
         }
         }

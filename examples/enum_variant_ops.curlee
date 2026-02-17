@@ -1,0 +1,12 @@
+enum Maybe {
+  Some(Int);
+  None;
+}
+
+fn main() -> Int {
+  let m: Maybe = Maybe::Some(1);
+  if (variant_is(m, Maybe::Some)) {
+    return variant_unwrap(m, Maybe::Some) + 41;
+  }
+  return 0;
+}
