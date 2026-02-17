@@ -79,6 +79,10 @@ jobs:
           grep -q "ctest --preset linux-debug --output-on-failure" "$file"
           grep -q "bash scripts/smoke.sh --both" "$file"
           grep -q "bash scripts/coverage.sh --fail-under 100 --fail-under-branch 100 --fail-under-function 100" "$file"
+          grep -q "actions/attest-build-provenance@v2" "$file"
+          grep -q "anchore/sbom-action@v0" "$file"
+          grep -q "dist/SBOM.spdx.json" "$file"
+          grep -q "gh attestation verify" "$file"
 
   quality-audit:
     name: Quality audit gate

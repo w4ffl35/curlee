@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release-preflight:
@@ -107,10 +109,41 @@ jobs:
           ```
           {sums}
           ```
+
+          ### SBOM (SPDX JSON)
+
+          Release asset: `SBOM.spdx.json`
+
+          ### Provenance attestation (GitHub Artifact Attestations)
+
+          Provenance attestations are published for release artifacts and tied to this tag build.
+
+          Verify locally (requires GitHub CLI):
+
+          ```bash
+          gh attestation verify curlee --repo "$GITHUB_REPOSITORY"
+          gh attestation verify curlee-{tag}-linux-$(uname -m).tar.gz --repo "$GITHUB_REPOSITORY"
+          ```
           """
 
           Path("dist/RELEASE_NOTES.md").write_text(notes, encoding="utf-8")
           PY
+
+      - name: Generate SBOM (SPDX JSON)
+        uses: anchore/sbom-action@v0
+        with:
+          path: dist
+          format: spdx-json
+          output-file: dist/SBOM.spdx.json
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/curlee
+            dist/*.tar.gz
+            dist/SHA256SUMS.txt
+            dist/SBOM.spdx.json
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -120,4 +153,5 @@ jobs:
             dist/curlee
             dist/*.tar.gz
             dist/SHA256SUMS.txt
+            dist/SBOM.spdx.json
           fail_on_unmatched_files: true
