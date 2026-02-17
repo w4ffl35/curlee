@@ -204,7 +204,7 @@ class Resolver
             source::SourceFile loaded_file = std::get<source::SourceFile>(loaded);
 
             // Record the module and parse its exports.
-            imported_files_.push_back(std::move(matches[0]));
+            imported_files_.push_back(std::move(loaded_file));
             const auto& src = imported_files_.back().contents;
 
             const auto lexed = curlee::lexer::lex(src);

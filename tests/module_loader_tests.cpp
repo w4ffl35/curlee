@@ -143,5 +143,83 @@ int main()
         }
     }
 
+    // Filesystem access error branch is handled deterministically.
+    {
+        const fs::path dir = make_temp_dir("resolve_permission_error");
+        const fs::path blocked = dir / "blocked";
+        const fs::path importing = blocked;
+
+        std::error_code ec;
+        fs::create_directories(blocked / "pkg", ec);
+        if (ec)
+        {
+            fail("failed to create blocked dirs: " + ec.message());
+        }
+
+        fs::permissions(blocked, fs::perms::none, fs::perm_options::replace, ec);
+        if (ec)
+        {
+            fail("failed to chmod blocked dir: " + ec.message());
+        }
+
+        curlee::resolver::ModuleSearchOptions opts;
+        opts.importing_file_dir = importing;
+        opts.entry_dir = importing;
+        opts.allow_stdlib = false;
+        opts.debug_trace = true;
+
+        const std::vector<std::string_view> import_path = {"pkg", "mod"};
+        const auto got = curlee::resolver::resolve_module_path(import_path, opts);
+
+        fs::permissions(blocked, fs::perms::owner_all, fs::perm_options::replace, ec);
+        if (ec)
+        {
+            fail("failed to restore blocked dir permissions: " + ec.message());
+        }
+
+        if (got)
+        {
+            fail("expected lookup to fail when filesystem reports access error");
+        }
+    }
+
+    // Oversized path component triggers filesystem error_code branch.
+    {
+        const fs::path dir = make_temp_dir("resolve_enametoolong");
+
+        curlee::resolver::ModuleSearchOptions opts;
+        opts.importing_file_dir = dir;
+        opts.entry_dir = dir;
+        opts.allow_stdlib = false;
+        opts.debug_trace = true;
+
+        const std::string huge(5000, 'x');
+        const std::vector<std::string_view> import_path = {huge};
+        const auto got = curlee::resolver::resolve_module_path(import_path, opts);
+        if (got)
+        {
+            fail("expected oversized path lookup to fail");
+        }
+    }
+
+    // NUL-containing path component should trigger filesystem error handling.
+    {
+        const fs::path dir = make_temp_dir("resolve_invalid_component");
+
+        curlee::resolver::ModuleSearchOptions opts;
+        opts.importing_file_dir = dir;
+        opts.entry_dir = dir;
+        opts.allow_stdlib = false;
+        opts.debug_trace = true;
+
+        const std::string invalid_part("bad\0name", 8);
+        const std::vector<std::string_view> import_path = {invalid_part};
+        const auto got = curlee::resolver::resolve_module_path(import_path, opts);
+        if (got)
+        {
+            fail("expected invalid component lookup to fail");
+        }
+    }
+
     return 0;
 }

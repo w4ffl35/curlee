@@ -769,7 +769,7 @@ std::vector<std::filesystem::path> load_stdlib_roots_from_env()
         }
     }
     return roots;
-}
+} // GCOVR_EXCL_LINE
 
 } // namespace
 

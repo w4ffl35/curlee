@@ -30,7 +30,7 @@ resolve_module_path(const std::vector<std::string_view>& import_path,
     roots.push_back(options.importing_file_dir);
 
     // 2. Entry file's directory (if different).
-    if (options.entry_dir != options.importing_file_dir)
+    if (!options.entry_dir.empty() && options.entry_dir != options.importing_file_dir)
     {
         roots.push_back(options.entry_dir);
     }
@@ -44,6 +44,7 @@ resolve_module_path(const std::vector<std::string_view>& import_path,
         }
     }
 
+    std::vector<fs::path> matches;
     for (const auto& root : roots)
     {
         fs::path module_path = root;
@@ -62,31 +63,53 @@ resolve_module_path(const std::vector<std::string_view>& import_path,
         const bool exists = fs::exists(module_path, ec);
         if (ec)
         {
-            if (options.debug_trace)
-            {
-                std::cerr << "[import] failed: not found\n";
-            }
+            std::cerr << "[import] failed: not found\n";
             continue;
         }
 
-        if (exists) // GCOVR_EXCL_LINE
+        if (exists)
         {
-            // Found it!
-            if (options.debug_trace) // GCOVR_EXCL_LINE
+            matches.push_back(fs::absolute(module_path));
+            if (options.debug_trace)
             {
-                std::cerr << "[import] ok: " << fs::absolute(module_path).string() << "\n"; // GCOVR_EXCL_LINE
+                std::cerr << "[import] ok: " << fs::absolute(module_path).string() << "\n";
             }
-
-            ResolvedModule res;
-            res.path = fs::absolute(module_path);
-            res.canonical_path = fs::canonical(module_path).string();
-            return res;
         }
-
-        if (options.debug_trace)
+        else if (options.debug_trace)
         {
             std::cerr << "[import] failed: not found\n";
         }
+    }
+
+    if (matches.size() == 1)
+    {
+        ResolvedModule res;
+        res.path = matches[0];
+        res.canonical_path = fs::canonical(matches[0]).string();
+        return res;
+    }
+
+    if (matches.size() > 1)
+    {
+        curlee::diag::Diagnostic d;
+        d.severity = curlee::diag::Severity::Error;
+        d.message = "ambiguous import: '" + import_name + "'";
+
+        for (const auto& match : matches)
+        {
+            const curlee::diag::Related note{
+                .message = "found module at " + match.string(),
+                .span = std::nullopt,
+            };
+            d.notes.push_back(note);
+        }
+
+        const curlee::diag::Related hint{
+            .message = "remove/rename one of the modules so the import is unambiguous",
+            .span = std::nullopt,
+        };
+        d.notes.push_back(hint);
+        return std::unexpected(d);
     }
 
     fs::path expected_file = options.importing_file_dir;
@@ -98,7 +121,7 @@ resolve_module_path(const std::vector<std::string_view>& import_path,
 
     std::string expected_msg = "expected module at " + expected_file.string();
     // Add detail about stdlib if searched
-    if (!options.stdlib_roots.empty())
+    if (options.allow_stdlib && !options.stdlib_roots.empty())
     {
         expected_msg += " or stdlib roots";
     }
