@@ -948,3 +948,9 @@ target_link_libraries(curlee_verification_checker_internal_tests PRIVATE Z3::Z3)
 add_test(NAME curlee_verification_checker_internal_tests
   COMMAND curlee_verification_checker_internal_tests
 )
+
+add_executable(curlee_expected_tests
+  tests/expected_scaffolding_test.cpp
+)
+target_include_directories(curlee_expected_tests PRIVATE include)
+add_test(NAME curlee_expected_tests COMMAND curlee_expected_tests)
