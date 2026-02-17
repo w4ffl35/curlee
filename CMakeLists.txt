@@ -100,6 +100,7 @@ add_executable(curlee
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -123,6 +124,7 @@ add_executable(curlee_lsp
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -153,6 +155,11 @@ add_test(NAME curlee_missing_file COMMAND curlee lex ${CMAKE_SOURCE_DIR}/tests/f
 set_tests_properties(curlee_missing_file PROPERTIES WILL_FAIL TRUE)
 
 add_test(NAME curlee_lex_reads_file COMMAND curlee lex ${CMAKE_SOURCE_DIR}/tests/fixtures/hello.curlee)
+
+add_test(
+  NAME curlee_check_import_success_debug
+  COMMAND ${CMAKE_COMMAND} -E env CURLEE_DEBUG_IMPORTS=1 curlee check ${CMAKE_SOURCE_DIR}/tests/fixtures/qualified_call/main.curlee
+)
 
 add_executable(curlee_line_map_tests
   tests/line_map_tests.cpp
@@ -224,6 +231,7 @@ add_executable(curlee_cli_diagnostics_golden_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -380,6 +388,7 @@ add_executable(curlee_lsp_internal_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -405,11 +414,20 @@ add_executable(curlee_resolver_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/source_file.cpp
 )
 target_include_directories(curlee_resolver_tests PRIVATE include)
 
 add_test(NAME curlee_resolver_tests COMMAND curlee_resolver_tests)
+
+add_executable(curlee_module_loader_tests
+  tests/module_loader_tests.cpp
+  src/resolver/module_loader.cpp
+)
+target_include_directories(curlee_module_loader_tests PRIVATE include)
+
+add_test(NAME curlee_module_loader_tests COMMAND curlee_module_loader_tests)
 
 add_executable(curlee_types_tests
   tests/types_tests.cpp
@@ -454,6 +472,7 @@ add_executable(curlee_cli_fmt_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -478,6 +497,7 @@ add_executable(curlee_cli_bundle_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -500,6 +520,7 @@ add_executable(curlee_cli_bundle_golden_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -522,6 +543,7 @@ add_executable(curlee_cli_version_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -546,6 +568,7 @@ add_executable(curlee_cli_bad_args_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -570,6 +593,7 @@ add_executable(curlee_cli_lex_parse_error_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -594,6 +618,7 @@ add_executable(curlee_cli_check_import_error_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -618,6 +643,7 @@ add_executable(curlee_cli_check_import_cycle_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -642,6 +668,7 @@ add_executable(curlee_cli_check_import_depth_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -666,6 +693,7 @@ add_executable(curlee_cli_check_imported_main_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -690,6 +718,7 @@ add_executable(curlee_cli_check_duplicate_function_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -714,6 +743,7 @@ add_executable(curlee_cli_check_import_order_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -738,6 +768,7 @@ add_executable(curlee_cli_check_import_path_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -770,6 +801,7 @@ add_executable(curlee_cli_fuel_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp
@@ -845,6 +877,7 @@ add_executable(curlee_e2e_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
   src/source/line_map.cpp
   src/source/source_file.cpp
   src/types/type_check.cpp

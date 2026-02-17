@@ -1,0 +1,10 @@
+fn divide(numerator: Int, denominator: Int) -> Int [
+  requires denominator != 0;
+] {
+  return numerator / denominator;
+}
+
+fn main() -> Int {
+  let x: Int = divide(10, 0);
+  return 0;
+}

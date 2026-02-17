@@ -242,6 +242,44 @@ int main()
         expect_contains(err, "error: expected capability name after --cap=", "stderr");
     }
 
+    // run: missing value after --stdlib-root
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--stdlib-root"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for missing --stdlib-root arg");
+        }
+        expect_contains(err, "error: expected path after --stdlib-root", "stderr");
+    }
+
+    // run: empty --stdlib-root=
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--stdlib-root=", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for empty --stdlib-root=");
+        }
+        expect_contains(err, "error: expected path after --stdlib-root=", "stderr");
+    }
+
+    // run: --stdlib-root and --stdlib-root= are accepted by argument parser.
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "run", "--stdlib-root", "/tmp", "--stdlib-root=/tmp", "--fuel", "0"}, out,
+            err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for missing run file (with --stdlib-root flags)");
+        }
+        expect_contains(err, "error: expected <file.curlee>", "stderr");
+    }
+
     // run: non-empty --cap= is accepted (even if the run itself fails later)
     {
         std::string out;

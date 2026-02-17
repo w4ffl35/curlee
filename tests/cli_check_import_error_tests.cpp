@@ -184,6 +184,45 @@ int main()
         expect_contains(err, "error:", "stderr");
     }
 
+    // check: import resolves to an existing path that cannot be loaded as a file.
+    {
+        const fs::path dir = make_temp_dir("check_import_load_error");
+        const fs::path entry = dir / "main.curlee";
+        const fs::path bad_module = dir / "foo" / "bad.curlee";
+
+        std::error_code ec;
+        fs::create_directories(bad_module.parent_path(), ec);
+        if (ec)
+        {
+            fail("failed to create bad module parent dir: " + ec.message());
+        }
+
+        write_file(bad_module, "fn helper() -> Int { return 7; }\n");
+        fs::permissions(bad_module, fs::perms::owner_read | fs::perms::owner_write,
+                        fs::perm_options::remove, ec);
+        if (ec)
+        {
+            fail("failed to remove module read permission: " + ec.message());
+        }
+
+        write_file(entry, "import foo.bad;\n\nfn main() -> Int {\n  return 0;\n}\n");
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
+
+        std::error_code restore_ec;
+        fs::permissions(bad_module, fs::perms::owner_read, fs::perm_options::add, restore_ec);
+
+        if (rc != 1)
+        {
+            fail("expected error exit code for import load failure");
+        }
+
+        expect_empty(out, "stdout");
+        expect_contains(err, "failed to load imported module:", "stderr");
+    }
+
     // check: importing yourself is an import cycle (entry file is already in the visiting set).
     {
         const fs::path dir = make_temp_dir("check_self_import_cycle");

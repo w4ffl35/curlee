@@ -262,6 +262,59 @@ fn main() -> Unit { return 0; })";
     }
 
     {
+        // Imported module exists but cannot be read.
+        const std::string src = R"(import foo.bad;
+
+fn main() -> Unit { return 0; })";
+
+        namespace fs = std::filesystem;
+        const fs::path base = fs::temp_directory_path() / "curlee_resolver_tests_import_load_fail";
+        const fs::path module_dir = base / "foo";
+        std::error_code ec;
+        fs::remove_all(base, ec);
+        fs::create_directories(module_dir, ec);
+        if (ec)
+        {
+            fail("failed to create temp module dir: " + ec.message());
+        }
+
+        const fs::path module_path = module_dir / "bad.curlee";
+        write_file(module_path, "fn helper() -> Unit { return 0; }");
+        fs::permissions(module_path, fs::perms::owner_read | fs::perms::owner_write,
+                        fs::perm_options::remove, ec);
+        if (ec)
+        {
+            fail("failed to remove module read permission: " + ec.message());
+        }
+
+        const fs::path main_path = base / "main.curlee";
+        const auto res = resolve_with_source(src, main_path.string());
+
+        std::error_code restore_ec;
+        fs::permissions(module_path, fs::perms::owner_read, fs::perm_options::add, restore_ec);
+
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
+        {
+            fail("expected resolver error when imported module cannot be loaded");
+        }
+
+        const auto& ds = std::get<std::vector<diag::Diagnostic>>(res);
+        bool saw_load_error = false;
+        for (const auto& d : ds)
+        {
+            if (d.message.find("failed to load imported module") != std::string::npos)
+            {
+                saw_load_error = true;
+                break;
+            }
+        }
+        if (!saw_load_error)
+        {
+            fail("expected load-failure diagnostic for imported module");
+        }
+    }
+
+    {
         // Import aliasing + qualified call via alias.
         const std::string src = R"(import foo.bar as baz;
 

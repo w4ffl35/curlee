@@ -7,6 +7,7 @@
 #include <curlee/diag/render.h>
 #include <curlee/lexer/lexer.h>
 #include <curlee/parser/parser.h>
+#include <curlee/resolver/module_loader.h>
 #include <curlee/resolver/resolver.h>
 #include <curlee/source/source_file.h>
 #include <curlee/types/type_check.h>
@@ -124,7 +125,8 @@ std::string join_import_pins(const std::vector<curlee::bundle::ImportPin>& pins)
 } // GCOVR_EXCL_LINE
 
 int cmd_read_only(std::string_view cmd, const std::string& path,
-                  const curlee::runtime::Capabilities& granted_caps, std::size_t fuel)
+                  const curlee::runtime::Capabilities& granted_caps, std::size_t fuel,
+                  const std::vector<std::filesystem::path>& stdlib_roots = {})
 {
     auto loaded = source::load_source_file(path);
     if (auto* err = std::get_if<source::LoadError>(&loaded))
@@ -162,7 +164,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         constexpr int kMaxImportDepth = 64;
 
         auto normalize_path = [](const std::string& p) -> std::string
-        { return fs::path(p).lexically_normal().string(); };
+        { return fs::absolute(fs::path(p)).lexically_normal().string(); };
 
         const fs::path entry_dir = fs::path(file.path).parent_path();
 
@@ -195,79 +197,39 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             [&](const source::SourceFile& importing_file,
                 const parser::ImportDecl& imp) -> std::variant<ImportLoadResult, diag::Diagnostic>
         {
-            std::string import_name;
-            for (std::size_t i = 0; i < imp.path.size(); ++i)
+            resolver::ModuleSearchOptions opts;
+            opts.importing_file_dir = fs::path(importing_file.path).parent_path();
+            opts.entry_dir = entry_dir;
+            opts.stdlib_roots = stdlib_roots;
+            opts.debug_trace = std::getenv("CURLEE_DEBUG_IMPORTS") != nullptr;
+
+            const auto found = resolver::resolve_module_path(imp.path, opts);
+
+            if (!found)
             {
-                import_name += std::string(imp.path[i]);
-                if (i + 1 < imp.path.size())
-                {
-                    import_name += ".";
-                }
+                diag::Diagnostic d = found.error();
+                d.span = imp.span;
+                return d;
             }
 
-            std::vector<fs::path> roots;
-            roots.push_back(fs::path(importing_file.path).parent_path());
-            if (entry_dir != roots.front())
+            const auto& mod_path = found->path;
+            const auto loaded = source::load_source_file(mod_path.string());
+            if (auto* err = std::get_if<source::LoadError>(&loaded))
             {
-                roots.push_back(entry_dir);
+                diag::Diagnostic d;
+                d.severity = diag::Severity::Error;
+                d.message = "failed to load imported module: " + err->message;
+                d.span = imp.span;
+                return d;
             }
 
-            std::string last_err = "failed to open file";
-            for (const auto& root : roots)
-            {
-                fs::path module_path = root;
-                for (const auto& part : imp.path)
-                {
-                    module_path /= std::string(part);
-                }
-                module_path += ".curlee";
+            auto dep_file = std::get<source::SourceFile>(loaded);
 
-                if (std::getenv("CURLEE_DEBUG_IMPORTS") != nullptr)
-                {
-                    std::cerr << "[import] trying " << module_path.string() << "\n";
-                }
-
-                const auto loaded = source::load_source_file(module_path.string());
-                if (auto* err = std::get_if<source::LoadError>(&loaded))
-                {
-                    if (std::getenv("CURLEE_DEBUG_IMPORTS") != nullptr)
-                    {
-                        std::cerr << "[import] failed: " << err->message << "\n";
-                    }
-                    last_err = err->message;
-                    continue;
-                }
-
-                auto dep_file = std::get<source::SourceFile>(loaded);
-
-                ImportLoadResult ok;
-                ok.file = std::move(dep_file);
-                ok.path = module_path;
-                ok.key = normalize_path(module_path.string());
-                if (std::getenv("CURLEE_DEBUG_IMPORTS") != nullptr)
-                {
-                    std::cerr << "[import] ok: " << ok.path.string() << "\n";
-                }
-                return ok;
-            }
-
-            diag::Diagnostic d;
-            d.severity = diag::Severity::Error;
-            d.message = "import not found: '" + import_name + "'";
-            d.span = imp.span;
-
-            fs::path expected_path = roots.front();
-            for (const auto& part : imp.path)
-            {
-                expected_path /= std::string(part);
-            }
-            expected_path += ".curlee";
-
-            const diag::Related note{.message = "expected module at " + expected_path.string() +
-                                                " (" + last_err + ")",
-                                     .span = std::nullopt};
-            d.notes.push_back(note); // GCOVR_EXCL_LINE
-            return d;
+            ImportLoadResult ok;
+            ok.file = std::move(dep_file);
+            ok.path = mod_path;
+            ok.key = found->canonical_path;
+            return ok;
         };
 
         auto check_module = [&](const source::SourceFile& mod_file, int depth,
@@ -376,7 +338,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             }
 
             const auto resolved =
-                resolver::resolve(mod_program, stable_file, std::optional{entry_dir});
+                resolver::resolve(mod_program, stable_file, std::optional{entry_dir}, stdlib_roots);
             if (std::holds_alternative<std::vector<diag::Diagnostic>>(resolved))
             {
                 render_diags(std::get<std::vector<diag::Diagnostic>>(resolved), stable_file);
@@ -511,7 +473,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             parser::reassign_expr_ids(program);
         }
 
-        const auto resolved = resolver::resolve(program, file, entry_dir);
+        const auto resolved = resolver::resolve(program, file, entry_dir, stdlib_roots);
         if (std::holds_alternative<std::vector<diag::Diagnostic>>(resolved))
         {
             const auto& ds = std::get<std::vector<diag::Diagnostic>>(resolved);
@@ -781,6 +743,34 @@ int cmd_fmt(const std::string& path, bool check)
     return kExitOk;
 }
 
+std::vector<std::filesystem::path> load_stdlib_roots_from_env()
+{
+    namespace fs = std::filesystem;
+    std::vector<fs::path> roots;
+
+    if (const char* env_p = std::getenv("CURLEE_STDLIB_ROOT"))
+    {
+        std::string env_s(env_p);
+        std::size_t start = 0;
+        while (start < env_s.size())
+        {
+            std::size_t end = env_s.find(':', start);
+            if (end == std::string::npos)
+            {
+                end = env_s.size();
+            }
+
+            if (end > start)
+            {
+                roots.push_back(fs::path(env_s.substr(start, end - start)));
+            }
+
+            start = end + 1;
+        }
+    }
+    return roots;
+}
+
 } // namespace
 
 int run(int argc, char** argv)
@@ -808,7 +798,8 @@ int run(int argc, char** argv)
     // path/to/file.curlee`.
     if (argc == 2 && !first.starts_with('-') && ends_with(first, ".curlee"))
     {
-        return cmd_read_only("run", std::string(first), empty_caps(), kDefaultFuel);
+        return cmd_read_only("run", std::string(first), empty_caps(), kDefaultFuel,
+                             load_stdlib_roots_from_env());
     }
 
     const std::string_view cmd = argv[1];
@@ -887,10 +878,38 @@ int run(int argc, char** argv)
         std::optional<curlee::bundle::Bundle> bundle;
         std::optional<std::string> path;
         std::size_t fuel = kDefaultFuel;
+        auto stdlib_roots = load_stdlib_roots_from_env();
 
         for (std::size_t i = 0; i < args.size();)
         {
             const std::string_view a = args[i];
+            if (a == "--stdlib-root")
+            {
+                if (i + 1 >= args.size())
+                {
+                    std::cerr << "error: expected path after --stdlib-root\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                stdlib_roots.push_back(std::string(args[i + 1]));
+                i += 2;
+                continue;
+            }
+
+            if (a.starts_with("--stdlib-root="))
+            {
+                const auto root = a.substr(std::string_view("--stdlib-root=").size());
+                if (root.empty())
+                {
+                    std::cerr << "error: expected path after --stdlib-root=\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                stdlib_roots.push_back(std::string(root));
+                ++i;
+                continue;
+            }
+
             if (a == "--cap" || a == "--capability")
             {
                 if (i + 1 >= args.size())
@@ -1033,7 +1052,7 @@ int run(int argc, char** argv)
             return cmd_run_bundle(*bundle, *path, caps, fuel);
         }
 
-        return cmd_read_only(cmd, *path, caps, fuel);
+        return cmd_read_only(cmd, *path, caps, fuel, stdlib_roots);
     }
 
     if (argc != 3)
@@ -1044,7 +1063,7 @@ int run(int argc, char** argv)
     }
 
     const std::string path = argv[2];
-    return cmd_read_only(cmd, path, empty_caps(), kDefaultFuel);
+    return cmd_read_only(cmd, path, empty_caps(), kDefaultFuel, load_stdlib_roots_from_env());
 }
 
 } // namespace curlee::cli

@@ -88,6 +88,44 @@ static fs::path write_temp_curlee(const std::string& stem, const std::string& co
     return path;
 }
 
+static fs::path make_temp_dir(const std::string& stem)
+{
+    const auto pid = static_cast<unsigned long>(::getpid());
+    const fs::path dir =
+        fs::temp_directory_path() / "curlee_cli_tests" / (stem + "_" + std::to_string(pid));
+
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    ec = {};
+    fs::create_directories(dir, ec);
+    if (ec)
+    {
+        fail("failed to create temp dir: " + dir.string() + ": " + ec.message());
+    }
+    return dir;
+}
+
+static void write_file(const fs::path& path, std::string_view contents)
+{
+    std::error_code ec;
+    fs::create_directories(path.parent_path(), ec);
+    if (ec)
+    {
+        fail("failed to create dirs for: " + path.string() + ": " + ec.message());
+    }
+
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    if (!f)
+    {
+        fail("failed to open temp file: " + path.string());
+    }
+    f << contents;
+    if (!f)
+    {
+        fail("failed to write temp file: " + path.string());
+    }
+}
+
 int main()
 {
     // check: parser rejects "import a.;" (missing identifier after '.')
@@ -106,6 +144,36 @@ int main()
         expect_empty(out, "stdout");
         expect_contains(err, "error:", "stderr");
         expect_contains(err, "expected identifier after '.' in import path", "stderr");
+    }
+
+    // check: imports can resolve from CURLEE_STDLIB_ROOT (colon-separated list).
+    {
+        const fs::path dir = make_temp_dir("check_import_stdlib_env");
+        const fs::path entry = dir / "main.curlee";
+        const fs::path stdlib_root = dir / "stdlib";
+        const fs::path stdlib_mod = stdlib_root / "std" / "math.curlee";
+
+        write_file(stdlib_mod, "fn add1(x: Int) -> Int { return x + 1; }\n");
+        write_file(entry, "import std.math as m;\n\n"
+                          "fn main() -> Int {\n"
+                          "  return m.add1(41);\n"
+                          "}\n");
+
+        const std::string env_value = (dir / "missing").string() + "::" + stdlib_root.string();
+        ::setenv("CURLEE_STDLIB_ROOT", env_value.c_str(), 1);
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
+
+        ::unsetenv("CURLEE_STDLIB_ROOT");
+
+        if (rc != 0)
+        {
+            fail("expected check to succeed with CURLEE_STDLIB_ROOT; stderr: " + err);
+        }
+        expect_empty(out, "stdout");
+        expect_empty(err, "stderr");
     }
 
     return 0;
