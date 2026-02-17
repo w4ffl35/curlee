@@ -1,0 +1,5 @@
+tests/fixtures/import_missing/entry.curlee:1:1: error: import not found: 'missing.mod'
+  |
+  | import missing.mod;
+  | ^^^^^^^^^^^^^^^^^^^
+note: expected module at tests/fixtures/import_missing/missing/mod.curlee (failed to open file)

@@ -1,0 +1,5 @@
+import shared;
+
+fn m() -> Int {
+  return 0;
+}

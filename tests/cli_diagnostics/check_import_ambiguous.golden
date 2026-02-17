@@ -1,0 +1,7 @@
+tests/fixtures/import_ambiguous/sub/m.curlee:1:1: error: ambiguous import: 'shared'
+  |
+  | import shared;
+  | ^^^^^^^^^^^^^^
+note: found module at tests/fixtures/import_ambiguous/sub/shared.curlee
+note: found module at tests/fixtures/import_ambiguous/shared.curlee
+note: remove/rename one of the modules so the import is unambiguous

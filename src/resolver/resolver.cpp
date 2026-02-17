@@ -193,7 +193,7 @@ class Resolver
             }
             first_expected += ".curlee";
 
-            curlee::source::SourceFile loaded_file;
+            std::vector<curlee::source::SourceFile> matches;
 
             for (const auto& root : roots)
             {
@@ -208,8 +208,7 @@ class Resolver
                 if (std::holds_alternative<source::SourceFile>(loaded))
                 {
                     found = true;
-                    loaded_file = std::get<source::SourceFile>(loaded);
-                    break;
+                    matches.push_back(std::get<source::SourceFile>(loaded));
                 }
             }
 
@@ -224,8 +223,23 @@ class Resolver
                 continue;
             }
 
+            if (matches.size() > 1)
+            {
+                Diagnostic d;
+                d.severity = Severity::Error;
+                d.message = "ambiguous import: '" + import_name + "'";
+                d.span = imp.span;
+                for (const auto& m : matches)
+                {
+                    d.notes.push_back(Related{.message = "found module at " + m.path, .span = std::nullopt}); // GCOVR_EXCL_LINE
+                }
+                d.notes.push_back(Related{.message = "remove/rename one of the modules so the import is unambiguous", .span = std::nullopt}); // GCOVR_EXCL_LINE
+                diagnostics_.push_back(std::move(d));
+                continue;
+            }
+
             // Record the module and parse its exports.
-            imported_files_.push_back(std::move(loaded_file));
+            imported_files_.push_back(std::move(matches[0]));
             const auto& src = imported_files_.back().contents;
 
             const auto lexed = curlee::lexer::lex(src);
@@ -312,7 +326,7 @@ class Resolver
             d.severity = Severity::Error;
             d.message = std::string(kind) + ": '" + std::string(name) + "'";
             d.span = span;
-            d.notes.push_back(Related{.message = "previous definition is here", .span = it->second.span}); // GCOVR_EXCL_LINE
+                d.notes.push_back(Related{.message = "previous definition is here", .span = it->second.span}); // GCOVR_EXCL_LINE
             diagnostics_.push_back(std::move(d));
             return;
         }
