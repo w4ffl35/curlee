@@ -77,11 +77,12 @@ flowchart LR
 Example (intended syntax):
 
 ```curlee
-fn divide(numerator: Int, denominator: Int) -> Int
-  [ requires denominator != 0;
-    ensures result * denominator == numerator; ]
+fn add(a: Int, b: Int) -> Int
+  [ requires a > 0;
+    requires b > 0;
+    ensures result > a && result > b; ]
 {
-  return numerator / denominator;
+  return a + b;
 }
 ```
 
@@ -134,6 +135,7 @@ User-facing documentation lives in the GitHub wiki:
 
 - https://github.com/w4ffl35/curlee/wiki
 - Supported fragment + stability: https://github.com/w4ffl35/curlee/wiki/Stability-and-Supported-Fragment
+- C++23 code quality standards: https://github.com/w4ffl35/curlee/wiki/C%2B%2B23-Code-Quality-Standards
 
 ## Datasets
 
@@ -255,7 +257,7 @@ Then:
 These fixtures are in the repo and should produce a diagnostic:
 
 ```bash
-./build/linux-debug/curlee check tests/fixtures/check_requires_divide.curlee
+./build/linux-debug/curlee check tests/fixtures/check_requires_fail.curlee
 ./build/linux-debug/curlee check tests/fixtures/check_ensures_fail.curlee
 ```
 

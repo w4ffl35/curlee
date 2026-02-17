@@ -1,6 +1,7 @@
 #include <cassert>
 #include <curlee/lexer/lexer.h>
 #include <curlee/parser/parser.h>
+#include <curlee/resolver/module_loader.h>
 #include <curlee/resolver/resolver.h>
 #include <curlee/source/source_file.h>
 #include <filesystem>
@@ -16,23 +17,7 @@ namespace
 using curlee::diag::Diagnostic;
 using curlee::diag::Related;
 using curlee::diag::Severity;
-using curlee::parser::BinaryExpr;
-using curlee::parser::BlockStmt;
-using curlee::parser::CallExpr;
-using curlee::parser::Expr;
-using curlee::parser::ExprStmt;
-using curlee::parser::Function;
-using curlee::parser::GroupExpr;
-using curlee::parser::IfStmt;
-using curlee::parser::LetStmt;
-using curlee::parser::MemberExpr;
-using curlee::parser::NameExpr;
-using curlee::parser::ReturnStmt;
-using curlee::parser::ScopedNameExpr;
-using curlee::parser::Stmt;
-using curlee::parser::StructLiteralExpr;
-using curlee::parser::UnsafeStmt;
-using curlee::parser::WhileStmt;
+using namespace curlee::parser;
 using curlee::source::Span;
 
 static std::string join_path(const std::vector<std::string_view>& parts)
@@ -89,8 +74,10 @@ class Resolver
 {
   public:
     Resolver(std::optional<std::filesystem::path> base_path,
-             std::optional<std::filesystem::path> entry_dir)
-        : base_path_(std::move(base_path)), entry_dir_(std::move(entry_dir))
+             std::optional<std::filesystem::path> entry_dir,
+             std::vector<std::filesystem::path> stdlib_roots = {})
+        : base_path_(std::move(base_path)), entry_dir_(std::move(entry_dir)),
+          stdlib_roots_(std::move(stdlib_roots))
     {
     }
 
@@ -125,6 +112,7 @@ class Resolver
     std::vector<Diagnostic> diagnostics_;
     std::optional<std::filesystem::path> base_path_;
     std::optional<std::filesystem::path> entry_dir_;
+    std::vector<std::filesystem::path> stdlib_roots_;
     int unsafe_depth_ = 0;
     bool resolving_ensures_ = false;
 
@@ -166,6 +154,8 @@ class Resolver
     {
         for (const auto& imp : program.imports)
         {
+            const std::string import_name = join_path(imp.path);
+
             if (!base_path_.has_value())
             {
                 Diagnostic d;
@@ -176,67 +166,42 @@ class Resolver
                 continue;
             }
 
-            const std::string import_name = join_path(imp.path);
-
-            std::vector<std::filesystem::path> roots;
-            roots.push_back(*base_path_);
-            if (entry_dir_.has_value() && *entry_dir_ != *base_path_)
+            ModuleSearchOptions opts;
+            opts.importing_file_dir = *base_path_;
+            if (entry_dir_.has_value())
             {
-                roots.push_back(*entry_dir_);
+                opts.entry_dir = *entry_dir_;
             }
+            opts.stdlib_roots = stdlib_roots_;
+            opts.debug_trace = std::getenv("CURLEE_DEBUG_IMPORTS") != nullptr;
 
-            bool found = false;
-            std::filesystem::path first_expected = *base_path_;
-            for (const auto& part : imp.path)
-            {
-                first_expected /= std::string(part);
-            }
-            first_expected += ".curlee";
-
-            std::vector<curlee::source::SourceFile> matches;
-
-            for (const auto& root : roots)
-            {
-                std::filesystem::path module_path = root;
-                for (const auto& part : imp.path)
-                {
-                    module_path /= std::string(part);
-                }
-                module_path += ".curlee";
-
-                const auto loaded = source::load_source_file(module_path.string());
-                if (std::holds_alternative<source::SourceFile>(loaded))
-                {
-                    found = true;
-                    matches.push_back(std::get<source::SourceFile>(loaded));
-                }
-            }
-
+            auto found = resolve_module_path(imp.path, opts);
             if (!found)
             {
-                Diagnostic d;
-                d.severity = Severity::Error;
-                d.message = "import not found: '" + import_name + "'";
+                Diagnostic d = std::move(found.error());
                 d.span = imp.span;
-                d.notes.push_back(Related{.message = "expected module at " + first_expected.string(), .span = std::nullopt}); // GCOVR_EXCL_LINE
+                // Preserve the "import not found: 'foo'" message format if needed,
+                // or just trust module_loader.
+                // The module_loader already returns a diagnostic with "import not found: '...'"
+                // but let's make sure the span is correct.
                 diagnostics_.push_back(std::move(d));
                 continue;
             }
 
-            if (matches.size() > 1)
+            const auto& mod_path = found->path;
+            const auto loaded = source::load_source_file(mod_path.string());
+            if (std::holds_alternative<source::LoadError>(loaded))
             {
                 Diagnostic d;
                 d.severity = Severity::Error;
-                d.message = "ambiguous import: '" + import_name + "'";
+                d.message = "failed to load imported module: " +
+                            std::get<source::LoadError>(loaded).message;
                 d.span = imp.span;
-                for (const auto& m : matches)
-                {
-                    d.notes.push_back(Related{.message = "found module at " + m.path, .span = std::nullopt}); // GCOVR_EXCL_LINE
-                }
-                d.notes.push_back(Related{.message = "remove/rename one of the modules so the import is unambiguous", .span = std::nullopt}); // GCOVR_EXCL_LINE
-                diagnostics_.push_back(std::move(d));
+                diagnostics_.push_back(d);
                 continue;
             }
+
+            source::SourceFile loaded_file = std::get<source::SourceFile>(loaded);
 
             // Record the module and parse its exports.
             imported_files_.push_back(std::move(matches[0]));
@@ -326,7 +291,9 @@ class Resolver
             d.severity = Severity::Error;
             d.message = std::string(kind) + ": '" + std::string(name) + "'";
             d.span = span;
-                d.notes.push_back(Related{.message = "previous definition is here", .span = it->second.span}); // GCOVR_EXCL_LINE
+            const Related previous_note{.message = "previous definition is here",
+                                        .span = it->second.span};
+            d.notes.push_back(previous_note); // GCOVR_EXCL_LINE
             diagnostics_.push_back(std::move(d));
             return;
         }
@@ -642,14 +609,15 @@ ResolveResult resolve(const curlee::parser::Program& program,
 
 ResolveResult resolve(const curlee::parser::Program& program,
                       const curlee::source::SourceFile& source,
-                      std::optional<std::filesystem::path> entry_dir)
+                      std::optional<std::filesystem::path> entry_dir,
+                      std::vector<std::filesystem::path> stdlib_roots)
 {
     std::optional<std::filesystem::path> base;
     if (!source.path.empty())
     {
         base = std::filesystem::path(source.path).parent_path();
     }
-    Resolver r(std::move(base), std::move(entry_dir));
+    Resolver r(std::move(base), std::move(entry_dir), std::move(stdlib_roots));
     return r.run(program);
 }
 

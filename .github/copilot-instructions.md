@@ -60,6 +60,12 @@ Curlee rejects programs unless it can prove *declared contracts* within a small,
 - Formatting-only diffs are valid changes when they improve readability and match the project’s style (e.g., `clang-format` output).
 - Do not revert sensible formatting just to keep a “clean diff”.
 - Avoid broad, unrelated reformatting across the repo: keep formatting changes scoped to files you’re already touching, or to an explicit formatting-only Issue.
+- For C/C++ in this workspace, treat save-time auto-formatting as disabled by default and do not depend on editor auto-format output for final style.
+- Prioritize **human-reviewed consistency** for wrapped signatures/calls:
+   - If a function signature wraps, place each parameter on its own line with the closing `)` on its own line.
+   - If a call wraps, place each argument on its own line with the closing `)` on its own line.
+   - Avoid mixed hanging-indent styles within the same file.
+- Aim for “AAA gold standard” readability in every change, not only during dedicated refactor tasks.
 
 ---
 

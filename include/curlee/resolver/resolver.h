@@ -47,9 +47,10 @@ using ResolveResult = std::variant<Resolution, std::vector<curlee::diag::Diagnos
 /** @brief Resolve names with an associated source file (for precise spans). */
 [[nodiscard]] ResolveResult resolve(const curlee::parser::Program& program,
                                     const curlee::source::SourceFile& source);
-/** @brief Resolve with an optional entry directory to resolve import paths. */
+/** @brief Resolve with explicit stdlib roots. */
 [[nodiscard]] ResolveResult resolve(const curlee::parser::Program& program,
                                     const curlee::source::SourceFile& source,
-                                    std::optional<std::filesystem::path> entry_dir);
+                                    std::optional<std::filesystem::path> entry_dir,
+                                    std::vector<std::filesystem::path> stdlib_roots = {});
 
 } // namespace curlee::resolver

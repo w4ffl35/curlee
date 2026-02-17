@@ -5,5 +5,6 @@ fn divide(numerator: Int, denominator: Int) -> Int [
 }
 
 fn main() -> Int {
-  return divide(10, 0);
+  let x: Int = divide(10, 0);
+  return 0;
 }

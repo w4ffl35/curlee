@@ -1,3 +1,4 @@
+#include <array>
 #include <cstdlib>
 #include <curlee/cli/cli.h>
 #include <filesystem>
@@ -5,59 +6,64 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unistd.h>
-#include <vector>
 
 namespace fs = std::filesystem;
 
-[[noreturn]] static void fail(const std::string& msg)
+[[noreturn]] static void fail(std::string_view msg)
 {
     std::cerr << "FAIL: " << msg << "\n";
     std::exit(1);
 }
 
-static int run_cli_capture(const std::vector<std::string>& argv_storage, std::string& out,
-                           std::string& err)
+struct CapturedRun
+{
+    int rc = 0;
+    std::string out;
+    std::string err;
+};
+
+static CapturedRun run_check_capture(const fs::path& entry)
 {
     std::ostringstream captured_out;
     std::ostringstream captured_err;
 
-    auto* old_out = std::cout.rdbuf(captured_out.rdbuf());
-    auto* old_err = std::cerr.rdbuf(captured_err.rdbuf());
+    std::streambuf* old_out = std::cout.rdbuf(captured_out.rdbuf());
+    std::streambuf* old_err = std::cerr.rdbuf(captured_err.rdbuf());
 
-    std::vector<std::string> args = argv_storage;
-    std::vector<char*> argv;
-    argv.reserve(args.size());
-    for (auto& s : args)
-    {
-        argv.push_back(s.data());
-    }
+    std::string command = "curlee";
+    std::string subcommand = "check";
+    std::string arg = entry.string();
+    std::array<char*, 3> argv = {command.data(), subcommand.data(), arg.data()};
 
-    const int rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
+    CapturedRun run;
+    run.rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
 
     std::cout.rdbuf(old_out);
     std::cerr.rdbuf(old_err);
 
-    out = captured_out.str();
-    err = captured_err.str();
-    return rc;
+    run.out = captured_out.str();
+    run.err = captured_err.str();
+    return run;
 }
 
-static void expect_contains(const std::string& haystack, const std::string& needle,
-                            const std::string& what)
+static void require_contains(const std::string& haystack, std::string_view needle)
 {
-    if (haystack.find(needle) == std::string::npos)
+    if (haystack.find(needle) != std::string::npos)
     {
-        fail("expected " + what + " to contain '" + needle + "'\n---\n" + haystack + "\n---");
+        return;
     }
+    fail("missing expected diagnostic fragment");
 }
 
-static void expect_empty(const std::string& s, const std::string& what)
+static void require_empty(const std::string& text, std::string_view channel)
 {
-    if (!s.empty())
+    if (text.empty())
     {
-        fail("expected " + what + " to be empty\n---\n" + s + "\n---");
+        return;
     }
+    fail("expected empty " + std::string(channel));
 }
 
 static fs::path write_temp_curlee(const std::string& stem, const std::string& contents)
@@ -95,21 +101,18 @@ int main()
         const fs::path entry = write_temp_curlee(
             "check_import_order", "fn main() -> Int {\n  return 0;\n}\n\nimport a;\n");
 
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture({"curlee", "check", entry.string()}, out, err);
-        if (rc != 1)
+        const CapturedRun run = run_check_capture(entry);
+        if (run.rc != 1)
         {
             fail("expected error exit code for import-after-declaration");
         }
 
-        expect_empty(out, "stdout");
-        expect_contains(err, "error:", "stderr");
-        expect_contains(err,
-                        "import declarations must appear before any other top-level declarations",
-                        "stderr");
-        expect_contains(err, "move this import above the first declaration", "stderr");
-        expect_contains(err, "first declaration is here", "stderr");
+        require_empty(run.out, "stdout");
+        require_contains(run.err, "error:");
+        require_contains(run.err,
+                         "import declarations must appear before any other top-level declarations");
+        require_contains(run.err, "move this import above the first declaration");
+        require_contains(run.err, "first declaration is here");
     }
 
     return 0;
