@@ -1,0 +1,7 @@
+fn add1(x: Int) -> Int {
+  return x + 1;
+}
+
+fn sub1(x: Int) -> Int {
+  return x - 1;
+}

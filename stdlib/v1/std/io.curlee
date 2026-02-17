@@ -1,0 +1,3 @@
+fn identity_int(value: Int, out: cap io.stdout) -> Int {
+  return value;
+}

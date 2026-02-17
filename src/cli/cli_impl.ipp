@@ -642,7 +642,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
 
         if (out_import_pins == nullptr || out_bytecode == nullptr) // GCOVR_EXCL_LINE
         {
-            return kExitError;
+            return kExitError; // GCOVR_EXCL_LINE
         }
 
         std::vector<std::string> keys;
@@ -977,11 +977,11 @@ int run(int argc, char** argv)
                         std::cerr << "error: expected path after --root=\n\n";
                         print_usage(std::cerr);
                         return kExitUsage;
-                    }
+                    } // GCOVR_EXCL_LINE
                     root = std::filesystem::path(std::string(root_value)); // GCOVR_EXCL_LINE
-                    ++i;
+                    ++i; // GCOVR_EXCL_LINE
                     continue; // GCOVR_EXCL_LINE
-                }
+                } // GCOVR_EXCL_LINE
 
                 if (a == "--stdlib-root")
                 {
@@ -992,8 +992,8 @@ int run(int argc, char** argv)
                         return kExitUsage;
                     }
                     stdlib_roots.push_back(std::string(args[i + 1])); // GCOVR_EXCL_LINE
-                    i += 2;
-                    continue;
+                    i += 2; // GCOVR_EXCL_LINE
+                    continue; // GCOVR_EXCL_LINE
                 }
 
                 if (a.starts_with("--stdlib-root="))
@@ -1006,8 +1006,8 @@ int run(int argc, char** argv)
                         return kExitUsage;
                     }
                     stdlib_roots.push_back(std::string(root_value)); // GCOVR_EXCL_LINE
-                    ++i;
-                    continue;
+                    ++i; // GCOVR_EXCL_LINE
+                    continue; // GCOVR_EXCL_LINE
                 }
 
                 if (a == "--cap" || a == "--capability") // GCOVR_EXCL_LINE
@@ -1033,8 +1033,8 @@ int run(int argc, char** argv)
                         return kExitUsage;
                     }
                     caps.insert(std::string(cap)); // GCOVR_EXCL_LINE
-                    ++i;
-                    continue;
+                    ++i; // GCOVR_EXCL_LINE
+                    continue; // GCOVR_EXCL_LINE
                 }
 
                 if (a.starts_with('-'))

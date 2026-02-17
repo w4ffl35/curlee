@@ -20,6 +20,8 @@ namespace fs = std::filesystem;
 int main()
 {
     const auto pid = static_cast<unsigned long>(::getpid());
+    const fs::path repo_root = fs::path(__FILE__).parent_path().parent_path();
+    const fs::path stdlib_v1_root = repo_root / "stdlib" / "v1";
 
     const auto write_text = [](const fs::path& path, std::string_view text)
     {
@@ -80,7 +82,8 @@ int main()
         {
             return;
         }
-        die("expected diagnostic to contain requested text");
+        die("expected diagnostic to contain '" + std::string(needle) + "'\n---\n" + text +
+            "\n---");
     };
 
     const auto expect_empty = [](const std::string& text, std::string_view label)
@@ -142,6 +145,118 @@ int main()
 
         expect_empty(run.out, "stdout");
         expect_empty(run.err, "stderr");
+    }
+
+    // check: importing stdlib modules from repository stdlib/v1 works.
+    {
+        if (!fs::exists(stdlib_v1_root / "std" / "math.curlee"))
+        {
+            die("expected stdlib/v1/std/math.curlee to exist");
+        }
+
+        const fs::path root =
+            fs::temp_directory_path() / "curlee_cli_tests" /
+            ("check_import_repo_stdlib_" + std::to_string(pid));
+        const fs::path entry = root / "main.curlee";
+
+        std::error_code ec;
+        fs::remove_all(root, ec);
+
+        write_text(entry,
+                   "import std.math as m;\n\n"
+                   "fn main() -> Int {\n"
+                   "  return m.add1(41);\n"
+                   "}\n");
+
+        ::setenv("CURLEE_STDLIB_ROOT", stdlib_v1_root.string().c_str(), 1);
+        const RunResult run = run_check(entry);
+        ::unsetenv("CURLEE_STDLIB_ROOT");
+
+        if (run.rc != 0)
+        {
+            die("expected check to succeed with repository stdlib root");
+        }
+
+        expect_empty(run.out, "stdout");
+        expect_empty(run.err, "stderr");
+    }
+
+    // check: stdlib IO signatures require explicit cap io.stdout values.
+    {
+        const fs::path root =
+            fs::temp_directory_path() / "curlee_cli_tests" /
+            ("check_stdlib_io_cap_" + std::to_string(pid));
+        const fs::path entry = root / "main.curlee";
+        const fs::path entry_ok = root / "main_ok.curlee";
+
+        std::error_code ec;
+        fs::remove_all(root, ec);
+
+        write_text(entry,
+                   "import std.io as io;\n\n"
+                   "fn main() -> Int {\n"
+                   "  return io.identity_int(7, 7);\n"
+                   "}\n");
+
+        write_text(entry_ok,
+                   "import std.io as io;\n\n"
+                   "fn main(out: cap io.stdout) -> Int {\n"
+                   "  return io.identity_int(7, out);\n"
+                   "}\n");
+
+        ::setenv("CURLEE_STDLIB_ROOT", stdlib_v1_root.string().c_str(), 1);
+        const RunResult missing_cap = run_check(entry);
+        const RunResult ok = run_check(entry_ok);
+        ::unsetenv("CURLEE_STDLIB_ROOT");
+
+        if (missing_cap.rc != 1)
+        {
+            die("expected check to fail for invalid stdlib io capability argument type");
+        }
+        expect_contains(missing_cap.err, "argument type mismatch for call to 'identity_int'");
+
+        if (ok.rc != 0)
+        {
+            die("expected check to succeed when stdlib io capability value is provided");
+        }
+        expect_empty(ok.out, "stdout");
+        expect_empty(ok.err, "stderr");
+    }
+
+    // check: unsafe rules are enforced for stdlib module implementations.
+    {
+        const fs::path root =
+            fs::temp_directory_path() / "curlee_cli_tests" /
+            ("check_stdlib_unsafe_gate_" + std::to_string(pid));
+        const fs::path stdlib_root = root / "stdlib";
+        const fs::path bad_module = stdlib_root / "std" / "badpython.curlee";
+        const fs::path entry = root / "main.curlee";
+
+        std::error_code ec;
+        fs::remove_all(root, ec);
+
+        write_text(bad_module,
+                   "fn call0(p: cap python.ffi) -> Unit {\n"
+                   "  python_ffi.call();\n"
+                   "  return 0;\n"
+                   "}\n");
+
+        write_text(entry,
+                   "import std.badpython as bad;\n\n"
+                   "fn main(p: cap python.ffi) -> Unit {\n"
+                   "  bad.call0(p);\n"
+                   "  return 0;\n"
+                   "}\n");
+
+        ::setenv("CURLEE_STDLIB_ROOT", stdlib_root.string().c_str(), 1);
+        const RunResult run = run_check(entry);
+        ::unsetenv("CURLEE_STDLIB_ROOT");
+
+        if (run.rc != 1)
+        {
+            die("expected check to fail when stdlib python_ffi usage is not inside unsafe");
+        }
+        expect_contains(run.err, "python_ffi.call requires an unsafe context");
     }
 
     return 0;
