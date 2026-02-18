@@ -1,0 +1,4 @@
+fn main() -> Int {
+  if (true) {
+    return 1;
+}

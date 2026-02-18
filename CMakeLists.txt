@@ -401,8 +401,15 @@ add_executable(curlee_fuzz_regression_tests
   tests/fuzz_regression_tests.cpp
   src/lexer/lexer.cpp
   src/parser/parser.cpp
+  src/compiler/emitter.cpp
+  src/types/type_check.cpp
+  src/verification/checker.cpp
+  src/verification/predicate_lowering.cpp
+  src/verification/solver.cpp
+  src/vm/vm.cpp
 )
 target_include_directories(curlee_fuzz_regression_tests PRIVATE include)
+target_link_libraries(curlee_fuzz_regression_tests PRIVATE Z3::Z3)
 
 add_test(
   NAME curlee_fuzz_regression_tests
