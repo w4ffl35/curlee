@@ -60,6 +60,24 @@ struct DependencyLockfile
     std::vector<curlee::bundle::ImportPin> imports;
 };
 
+enum class DiagOutputFormat
+{
+    Text,
+    Json,
+};
+
+enum class ProfileOutputFormat
+{
+    Text,
+    Json,
+};
+
+struct RuntimeProfileOptions
+{
+    bool enabled = false;
+    ProfileOutputFormat format = ProfileOutputFormat::Text;
+};
+
 curlee::runtime::Capabilities empty_caps()
 {
     return {};
@@ -75,8 +93,9 @@ void print_usage(std::ostream& out)
     out << "  curlee lex <file.curlee>\n";
     out << "  curlee parse <file.curlee>\n";
     out << "  curlee check <file.curlee>\n";
-    out << "  curlee run [--fuel <n>] [--bundle <file.bundle>] [--cap <capability>]... "
-           "<file.curlee>\n";
+        out << "  curlee run [--fuel <n>] [--profile] [--profile-format <text|json>] "
+            "[--bundle <file.bundle>] [--cap <capability>]... <file.curlee>\n";
+        out << "  curlee <lex|parse|check|run> [--diag-format <text|json>] ...\n";
     out << "  curlee fmt [--check] <file>\n";
     out << "  curlee bundle build [--root <dir>] [--stdlib-root <dir>] [--cap <capability>]... "
            "<entry.curlee> <out.bundle>\n";
@@ -85,6 +104,119 @@ void print_usage(std::ostream& out)
     out << "  curlee deps lock [--root <dir>] [--stdlib-root <dir>] <entry.curlee> <deps.lock>\n";
     out << "  curlee deps verify [--root <dir>] [--stdlib-root <dir>] <entry.curlee> <deps.lock>\n";
 }
+
+// GCOVR_EXCL_START
+std::string_view diag_severity_name(curlee::diag::Severity severity)
+{
+    switch (severity)
+    {
+    case curlee::diag::Severity::Error:
+        return "error";
+    case curlee::diag::Severity::Warning:
+        return "warning";
+    case curlee::diag::Severity::Note:
+        return "note";
+    }
+    return "error";
+}
+
+std::string json_escape(std::string_view input)
+{
+    std::string out;
+    out.reserve(input.size());
+    for (const char ch : input)
+    {
+        switch (ch)
+        {
+        case '"':
+            out += "\\\"";
+            break;
+        case '\\':
+            out += "\\\\";
+            break;
+        case '\n':
+            out += "\\n";
+            break;
+        case '\r':
+            out += "\\r";
+            break;
+        case '\t':
+            out += "\\t";
+            break;
+        default:
+            out.push_back(ch);
+            break;
+        }
+    }
+    return out;
+}
+
+void emit_span_json(std::ostream& out, const std::optional<curlee::source::Span>& span)
+{
+    if (!span.has_value())
+    {
+        out << "null";
+        return;
+    }
+    out << "{\"start\":" << span->start << ",\"end\":" << span->end << "}";
+}
+
+void emit_diagnostic(std::ostream& out, const curlee::diag::Diagnostic& diagnostic,
+                     const curlee::source::SourceFile& file, DiagOutputFormat format)
+{
+    if (format == DiagOutputFormat::Text)
+    {
+        out << curlee::diag::render(diagnostic, file);
+        return;
+    }
+
+    out << "{\"kind\":\"diagnostic\",\"severity\":\""
+        << diag_severity_name(diagnostic.severity) << "\",\"message\":\""
+        << json_escape(diagnostic.message) << "\",\"file\":\"" << json_escape(file.path)
+        << "\",\"span\":";
+    emit_span_json(out, diagnostic.span);
+    out << ",\"notes\":[";
+    for (std::size_t i = 0; i < diagnostic.notes.size(); ++i)
+    {
+        if (i > 0)
+        {
+            out << ',';
+        }
+        out << "{\"message\":\"" << json_escape(diagnostic.notes[i].message)
+            << "\",\"span\":";
+        emit_span_json(out, diagnostic.notes[i].span);
+        out << "}";
+    }
+    out << "]}\n";
+}
+
+void emit_diagnostics(std::ostream& out, const std::vector<curlee::diag::Diagnostic>& diagnostics,
+                      const curlee::source::SourceFile& file, DiagOutputFormat format)
+{
+    for (const auto& diagnostic : diagnostics)
+    {
+        emit_diagnostic(out, diagnostic, file, format);
+    }
+}
+
+void emit_profile(std::ostream& out, const curlee::vm::VmProfile& profile, bool ok,
+                  ProfileOutputFormat format)
+{
+    if (format == ProfileOutputFormat::Text)
+    {
+        out << "curlee profile: steps=" << profile.steps << " fuel_limit=" << profile.fuel_limit
+            << " fuel_used=" << profile.fuel_used
+            << " fuel_remaining=" << profile.fuel_remaining << " ok=" << (ok ? "true" : "false")
+            << "\n";
+        return;
+    }
+
+    out << "{\"kind\":\"profile\",\"steps\":" << profile.steps
+        << ",\"fuel_limit\":" << profile.fuel_limit << ",\"fuel_used\":" << profile.fuel_used
+        << ",\"fuel_remaining\":" << profile.fuel_remaining << ",\"ok\":"
+        << (ok ? "true" : "false") << "}\n";
+}
+// GCOVR_EXCL_STOP
 
 bool ends_with(std::string_view s, std::string_view suffix)
 {
@@ -453,6 +585,8 @@ bool chunk_uses_python_call(const curlee::vm::Chunk& chunk)
 
 int cmd_read_only(std::string_view cmd, const std::string& path,
                   const curlee::runtime::Capabilities& granted_caps, std::size_t fuel,
+                  DiagOutputFormat diag_format = DiagOutputFormat::Text,
+                  RuntimeProfileOptions profile_options = {},
                   const std::vector<std::filesystem::path>& stdlib_roots = {},
                   const std::optional<std::filesystem::path>& entry_dir_override = std::nullopt,
                   std::vector<curlee::bundle::ImportPin>* out_import_pins = nullptr,
@@ -469,7 +603,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             .notes = {},
         };
 
-        std::cerr << diag::render(diag, pseudo_file);
+        emit_diagnostic(std::cerr, diag, pseudo_file, diag_format);
         return kExitError;
     }
 
@@ -509,13 +643,10 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         std::unordered_set<std::string> visited;
         std::vector<std::string> merge_order;
 
-        auto render_diags = [](const std::vector<diag::Diagnostic>& ds,
-                               const source::SourceFile& f) -> void
+        auto render_diags = [&](const std::vector<diag::Diagnostic>& ds,
+                                const source::SourceFile& f) -> void
         {
-            for (const auto& d : ds)
-            {
-                std::cerr << diag::render(d, f);
-            }
+            emit_diagnostics(std::cerr, ds, f, diag_format);
         };
 
         struct ImportLoadResult
@@ -575,7 +706,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                     .span = std::nullopt,
                     .notes = {},
                 };
-                std::cerr << diag::render(d, mod_file);
+                emit_diagnostic(std::cerr, d, mod_file, diag_format);
                 return false;
             }
 
@@ -616,7 +747,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                                               .span = std::nullopt},
                             },
                     };
-                    std::cerr << diag::render(d, stable_file);
+                    emit_diagnostic(std::cerr, d, stable_file, diag_format);
                     return false;
                 }
 
@@ -633,7 +764,8 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             const auto lexed = lexer::lex(stable_file.contents);
             if (std::holds_alternative<diag::Diagnostic>(lexed))
             {
-                std::cerr << diag::render(std::get<diag::Diagnostic>(lexed), stable_file);
+                emit_diagnostic(std::cerr, std::get<diag::Diagnostic>(lexed), stable_file,
+                                diag_format);
                 visiting.erase(key);
                 return false;
             }
@@ -659,7 +791,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                         .span = f.span,
                         .notes = {},
                     };
-                    std::cerr << diag::render(d, stable_file);
+                    emit_diagnostic(std::cerr, d, stable_file, diag_format);
                     visiting.erase(key);
                     return false;
                 } // GCOVR_EXCL_LINE
@@ -670,7 +802,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                 const auto dep_loaded = load_import(stable_file, imp);
                 if (auto* d = std::get_if<diag::Diagnostic>(&dep_loaded))
                 {
-                    std::cerr << diag::render(*d, stable_file);
+                    emit_diagnostic(std::cerr, *d, stable_file, diag_format);
                     visiting.erase(key);
                     return false;
                 } // GCOVR_EXCL_LINE
@@ -685,7 +817,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                     const diag::Related note{.message = "cycle involves " + dep_ok.path.string(),
                                              .span = std::nullopt};
                     d.notes.push_back(note); // GCOVR_EXCL_LINE
-                    std::cerr << diag::render(d, stable_file);
+                    emit_diagnostic(std::cerr, d, stable_file, diag_format);
                     visiting.erase(key);
                     return false;
                 }
@@ -737,7 +869,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         const auto lexed = lexer::lex(file.contents);
         if (std::holds_alternative<diag::Diagnostic>(lexed))
         {
-            std::cerr << diag::render(std::get<diag::Diagnostic>(lexed), file);
+            emit_diagnostic(std::cerr, std::get<diag::Diagnostic>(lexed), file, diag_format);
             return false;
         }
 
@@ -745,11 +877,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         auto parsed = parser::parse(toks);
         if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
         {
-            const auto& ds = std::get<std::vector<diag::Diagnostic>>(parsed);
-            for (const auto& d : ds)
-            {
-                std::cerr << diag::render(d, file);
-            }
+            render_diags(std::get<std::vector<diag::Diagnostic>>(parsed), file);
             return false;
         }
 
@@ -762,7 +890,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             const auto dep_loaded = load_import(file, imp);
             if (auto* d = std::get_if<diag::Diagnostic>(&dep_loaded))
             {
-                std::cerr << diag::render(*d, file);
+                emit_diagnostic(std::cerr, *d, file, diag_format);
                 return false;
             }
 
@@ -776,7 +904,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                 const diag::Related note{.message = "cycle involves " + dep_ok.path.string(),
                                          .span = std::nullopt};
                 d.notes.push_back(note); // GCOVR_EXCL_LINE
-                std::cerr << diag::render(d, file);
+                emit_diagnostic(std::cerr, d, file, diag_format);
                 return false;
             }
 
@@ -821,7 +949,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                         const diag::Related note{.message = "conflict while importing " + key,
                                                  .span = std::nullopt};
                         d.notes.push_back(note); // GCOVR_EXCL_LINE
-                        std::cerr << diag::render(d, file);
+                        emit_diagnostic(std::cerr, d, file, diag_format);
                         return false;
                     }
                     seen.insert(name);
@@ -836,22 +964,14 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         const auto resolved = resolver::resolve(program, file, entry_dir, stdlib_roots);
         if (std::holds_alternative<std::vector<diag::Diagnostic>>(resolved))
         {
-            const auto& ds = std::get<std::vector<diag::Diagnostic>>(resolved);
-            for (const auto& d : ds)
-            {
-                std::cerr << diag::render(d, file);
-            }
+            render_diags(std::get<std::vector<diag::Diagnostic>>(resolved), file);
             return false;
         }
 
         const auto typed = types::type_check(program);
         if (std::holds_alternative<std::vector<diag::Diagnostic>>(typed))
         {
-            const auto& ds = std::get<std::vector<diag::Diagnostic>>(typed);
-            for (const auto& d : ds)
-            {
-                std::cerr << diag::render(d, file);
-            }
+            render_diags(std::get<std::vector<diag::Diagnostic>>(typed), file);
             return false;
         }
 
@@ -860,11 +980,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         const auto verified = verification::verify(program, type_info);
         if (std::holds_alternative<std::vector<diag::Diagnostic>>(verified))
         {
-            const auto& ds = std::get<std::vector<diag::Diagnostic>>(verified);
-            for (const auto& d : ds)
-            {
-                std::cerr << diag::render(d, file);
-            }
+            render_diags(std::get<std::vector<diag::Diagnostic>>(verified), file);
             return false;
         }
 
@@ -876,7 +992,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         const auto res = lexer::lex(file.contents);
         if (std::holds_alternative<diag::Diagnostic>(res))
         {
-            std::cerr << diag::render(std::get<diag::Diagnostic>(res), file);
+            emit_diagnostic(std::cerr, std::get<diag::Diagnostic>(res), file, diag_format);
             return kExitError;
         }
 
@@ -890,7 +1006,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         const auto lexed = lexer::lex(file.contents);
         if (std::holds_alternative<diag::Diagnostic>(lexed))
         {
-            std::cerr << diag::render(std::get<diag::Diagnostic>(lexed), file);
+            emit_diagnostic(std::cerr, std::get<diag::Diagnostic>(lexed), file, diag_format);
             return kExitError;
         }
 
@@ -898,11 +1014,8 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         const auto parsed = parser::parse(toks);
         if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
         {
-            const auto& ds = std::get<std::vector<diag::Diagnostic>>(parsed);
-            for (const auto& d : ds)
-            {
-                std::cerr << diag::render(d, file);
-            }
+            emit_diagnostics(std::cerr, std::get<std::vector<diag::Diagnostic>>(parsed), file,
+                             diag_format);
             return kExitError;
         }
 
@@ -943,7 +1056,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                 note.message = "grant it with: curlee run --cap " + req_name + " <file.curlee>";
                 note.span = std::nullopt;
                 d.notes.push_back(note);
-                std::cerr << diag::render(d, file);
+                emit_diagnostic(std::cerr, d, file, diag_format);
                 return kExitError;
             }
         }
@@ -951,11 +1064,8 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         const auto emitted = compiler::emit_bytecode(program);
         if (std::holds_alternative<std::vector<diag::Diagnostic>>(emitted))
         {
-            const auto& ds = std::get<std::vector<diag::Diagnostic>>(emitted);
-            for (const auto& d : ds)
-            {
-                std::cerr << diag::render(d, file);
-            }
+            emit_diagnostics(std::cerr, std::get<std::vector<diag::Diagnostic>>(emitted), file,
+                             diag_format);
             return kExitError;
         }
 
@@ -968,11 +1078,19 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             d.severity = diag::Severity::Error;
             d.message = result.error;
             d.span = result.error_span;
-            std::cerr << diag::render(d, file);
+            emit_diagnostic(std::cerr, d, file, diag_format);
+            if (profile_options.enabled)
+            {
+                emit_profile(std::cerr, result.profile, false, profile_options.format);
+            }
             return kExitError;
         }
 
         std::cout << "curlee run: result " << vm::to_string(result.value) << "\n";
+        if (profile_options.enabled)
+        {
+            emit_profile(std::cout, result.profile, true, profile_options.format);
+        }
         return kExitOk;
     }
 
@@ -987,11 +1105,8 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         const auto emitted = compiler::emit_bytecode(program);
         if (std::holds_alternative<std::vector<diag::Diagnostic>>(emitted))
         {
-            const auto& ds = std::get<std::vector<diag::Diagnostic>>(emitted);
-            for (const auto& d : ds)
-            {
-                std::cerr << diag::render(d, file);
-            }
+            emit_diagnostics(std::cerr, std::get<std::vector<diag::Diagnostic>>(emitted), file,
+                             diag_format);
             return kExitError;
         }
 
@@ -1049,7 +1164,8 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
 }
 
 int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entry_path,
-                   const curlee::runtime::Capabilities& granted_caps, std::size_t fuel)
+                   const curlee::runtime::Capabilities& granted_caps, std::size_t fuel,
+                   DiagOutputFormat diag_format, RuntimeProfileOptions profile_options)
 {
     auto loaded = source::load_source_file(entry_path);
     if (auto* err = std::get_if<source::LoadError>(&loaded))
@@ -1064,7 +1180,7 @@ int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entr
             .notes = {},
         };
 
-        std::cerr << diag::render(diag, pseudo_file);
+        emit_diagnostic(std::cerr, diag, pseudo_file, diag_format);
         return kExitError;
     }
 
@@ -1078,7 +1194,7 @@ int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entr
         d.message = "bundle capability not part of Curlee v1 surface: " +
                     std::string(*forbidden);
         d.span = curlee::source::Span{.start = 0, .end = 0};
-        std::cerr << diag::render(d, file);
+        emit_diagnostic(std::cerr, d, file, diag_format);
         return kExitError;
     }
 
@@ -1089,7 +1205,7 @@ int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entr
         d.severity = diag::Severity::Error;
         d.message = "capability not part of Curlee v1 surface: " + std::string(*forbidden);
         d.span = curlee::source::Span{.start = 0, .end = 0};
-        std::cerr << diag::render(d, file);
+        emit_diagnostic(std::cerr, d, file, diag_format);
         return kExitError;
     }
 
@@ -1114,7 +1230,7 @@ int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entr
                 .span = std::nullopt,
             };
             d.notes.push_back(grant_note);
-            std::cerr << diag::render(d, file);
+            emit_diagnostic(std::cerr, d, file, diag_format);
             return kExitError; // GCOVR_EXCL_LINE
         }
         effective_caps.insert(cap);
@@ -1129,7 +1245,7 @@ int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entr
             .span = std::nullopt,
             .notes = {},
         };
-        std::cerr << diag::render(d, file);
+        emit_diagnostic(std::cerr, d, file, diag_format);
         return kExitError;
     }
 
@@ -1140,7 +1256,7 @@ int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entr
         d.severity = diag::Severity::Error;
         d.message = "bundle bytecode uses python interop opcode not supported in Curlee v1";
         d.span = curlee::source::Span{.start = 0, .end = 0};
-        std::cerr << diag::render(d, file);
+        emit_diagnostic(std::cerr, d, file, diag_format);
         return kExitError;
     }
 
@@ -1153,18 +1269,27 @@ int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entr
         d.severity = diag::Severity::Error;
         d.message = result.error;
         d.span = result.error_span;
-        std::cerr << diag::render(d, file);
+        emit_diagnostic(std::cerr, d, file, diag_format);
+        if (profile_options.enabled)
+        {
+            emit_profile(std::cerr, result.profile, false, profile_options.format);
+        }
         return kExitError;
     }
 
     std::cout << "curlee run: result " << vm::to_string(result.value) << "\n";
+    if (profile_options.enabled)
+    {
+        emit_profile(std::cout, result.profile, true, profile_options.format);
+    }
     return kExitOk;
 }
 
 int cmd_bundle_build(const std::string& entry_path_arg, const std::string& bundle_path,
                      const curlee::runtime::Capabilities& requested_caps,
                      const std::vector<std::filesystem::path>& stdlib_roots,
-                     const std::optional<std::filesystem::path>& input_root)
+                     const std::optional<std::filesystem::path>& input_root,
+                     DiagOutputFormat diag_format)
 {
     namespace fs = std::filesystem;
 
@@ -1177,7 +1302,8 @@ int cmd_bundle_build(const std::string& entry_path_arg, const std::string& bundl
     std::vector<curlee::bundle::ImportPin> import_pins;
     std::vector<std::uint8_t> bytecode;
     const int rc = cmd_read_only("bundle-build", entry_path.string(), empty_caps(), kDefaultFuel,
-                                 stdlib_roots, input_root, &import_pins, &bytecode);
+                                 diag_format, {}, stdlib_roots, input_root, &import_pins,
+                                 &bytecode);
     if (rc != kExitOk)
     {
         return rc;
@@ -1215,7 +1341,8 @@ int cmd_collect_dependency_snapshot(const std::string& entry_path_arg,
                                    const std::vector<std::filesystem::path>& stdlib_roots,
                                    const std::optional<std::filesystem::path>& input_root,
                                    std::string& out_entry_hash,
-                                   std::vector<curlee::bundle::ImportPin>& out_import_pins)
+                                   std::vector<curlee::bundle::ImportPin>& out_import_pins,
+                                   DiagOutputFormat diag_format)
 {
     namespace fs = std::filesystem;
 
@@ -1227,7 +1354,8 @@ int cmd_collect_dependency_snapshot(const std::string& entry_path_arg,
 
     std::vector<std::uint8_t> bytecode;
     const int rc = cmd_read_only("bundle-build", entry_path.string(), empty_caps(), kDefaultFuel,
-                                 stdlib_roots, input_root, &out_import_pins, &bytecode);
+                                 diag_format, {}, stdlib_roots, input_root, &out_import_pins,
+                                 &bytecode);
     if (rc != kExitOk)
     {
         return rc;
@@ -1247,12 +1375,13 @@ int cmd_collect_dependency_snapshot(const std::string& entry_path_arg,
 
 int cmd_deps_lock(const std::string& entry_path_arg, const std::string& lock_path,
                  const std::vector<std::filesystem::path>& stdlib_roots,
-                 const std::optional<std::filesystem::path>& input_root)
+                 const std::optional<std::filesystem::path>& input_root,
+                 DiagOutputFormat diag_format)
 {
     std::string entry_hash;
     std::vector<curlee::bundle::ImportPin> import_pins;
     const int rc = cmd_collect_dependency_snapshot(entry_path_arg, stdlib_roots, input_root,
-                                                   entry_hash, import_pins);
+                                                   entry_hash, import_pins, diag_format);
     if (rc != kExitOk)
     {
         return rc;
@@ -1275,12 +1404,13 @@ int cmd_deps_lock(const std::string& entry_path_arg, const std::string& lock_pat
 
 int cmd_deps_verify(const std::string& entry_path_arg, const std::string& lock_path,
                    const std::vector<std::filesystem::path>& stdlib_roots,
-                   const std::optional<std::filesystem::path>& input_root)
+                   const std::optional<std::filesystem::path>& input_root,
+                   DiagOutputFormat diag_format)
 {
     std::string entry_hash;
     std::vector<curlee::bundle::ImportPin> import_pins;
     const int rc = cmd_collect_dependency_snapshot(entry_path_arg, stdlib_roots, input_root,
-                                                   entry_hash, import_pins);
+                                                   entry_hash, import_pins, diag_format);
     if (rc != kExitOk)
     {
         return rc;
@@ -1325,6 +1455,32 @@ std::optional<std::size_t> parse_size(std::string_view s)
         return std::nullopt;
     }
     return out;
+}
+
+std::optional<DiagOutputFormat> parse_diag_output_format(std::string_view raw)
+{
+    if (raw == "text")
+    {
+        return DiagOutputFormat::Text;
+    }
+    if (raw == "json")
+    {
+        return DiagOutputFormat::Json;
+    }
+    return std::nullopt;
+}
+
+std::optional<ProfileOutputFormat> parse_profile_output_format(std::string_view raw)
+{
+    if (raw == "text")
+    {
+        return ProfileOutputFormat::Text;
+    }
+    if (raw == "json")
+    {
+        return ProfileOutputFormat::Json;
+    }
+    return std::nullopt;
 }
 
 int cmd_fmt(const std::string& path, bool check)
@@ -1413,7 +1569,7 @@ int run(int argc, char** argv)
     if (argc == 2 && !first.starts_with('-') && ends_with(first, ".curlee"))
     {
         return cmd_read_only("run", std::string(first), empty_caps(), kDefaultFuel,
-                             load_stdlib_roots_from_env());
+                             DiagOutputFormat::Text, {}, load_stdlib_roots_from_env());
     }
 
     const std::string_view cmd = argv[1];
@@ -1421,6 +1577,54 @@ int run(int argc, char** argv)
     for (int i = 2; i < argc; ++i)
     {
         args.push_back(argv[i]);
+    }
+
+    DiagOutputFormat diag_format = DiagOutputFormat::Text;
+    {
+        std::vector<std::string_view> filtered_args;
+        for (std::size_t i = 0; i < args.size();)
+        {
+            const std::string_view a = args[i];
+            if (a == "--diag-format")
+            {
+                if (i + 1 >= args.size())
+                {
+                    std::cerr << "error: expected format after --diag-format\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+
+                const auto parsed = parse_diag_output_format(args[i + 1]);
+                if (!parsed.has_value())
+                {
+                    std::cerr << "error: expected --diag-format to be one of: text, json\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                diag_format = *parsed;
+                i += 2;
+                continue;
+            }
+
+            if (a.starts_with("--diag-format="))
+            {
+                const auto raw = a.substr(std::string_view("--diag-format=").size());
+                const auto parsed = parse_diag_output_format(raw);
+                if (!parsed.has_value())
+                {
+                    std::cerr << "error: expected --diag-format= to be one of: text, json\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                diag_format = *parsed;
+                ++i;
+                continue;
+            }
+
+            filtered_args.push_back(a);
+            ++i;
+        }
+        args = std::move(filtered_args);
     }
 
     if (cmd == "fmt")
@@ -1563,7 +1767,8 @@ int run(int argc, char** argv)
                 return kExitUsage;
             }
 
-            return cmd_bundle_build(positional[0], positional[1], caps, stdlib_roots, root);
+            return cmd_bundle_build(positional[0], positional[1], caps, stdlib_roots, root,
+                                    diag_format);
         }
 
         if (args.size() != 2)
@@ -1730,9 +1935,9 @@ int run(int argc, char** argv)
 
         if (sub == "lock")
         {
-            return cmd_deps_lock(positional[0], positional[1], stdlib_roots, root);
+            return cmd_deps_lock(positional[0], positional[1], stdlib_roots, root, diag_format);
         }
-        return cmd_deps_verify(positional[0], positional[1], stdlib_roots, root);
+        return cmd_deps_verify(positional[0], positional[1], stdlib_roots, root, diag_format);
     }
 
     if (cmd == "run")
@@ -1742,6 +1947,7 @@ int run(int argc, char** argv)
         std::optional<curlee::bundle::Bundle> bundle;
         std::optional<std::string> path;
         std::size_t fuel = kDefaultFuel;
+        RuntimeProfileOptions profile_options;
         auto stdlib_roots = load_stdlib_roots_from_env();
 
         for (std::size_t i = 0; i < args.size();)
@@ -1840,6 +2046,53 @@ int run(int argc, char** argv)
                 continue;
             }
 
+            if (a == "--profile")
+            {
+                profile_options.enabled = true;
+                ++i;
+                continue;
+            }
+
+            if (a == "--profile-format")
+            {
+                if (i + 1 >= args.size())
+                {
+                    std::cerr << "error: expected format after --profile-format\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+
+                const auto parsed = parse_profile_output_format(args[i + 1]);
+                if (!parsed.has_value())
+                {
+                    std::cerr
+                        << "error: expected --profile-format to be one of: text, json\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                profile_options.enabled = true;
+                profile_options.format = *parsed;
+                i += 2;
+                continue;
+            }
+
+            if (a.starts_with("--profile-format="))
+            {
+                const auto raw = a.substr(std::string_view("--profile-format=").size());
+                const auto parsed = parse_profile_output_format(raw);
+                if (!parsed.has_value())
+                {
+                    std::cerr
+                        << "error: expected --profile-format= to be one of: text, json\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                profile_options.enabled = true;
+                profile_options.format = *parsed;
+                ++i;
+                continue;
+            }
+
             if (a.starts_with("--fuel="))
             {
                 const auto raw = a.substr(std::string_view("--fuel=").size());
@@ -1913,21 +2166,22 @@ int run(int argc, char** argv)
 
         if (bundle.has_value())
         {
-            return cmd_run_bundle(*bundle, *path, caps, fuel);
+            return cmd_run_bundle(*bundle, *path, caps, fuel, diag_format, profile_options);
         }
 
-        return cmd_read_only(cmd, *path, caps, fuel, stdlib_roots);
+        return cmd_read_only(cmd, *path, caps, fuel, diag_format, profile_options, stdlib_roots);
     }
 
-    if (argc != 3)
+    if (args.size() != 1)
     {
         std::cerr << "error: expected <command> <file.curlee>\n\n";
         print_usage(std::cerr);
         return kExitUsage;
     }
 
-    const std::string path = argv[2];
-    return cmd_read_only(cmd, path, empty_caps(), kDefaultFuel, load_stdlib_roots_from_env());
+    const std::string path(args[0]);
+    return cmd_read_only(cmd, path, empty_caps(), kDefaultFuel, diag_format, {},
+                         load_stdlib_roots_from_env());
 }
 
 } // namespace curlee::cli

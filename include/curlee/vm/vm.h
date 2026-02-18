@@ -15,6 +15,14 @@
 namespace curlee::vm
 {
 
+struct VmProfile
+{
+  std::size_t steps = 0;
+  std::size_t fuel_limit = 0;
+  std::size_t fuel_used = 0;
+  std::size_t fuel_remaining = 0;
+};
+
 /** @brief Result of executing a chunk in the VM. */
 struct VmResult
 {
@@ -22,6 +30,7 @@ struct VmResult
     Value value = Value::unit_v();
     std::string error;
     std::optional<curlee::source::Span> error_span;
+    VmProfile profile;
 };
 
 /**
