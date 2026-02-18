@@ -126,6 +126,84 @@ std::string join_import_pins(const std::vector<curlee::bundle::ImportPin>& pins)
     return out;
 } // GCOVR_EXCL_LINE
 
+bool is_v1_forbidden_capability(std::string_view cap)
+{
+    return cap == "python.ffi" || cap == "python.sandbox";
+}
+
+std::optional<std::string_view>
+find_forbidden_v1_capability(const std::vector<std::string>& capabilities)
+{
+    for (const auto& cap : capabilities)
+    {
+        if (is_v1_forbidden_capability(cap))
+        {
+            return cap;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string_view>
+find_forbidden_v1_capability(const curlee::runtime::Capabilities& capabilities)
+{
+    for (const auto& cap : capabilities)
+    {
+        if (is_v1_forbidden_capability(cap))
+        {
+            return cap;
+        }
+    }
+    return std::nullopt;
+}
+
+bool chunk_uses_python_call(const curlee::vm::Chunk& chunk)
+{
+    std::size_t ip = 0;
+    while (ip < chunk.code.size())
+    {
+        const auto op = static_cast<curlee::vm::OpCode>(chunk.code[ip++]);
+        if (op == curlee::vm::OpCode::PythonCall)
+        {
+            return true;
+        }
+
+        std::size_t operand_bytes = 0;
+        switch (op)
+        {
+        case curlee::vm::OpCode::Constant:
+        case curlee::vm::OpCode::LoadLocal:
+        case curlee::vm::OpCode::StoreLocal:
+        case curlee::vm::OpCode::Jump:
+        case curlee::vm::OpCode::JumpIfFalse:
+        case curlee::vm::OpCode::Call:
+            operand_bytes = 2;
+            break;
+
+        case curlee::vm::OpCode::MakeEnum:
+            operand_bytes = 5;
+            break;
+
+        case curlee::vm::OpCode::EnumIs:
+        case curlee::vm::OpCode::EnumUnwrap:
+            operand_bytes = 4;
+            break;
+
+        default:
+            break;
+        }
+
+        if (ip + operand_bytes > chunk.code.size())
+        {
+            return false;
+        }
+
+        ip += operand_bytes;
+    }
+
+    return false;
+}
+
 int cmd_read_only(std::string_view cmd, const std::string& path,
                   const curlee::runtime::Capabilities& granted_caps, std::size_t fuel,
                   const std::vector<std::filesystem::path>& stdlib_roots = {},
@@ -705,6 +783,29 @@ int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entr
 
     const auto& file = std::get<source::SourceFile>(loaded);
 
+    if (const auto forbidden = find_forbidden_v1_capability(bundle.manifest.capabilities);
+        forbidden.has_value())
+    {
+        diag::Diagnostic d;
+        d.severity = diag::Severity::Error;
+        d.message = "bundle capability not part of Curlee v1 surface: " +
+                    std::string(*forbidden);
+        d.span = curlee::source::Span{.start = 0, .end = 0};
+        std::cerr << diag::render(d, file);
+        return kExitError;
+    }
+
+    if (const auto forbidden = find_forbidden_v1_capability(granted_caps);
+        forbidden.has_value())
+    {
+        diag::Diagnostic d;
+        d.severity = diag::Severity::Error;
+        d.message = "capability not part of Curlee v1 surface: " + std::string(*forbidden);
+        d.span = curlee::source::Span{.start = 0, .end = 0};
+        std::cerr << diag::render(d, file);
+        return kExitError;
+    }
+
     curlee::runtime::Capabilities effective_caps;
     for (const auto& cap : bundle.manifest.capabilities)
     {
@@ -746,6 +847,16 @@ int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entr
     }
 
     const auto& chunk = std::get<curlee::vm::Chunk>(decoded);
+    if (chunk_uses_python_call(chunk))
+    {
+        diag::Diagnostic d;
+        d.severity = diag::Severity::Error;
+        d.message = "bundle bytecode uses python interop opcode not supported in Curlee v1";
+        d.span = curlee::source::Span{.start = 0, .end = 0};
+        std::cerr << diag::render(d, file);
+        return kExitError;
+    }
+
     vm::VM machine;
 
     const auto result = machine.run(chunk, fuel, effective_caps);
@@ -783,6 +894,13 @@ int cmd_bundle_build(const std::string& entry_path_arg, const std::string& bundl
     if (rc != kExitOk)
     {
         return rc;
+    }
+
+    if (const auto forbidden = find_forbidden_v1_capability(requested_caps);
+        forbidden.has_value())
+    {
+        std::cerr << "error: capability not part of Curlee v1 surface: " << *forbidden << "\n";
+        return kExitError;
     }
 
     std::vector<std::string> capabilities(requested_caps.begin(), requested_caps.end());
@@ -1078,6 +1196,31 @@ int run(int argc, char** argv)
 
         if (sub == "verify")
         {
+            if (const auto forbidden = find_forbidden_v1_capability(b.manifest.capabilities);
+                forbidden.has_value())
+            {
+                std::cerr << "error: bundle verify failed: capability not part of Curlee v1 "
+                             "surface: "
+                          << *forbidden << "\n";
+                return kExitError;
+            }
+
+            const auto decoded = curlee::vm::decode_chunk(b.bytecode);
+            if (const auto* decode_err = std::get_if<curlee::vm::ChunkDecodeError>(&decoded))
+            {
+                std::cerr << "error: bundle verify failed: invalid bundle bytecode: "
+                          << decode_err->message << "\n";
+                return kExitError;
+            }
+
+            const auto& chunk = std::get<curlee::vm::Chunk>(decoded);
+            if (chunk_uses_python_call(chunk))
+            {
+                std::cerr << "error: bundle verify failed: bundle bytecode uses python interop "
+                             "opcode not supported in Curlee v1\n";
+                return kExitError;
+            }
+
             std::cout << "curlee bundle verify: ok\n";
             return kExitOk;
         }
