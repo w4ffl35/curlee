@@ -63,8 +63,8 @@ void print_usage(std::ostream& out)
     out << "  curlee lex <file.curlee>\n";
     out << "  curlee parse <file.curlee>\n";
     out << "  curlee check <file.curlee>\n";
-        out << "  curlee run [--fuel <n>] [--bundle <file.bundle>] [--graphics <backend>] "
-            "[--cap <capability>]... "
+    out << "  curlee run [--fuel <n>] [--bundle <file.bundle>] [--graphics <backend>] "
+           "[--cap <capability>]... "
            "<file.curlee>\n";
     out << "  curlee fmt [--check] <file>\n";
     out << "  curlee bundle verify <file.bundle>\n";
@@ -711,9 +711,8 @@ int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entr
             d.message = "capability not granted: gfx.window";
             d.span = std::nullopt;
             const diag::Related note{
-                .message =
-                    "grant it with: curlee run --graphics=window --cap gfx.window --bundle "
-                    "<file.bundle> <file.curlee>",
+                .message = "grant it with: curlee run --graphics=window --cap gfx.window --bundle "
+                           "<file.bundle> <file.curlee>",
                 .span = std::nullopt,
             };
             d.notes.push_back(note);

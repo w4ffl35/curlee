@@ -480,8 +480,7 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
     return run(chunk, fuel, capabilities, VmRunOptions{});
 }
 
-VmResult VM::run(const Chunk& chunk, const Capabilities& capabilities,
-                 const VmRunOptions& options)
+VmResult VM::run(const Chunk& chunk, const Capabilities& capabilities, const VmRunOptions& options)
 {
     return run(chunk, std::numeric_limits<std::size_t>::max(), capabilities, options);
 }
