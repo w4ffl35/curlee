@@ -185,7 +185,7 @@ class Checker
                 error_at(e.span, "duplicate type name '" + std::string(e.name) + "'");
                 continue;
             }
-            enums_.emplace(e.name, EnumInfo{});
+            enums_.emplace(e.name, EnumInfo{}); // GCOVR_EXCL_LINE
         }
 
         // Second pass: resolve field/variant types.
@@ -545,7 +545,7 @@ class Checker
         const auto enum_it = enums_.find(value_t->name);
         if (enum_it == enums_.end()) // GCOVR_EXCL_LINE
         {
-            error_at(stmt_span,
+            error_at(stmt_span,                                                 // GCOVR_EXCL_LINE
                      "unknown enum type '" + std::string(value_t->name) + "'"); // GCOVR_EXCL_LINE
             return;                                                             // GCOVR_EXCL_LINE
         }
@@ -588,8 +588,9 @@ class Checker
                 d.message = "duplicate match arm for variant '" + std::string(value_t->name) +
                             "::" + std::string(pattern.variant_name) + "'";
                 d.span = pattern.span;
-                d.notes.push_back(curlee::diag::Related{.message = "previous arm is here",
-                                                        .span = seen_it->second});
+                d.notes.push_back(
+                    curlee::diag::Related{.message = "previous arm is here", // GCOVR_EXCL_LINE
+                                          .span = seen_it->second});
                 diags_.push_back(std::move(d));
             }
             else

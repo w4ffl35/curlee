@@ -77,13 +77,8 @@ int main()
 
         // Cover remaining switch cases at runtime (avoid constexpr folding).
         const TypeKind kinds[] = {
-            TypeKind::Int,
-            TypeKind::Bool,
-            TypeKind::String,
-            TypeKind::Unit,
-            TypeKind::Capability,
-            TypeKind::Struct,
-            TypeKind::Enum,
+            TypeKind::Int,        TypeKind::Bool,   TypeKind::String, TypeKind::Unit,
+            TypeKind::Capability, TypeKind::Struct, TypeKind::Enum,
         };
         for (std::size_t i = 0; i < (sizeof(kinds) / sizeof(kinds[0])); ++i)
         {
@@ -139,6 +134,162 @@ int main()
             fail("parse failed");
         const auto res = types::type_check(std::get<parser::Program>(parsed));
         expect_diag(res, "unknown type 'Foo'");
+    }
+
+    // match: scrutinee expression type failure should short-circuit match checking.
+    {
+        const std::string src = R"(enum E { A; }
+fn main() -> Unit {
+    match (unknown_name) {
+        E::A => { return; }
+    }
+    return;
+})";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_diag(res, "unknown name 'unknown_name'");
+    }
+
+    // match: non-enum scrutinee and arm-body traversal.
+    {
+        const std::string src = R"(enum E { A; }
+fn main(v: Int) -> Unit {
+    match (v) {
+        E::A => { let x: Int = 1; x + 1; return; }
+    }
+    return;
+})";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_diag(res, "match expects an enum value");
+    }
+
+    // match: non-enum path still handles null arm body in manually-shaped AST.
+    {
+        const std::string src = R"(enum E { A; }
+        fn main(v: Int) -> Unit {
+            match (v) {
+            E::A => { return; }
+            }
+            return;
+        })";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        auto program = std::get<parser::Program>(std::move(parsed));
+        auto* match_stmt = std::get_if<parser::MatchStmt>(&program.functions[0].body.stmts[0].node);
+        if (match_stmt == nullptr || match_stmt->arms.empty())
+            fail("expected match statement with one arm");
+        match_stmt->arms[0].body.reset();
+        const auto res = types::type_check(program);
+        expect_diag(res, "match expects an enum value");
+    }
+
+    // match: enum mismatch + unknown variant + payload binding rules + duplicate arm.
+    {
+        const std::string src = R"(enum E { A(Int); B; C; }
+enum F { A; }
+fn main(v: E) -> Unit {
+    match (v) {
+        F::A => { return; }
+        E::Nope(x) => { return; }
+        E::A => { return; }
+        E::B(x) => { return; }
+        E::B => { return; }
+    }
+    return;
+})";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_diag(res, "match arm uses enum 'F' but matched value is 'E'");
+        expect_diag(res, "unknown variant 'Nope' for enum 'E'");
+        expect_diag(res, "must bind payload with (name)");
+        expect_diag(res, "cannot bind payload (variant has no payload)");
+        expect_diag(res, "duplicate match arm for variant 'E::B'");
+    }
+
+    // match: unknown-variant and valid-variant paths with null arm body (manually-shaped AST).
+    {
+        const std::string src = R"(enum E { A; }
+        fn main(v: E) -> Unit {
+            match (v) {
+            E::Nope => { return; }
+            }
+            return;
+        })";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        auto program = std::get<parser::Program>(std::move(parsed));
+        auto* match_stmt = std::get_if<parser::MatchStmt>(&program.functions[0].body.stmts[0].node);
+        if (match_stmt == nullptr || match_stmt->arms.empty())
+            fail("expected match statement with one arm");
+        match_stmt->arms[0].body.reset();
+        const auto res = types::type_check(program);
+        expect_diag(res, "unknown variant 'Nope' for enum 'E'");
+    }
+
+    {
+        const std::string src = R"(enum E { A; }
+        fn main(v: E) -> Unit {
+            match (v) {
+            E::A => { return; }
+            }
+            return;
+        })";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        auto program = std::get<parser::Program>(std::move(parsed));
+        auto* match_stmt = std::get_if<parser::MatchStmt>(&program.functions[0].body.stmts[0].node);
+        if (match_stmt == nullptr || match_stmt->arms.empty())
+            fail("expected match statement with one arm");
+        match_stmt->arms[0].body.reset();
+        const auto res = types::type_check(program);
+        expect_ok(res);
+    }
+
+    // match: non-exhaustive message formatting with multiple missing variants.
+    {
+        const std::string src = R"(enum E { A; B; C; }
+fn main(v: E) -> Unit {
+    match (v) {
+        E::A => { return; }
+    }
+    return;
+})";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_diag(res, "missing arms E::B, E::C");
     }
 
     // unknown type name in return annotation

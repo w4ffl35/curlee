@@ -2,6 +2,7 @@
 #include <curlee/bundle/bundle.h>
 #include <curlee/cli/cli.h>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -191,6 +192,68 @@ int main()
             fail("expected usage exit code for missing run file");
         }
         expect_contains(err, "error: expected <file.curlee>", "stderr");
+    }
+
+    // run: --graphics window requires explicit gfx.window capability grant.
+    {
+        const fs::path src_path = temp_path("curlee_graphics_cap_gate.curlee");
+        {
+            std::ofstream out(src_path, std::ios::binary | std::ios::trunc);
+            if (!out)
+            {
+                fail("failed to open graphics capability fixture for writing");
+            }
+            out << "fn main() -> Int { return 0; }\n";
+        }
+
+        std::string out;
+        std::string err;
+        const int rc =
+            run_cli_capture({"curlee", "run", "--graphics", "window", src_path.string()}, out, err);
+        if (rc != 1)
+        {
+            fail("expected error exit code for window graphics without gfx.window capability");
+        }
+        expect_contains(err, "capability not granted: gfx.window", "stderr");
+        expect_contains(err, "grant it with: curlee run --graphics=window --cap gfx.window",
+                        "stderr");
+    }
+
+    // run: --graphics window with gfx.window granted should proceed to VM run.
+    {
+        const fs::path src_path = temp_path("curlee_graphics_cap_ok.curlee");
+        {
+            std::ofstream out(src_path, std::ios::binary | std::ios::trunc);
+            if (!out)
+            {
+                fail("failed to open graphics capability success fixture for writing");
+            }
+            out << "fn main() -> Int { return 0; }\n";
+        }
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "run", "--graphics", "window", "--cap", "gfx.window", src_path.string()},
+            out, err);
+        if (rc != 0)
+        {
+            fail("expected success exit code for window graphics with gfx.window capability");
+        }
+        expect_contains(out, "curlee run: result 0", "stdout");
+    }
+
+    // run: unsupported backend via split form (--graphics <backend>)
+    {
+        std::string out;
+        std::string err;
+        const int rc =
+            run_cli_capture({"curlee", "run", "--graphics", "metal", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for unsupported split graphics backend");
+        }
+        expect_contains(err, "error: unsupported graphics backend: metal", "stderr");
     }
 
     // run: unknown option
@@ -384,6 +447,18 @@ int main()
         if (rc != 2)
         {
             fail("expected usage exit code for unsupported --graphics backend");
+        }
+        expect_contains(err, "error: unsupported graphics backend: metal", "stderr");
+    }
+
+    // run: unsupported graphics backend via --graphics=
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--graphics=metal", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for unsupported --graphics= backend");
         }
         expect_contains(err, "error: unsupported graphics backend: metal", "stderr");
     }

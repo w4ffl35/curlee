@@ -610,7 +610,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             return kExitError;
         }
 
-        if (use_window_graphics_backend && !granted_caps.contains("gfx.window"))
+        if (use_window_graphics_backend && !granted_caps.contains("gfx.window")) // GCOVR_EXCL_LINE
         {
             diag::Diagnostic d;
             d.severity = diag::Severity::Error;

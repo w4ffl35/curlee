@@ -93,6 +93,46 @@ fn main() -> Unit { return 0; })";
     }
 
     {
+        // Import-not-found diagnostic includes an expected module path note.
+        const std::string src = R"(import no.such.module;
+
+fn main() -> Unit { return 0; })";
+
+        namespace fs = std::filesystem;
+        const fs::path base = fs::temp_directory_path() / "curlee_resolver_tests_import_missing";
+        fs::create_directories(base);
+
+        const fs::path main_path = base / "main.curlee";
+        const auto res = resolve_with_source(src, main_path.string());
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
+        {
+            fail("expected resolver error for missing import");
+        }
+
+        const auto& ds = std::get<std::vector<diag::Diagnostic>>(res);
+        bool found_expected_module_note = false;
+        for (const auto& d : ds)
+        {
+            if (d.message.find("import not found") == std::string::npos)
+            {
+                continue;
+            }
+            for (const auto& n : d.notes)
+            {
+                if (n.message.find("expected module at ") != std::string::npos)
+                {
+                    found_expected_module_note = true;
+                    break;
+                }
+            }
+        }
+        if (!found_expected_module_note)
+        {
+            fail("expected missing import diagnostic note with expected module path");
+        }
+    }
+
+    {
         const std::string src = R"(fn print(x: Int) -> Unit {
   return 0;
 }
@@ -355,6 +395,39 @@ fn main() -> Unit {
     }
 
     {
+        // Match-arm body may be absent in manually-constructed ASTs; resolver should still
+        // traverse safely.
+        const std::string src = R"(enum E { A; }
+fn main(v: E) -> Unit {
+  match (v) {
+    E::A => { return; }
+  }
+  return;
+})";
+
+        auto program = parse_ok(src);
+        if (program.functions.empty())
+        {
+            fail("expected function in parsed program");
+        }
+        auto* match_stmt =
+            std::get_if<curlee::parser::MatchStmt>(&program.functions[0].body.stmts[0].node);
+        if (match_stmt == nullptr || match_stmt->arms.empty())
+        {
+            fail("expected first statement to be match with at least one arm");
+        }
+        match_stmt->arms[0].body.reset();
+
+        const curlee::source::SourceFile file{
+            .path = "tests/fixtures/resolve_match_null_body.curlee", .contents = src};
+        const auto res = curlee::resolver::resolve(program, file);
+        if (!std::holds_alternative<curlee::resolver::Resolution>(res))
+        {
+            fail("expected resolver success for match arm with null body");
+        }
+    }
+
+    {
         // python_ffi.<not-call> is treated as a builtin module reference but should not trip the
         // unsafe-context check.
         const std::string src = R"(fn main() -> Unit {
@@ -543,6 +616,27 @@ fn main() -> Unit {
         if (!std::holds_alternative<resolver::Resolution>(res))
         {
             fail("expected resolver success for predicate forms");
+        }
+    }
+
+    {
+        // Match: payload binder introduces an arm-local name and arm body is traversed.
+        const std::string src = R"(enum E {
+    A(Int);
+    B;
+}
+fn main(v: E) -> Unit {
+    match (v) {
+        E::A(x) => { x; }
+        E::B => { return; }
+    }
+    return;
+})";
+
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_match_payload.curlee");
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for match payload binding");
         }
     }
 

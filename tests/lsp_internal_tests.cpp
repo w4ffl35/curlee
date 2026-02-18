@@ -1139,6 +1139,40 @@ int main()
                         .node = curlee::parser::UnsafeStmt{
                             .body = std::make_unique<curlee::parser::Block>(std::move(one_block))}};
 
+        Expr call_callee{.id = 50, .span = span, .node = curlee::parser::NameExpr{.name = "f"}};
+        Expr call_expr{.id = 51,
+                       .span = span,
+                       .node = curlee::parser::CallExpr{
+                           .callee = std::make_unique<Expr>(std::move(call_callee)), .args = {}}};
+        Stmt call_stmt{.span = span,
+                       .node = curlee::parser::ExprStmt{.expr = std::move(call_expr)}};
+
+        curlee::parser::Block match_arm_block{.span = span, .stmts = {}};
+        match_arm_block.stmts.push_back(std::move(call_stmt));
+
+        curlee::parser::MatchArm match_arm_with_body{
+            .span = span,
+            .pattern = curlee::parser::MatchArmPattern{.span = span,
+                                                       .enum_name = "E",
+                                                       .variant_name = "A",
+                                                       .payload_name = std::nullopt},
+            .body = std::make_unique<curlee::parser::Block>(std::move(match_arm_block))};
+        curlee::parser::MatchArm match_arm_without_body{
+            .span = span,
+            .pattern = curlee::parser::MatchArmPattern{.span = span,
+                                                       .enum_name = "E",
+                                                       .variant_name = "B",
+                                                       .payload_name = std::nullopt},
+            .body = nullptr};
+
+        std::vector<curlee::parser::MatchArm> match_arms;
+        match_arms.push_back(std::move(match_arm_with_body));
+        match_arms.push_back(std::move(match_arm_without_body));
+
+        Stmt match_stmt{.span = span,
+                        .node = curlee::parser::MatchStmt{.value = make_leaf(13),
+                                                          .arms = std::move(match_arms)}};
+
         const curlee::parser::Expr* best = nullptr;
         find_call_exprs_in_stmt(ret_no_value, 1, best);
         find_call_exprs_in_stmt(ret_with_value, 1, best);
@@ -1148,6 +1182,7 @@ int main()
         find_call_exprs_in_stmt(unsafe_null, 1, best);
         find_call_exprs_in_stmt(unsafe_empty, 1, best);
         find_call_exprs_in_stmt(unsafe_one, 1, best);
+        find_call_exprs_in_stmt(match_stmt, 1, best);
 
         best = nullptr;
         find_exprs_in_stmt(ret_no_value, 1, best);
@@ -1158,6 +1193,7 @@ int main()
         find_exprs_in_stmt(unsafe_null, 1, best);
         find_exprs_in_stmt(unsafe_empty, 1, best);
         find_exprs_in_stmt(unsafe_one, 1, best);
+        find_exprs_in_stmt(match_stmt, 1, best);
     }
 
     std::cout << "OK\n";

@@ -138,6 +138,57 @@ int main()
     }
 
     {
+        const std::string source = R"(enum E {
+    A;
+}
+fn helper() -> Int {
+    match (E::A) {
+        E::A => { return 0; }
+    }
+    return 0;
+}
+fn main() -> Int {
+    return helper();
+})";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for match runnable diagnostic test");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for match runnable diagnostic test");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for match statements in runnable code");
+        }
+
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        bool found = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("match statements are not supported in runnable code") !=
+                std::string::npos)
+            {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+        {
+            fail("expected match runnable diagnostic from emitter");
+        }
+    }
+
+    {
         const std::string source =
             "fn main() -> Int { if (true) { return 1; } else { return 2; } }";
 

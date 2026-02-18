@@ -108,6 +108,15 @@ fn main(v: Option) -> Unit {
         {
             fail("parse failed on match program");
         }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("match (v)") == std::string::npos ||
+            dumped.find("Option::Some(x)") == std::string::npos ||
+            dumped.find("Option::None =>") == std::string::npos)
+        {
+            fail("dump missing expected match arm rendering");
+        }
     }
 
     // Match statement: malformed arm separator should fail.
@@ -122,6 +131,42 @@ fn main(v: Option) -> Unit {
 }
 )";
         expect_parse_error_contains(src, "expected '=>' after match arm pattern");
+    }
+
+    // Match statement: additional malformed forms for deterministic diagnostics.
+    {
+        expect_parse_error_contains("fn main(v: Int) -> Unit { match v) { } return; }",
+                                    "expected '(' after 'match'");
+        expect_parse_error_contains("fn main(v: Int) -> Unit { match () { } return; }",
+                                    "expected expression");
+        expect_parse_error_contains("fn main(v: Int) -> Unit { match (v { } return; }",
+                                    "expected ')' after match value");
+        expect_parse_error_contains("fn main(v: Int) -> Unit { match (v) return; }",
+                                    "expected '{' after match value");
+        expect_parse_error_contains(
+            "fn main(v: Int) -> Unit { match (v) { => { return; } } return; }",
+            "expected match arm pattern");
+        expect_parse_error_contains(
+            "fn main(v: Int) -> Unit { match (v) { Option Some => { return; } } return; }",
+            "expected '::' in match arm pattern");
+        expect_parse_error_contains(
+            "fn main(v: Int) -> Unit { match (v) { Option:: => { return; } } return; }",
+            "expected variant name in match arm pattern");
+        expect_parse_error_contains(
+            "fn main(v: Int) -> Unit { match (v) { Option::Some() => { return; } } return; }",
+            "expected payload binding name in match arm");
+        expect_parse_error_contains(
+            "fn main(v: Int) -> Unit { match (v) { Option::Some(x => { return; } } return; }",
+            "expected ')' after match arm payload binding");
+        expect_parse_error_contains(
+            "fn main(v: Int) -> Unit { match (v) { Option::Some(x) > { return; } } return; }",
+            "expected '=>' after match arm pattern");
+        expect_parse_error_contains(
+            "fn main(v: Int) -> Unit { match (v) { Option::None => return; } return; }",
+            "expected '{' to start block");
+        expect_parse_error_contains(
+            "fn main(v: Int) -> Unit { match (v) { Option::None => { return; } ",
+            "expected '}' after match arms");
     }
 
     // Struct literal: duplicate field initializer.

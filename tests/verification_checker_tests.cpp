@@ -785,6 +785,62 @@ int main()
         }
     }
 
+    {
+        // Match statements are traversed conservatively by the verifier.
+        const std::string source = "enum E { A; B; }\n"
+                                   "fn main() -> Int [ ensures result >= 0; ] {\n"
+                                   "  match (E::A) {\n"
+                                   "    E::A => { return 1; }\n"
+                                   "    E::B => { return 2; }\n"
+                                   "  }\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "match traversal in verifier");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification success for match traversal test");
+        }
+    }
+
+    {
+        // Match arms with null body pointers (manually-shaped AST) are handled conservatively.
+        const std::string source = "enum E { A; }\n"
+                                   "fn main() -> Int [ ensures result >= 0; ] {\n"
+                                   "  match (E::A) {\n"
+                                   "    E::A => { return 1; }\n"
+                                   "  }\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        auto program = parse_program_or_fail(source, "match traversal null-body verifier test");
+        if (program.functions.empty() || program.functions[0].body.stmts.empty())
+        {
+            fail("expected parsed function with statements");
+        }
+
+        auto* match_stmt =
+            std::get_if<curlee::parser::MatchStmt>(&program.functions[0].body.stmts[0].node);
+        if (match_stmt == nullptr || match_stmt->arms.empty())
+        {
+            fail("expected first statement to be match with at least one arm");
+        }
+        match_stmt->arms[0].body.reset();
+
+        const auto typed = curlee::types::type_check(program);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(typed))
+        {
+            fail("expected type checking success for null-body verifier match test");
+        }
+
+        const auto& type_info = std::get<curlee::types::TypeInfo>(typed);
+        const auto verified = curlee::verification::verify(program, type_info);
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification success for null-body verifier match test");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

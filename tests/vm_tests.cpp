@@ -272,6 +272,14 @@ int main(int argc, char** argv)
 
         run_twice_deterministic(chunk, Value::int_v(42));
         run_twice_graphics_deterministic(chunk, Value::int_v(42));
+
+        VM vm;
+        VM::Capabilities caps;
+        const auto capped_res = vm.run(chunk, 100, caps);
+        if (!capped_res.ok || !(capped_res.value == Value::int_v(42)))
+        {
+            fail("expected VM::run(chunk, fuel, capabilities) overload to succeed");
+        }
     }
 
     // Graphics backend requires explicit capability.
@@ -319,6 +327,24 @@ int main(int argc, char** argv)
         if (present_res.ok || present_res.error != "graphics backend present failed")
         {
             fail("expected graphics backend present failure");
+        }
+
+        EnvVarGuard init_false_guard{"CURLEE_GFX_WINDOW_INIT_FAIL"};
+        init_false_guard.set("0");
+        const auto init_false_res = vm.run(chunk, caps, options);
+        init_false_guard.unset();
+        if (!init_false_res.ok)
+        {
+            fail("expected graphics init fail guard with value 0 to not fail run");
+        }
+
+        EnvVarGuard present_false_guard{"CURLEE_GFX_WINDOW_PRESENT_FAIL"};
+        present_false_guard.set("0");
+        const auto present_false_res = vm.run(chunk, caps, options);
+        present_false_guard.unset();
+        if (!present_false_res.ok)
+        {
+            fail("expected graphics present fail guard with value 0 to not fail run");
         }
     }
 
