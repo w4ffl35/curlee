@@ -25,6 +25,7 @@ using curlee::parser::Function;
 using curlee::parser::GroupExpr;
 using curlee::parser::IfStmt;
 using curlee::parser::LetStmt;
+using curlee::parser::MatchStmt;
 using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
@@ -219,7 +220,9 @@ class Resolver
                 d.severity = Severity::Error;
                 d.message = "import not found: '" + import_name + "'";
                 d.span = imp.span;
-                d.notes.push_back(Related{.message = "expected module at " + first_expected.string(), .span = std::nullopt}); // GCOVR_EXCL_LINE
+                d.notes.push_back(
+                    Related{.message = "expected module at " + first_expected.string(),
+                            .span = std::nullopt}); // GCOVR_EXCL_LINE
                 diagnostics_.push_back(std::move(d));
                 continue;
             }
@@ -312,7 +315,8 @@ class Resolver
             d.severity = Severity::Error;
             d.message = std::string(kind) + ": '" + std::string(name) + "'";
             d.span = span;
-            d.notes.push_back(Related{.message = "previous definition is here", .span = it->second.span}); // GCOVR_EXCL_LINE
+            d.notes.push_back(Related{.message = "previous definition is here",
+                                      .span = it->second.span}); // GCOVR_EXCL_LINE
             diagnostics_.push_back(std::move(d));
             return;
         }
@@ -457,6 +461,29 @@ class Resolver
             resolve_stmt(stmt);
         }
         pop_scope();
+    }
+
+    void resolve_stmt_node(const MatchStmt& s, Span)
+    {
+        resolve_expr(s.value);
+
+        for (const auto& arm : s.arms)
+        {
+            push_scope();
+            if (arm.pattern.payload_name.has_value())
+            {
+                declare(*arm.pattern.payload_name, arm.pattern.span,
+                        "duplicate match payload binding");
+            }
+            if (arm.body != nullptr)
+            {
+                for (const auto& stmt : arm.body->stmts)
+                {
+                    resolve_stmt(stmt);
+                }
+            }
+            pop_scope();
+        }
     }
 
     void resolve_expr(const Expr& e)

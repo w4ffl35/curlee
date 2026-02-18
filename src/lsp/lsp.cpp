@@ -1040,6 +1040,20 @@ void find_call_exprs_in_stmt(const curlee::parser::Stmt& stmt, std::size_t offse
                     }
                 }
             }
+            else if constexpr (std::is_same_v<T, curlee::parser::MatchStmt>)
+            {
+                best = find_call_expr_at(node.value, offset, best);
+                for (const auto& arm : node.arms)
+                {
+                    if (arm.body)
+                    {
+                        for (const auto& inner : arm.body->stmts)
+                        {
+                            find_call_exprs_in_stmt(inner, offset, best);
+                        }
+                    }
+                }
+            }
             else if constexpr (std::is_same_v<T, curlee::parser::BlockStmt>)
             {
                 if (node.block)
@@ -1116,6 +1130,20 @@ void find_exprs_in_stmt(const curlee::parser::Stmt& stmt, std::size_t offset,
                     for (const auto& inner : node.body->stmts)
                     {
                         find_exprs_in_stmt(inner, offset, best);
+                    }
+                }
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::MatchStmt>)
+            {
+                best = find_expr_at(node.value, offset, best);
+                for (const auto& arm : node.arms)
+                {
+                    if (arm.body)
+                    {
+                        for (const auto& inner : arm.body->stmts)
+                        {
+                            find_exprs_in_stmt(inner, offset, best);
+                        }
                     }
                 }
             }

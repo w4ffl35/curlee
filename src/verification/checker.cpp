@@ -28,6 +28,7 @@ using curlee::parser::ExprStmt;
 using curlee::parser::Function;
 using curlee::parser::IfStmt;
 using curlee::parser::LetStmt;
+using curlee::parser::MatchStmt;
 using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
@@ -956,6 +957,24 @@ class Verifier
             check_stmt(stmt, expected_return);
         }
         pop_scope();
+    }
+
+    void check_stmt_node(const MatchStmt& s, Span, TypeKind expected_return)
+    {
+        check_expr_for_calls(s.value);
+
+        for (const auto& arm : s.arms)
+        {
+            push_scope();
+            if (arm.body != nullptr)
+            {
+                for (const auto& stmt : arm.body->stmts)
+                {
+                    check_stmt(stmt, expected_return);
+                }
+            }
+            pop_scope();
+        }
     }
 
     void check_function(const Function& f)

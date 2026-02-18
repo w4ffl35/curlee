@@ -213,6 +213,30 @@ struct WhileStmt
     std::unique_ptr<Block> body;
 };
 
+/** @brief Match arm pattern: `Enum::Variant` or `Enum::Variant(payload)`. */
+struct MatchArmPattern
+{
+    curlee::source::Span span;
+    std::string_view enum_name;
+    std::string_view variant_name;
+    std::optional<std::string_view> payload_name;
+};
+
+/** @brief One `match` arm with a variant pattern and block body. */
+struct MatchArm
+{
+    curlee::source::Span span;
+    MatchArmPattern pattern;
+    std::unique_ptr<Block> body;
+};
+
+/** @brief Match statement over an enum value. */
+struct MatchStmt
+{
+    Expr value;
+    std::vector<MatchArm> arms;
+};
+
 /** @brief Unsafe block statement (MVP semantics for capabilities). */
 struct UnsafeStmt
 {
@@ -231,7 +255,8 @@ struct BlockStmt
 struct Stmt
 {
     curlee::source::Span span;
-    std::variant<LetStmt, ReturnStmt, ExprStmt, BlockStmt, IfStmt, WhileStmt, UnsafeStmt> node;
+    std::variant<LetStmt, ReturnStmt, ExprStmt, BlockStmt, IfStmt, WhileStmt, MatchStmt, UnsafeStmt>
+        node;
 };
 
 /** @brief A sequence of statements with a source span. */

@@ -82,6 +82,48 @@ fn main() -> Unit { return; }
         expect_parse_error_contains(src, "duplicate variant name in enum declaration");
     }
 
+    // Match statement: parse success with payload-bearing and payload-free variants.
+    {
+        const std::string src = R"(enum Option {
+    Some(Int);
+    None;
+}
+fn main(v: Option) -> Unit {
+    match (v) {
+        Option::Some(x) => { print(x); }
+        Option::None => { return; }
+    }
+    return;
+}
+)";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on match program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on match program");
+        }
+    }
+
+    // Match statement: malformed arm separator should fail.
+    {
+        const std::string src = R"(enum Option { Some(Int); None; }
+fn main(v: Option) -> Unit {
+    match (v) {
+        Option::Some(x) = { print(x); }
+        Option::None => { return; }
+    }
+    return;
+}
+)";
+        expect_parse_error_contains(src, "expected '=>' after match arm pattern");
+    }
+
     // Struct literal: duplicate field initializer.
     {
         const std::string src = R"(struct Point { x: Int; }

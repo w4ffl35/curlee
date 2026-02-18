@@ -101,6 +101,17 @@ void assign_expr_ids_stmt(curlee::parser::Stmt& stmt, std::size_t& next_id)
                 assign_expr_ids(node.cond, next_id);
                 assign_expr_ids_block(*node.body, next_id);
             }
+            else if constexpr (std::is_same_v<Node, curlee::parser::MatchStmt>)
+            {
+                assign_expr_ids(node.value, next_id);
+                for (auto& arm : node.arms)
+                {
+                    if (arm.body != nullptr)
+                    {
+                        assign_expr_ids_block(*arm.body, next_id);
+                    }
+                }
+            }
         },
         stmt.node);
 }
@@ -1269,6 +1280,115 @@ class Parser
             return stmt;
         }
 
+        if (match(TokenKind::KwMatch))
+        {
+            const Token kw = previous();
+
+            if (auto err = consume(TokenKind::LParen, "expected '(' after 'match'");
+                err.has_value())
+            {
+                return *err;
+            }
+
+            auto value_res = parse_expr();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(value_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(value_res));
+            }
+            Expr value = std::get<Expr>(std::move(value_res));
+
+            if (auto err = consume(TokenKind::RParen, "expected ')' after match value");
+                err.has_value())
+            {
+                return *err;
+            }
+
+            if (auto err = consume(TokenKind::LBrace, "expected '{' after match value");
+                err.has_value())
+            {
+                return *err;
+            }
+
+            std::vector<MatchArm> arms;
+            while (!check(TokenKind::RBrace) && !is_at_end())
+            {
+                if (!check(TokenKind::Identifier))
+                {
+                    return error_at(peek(), "expected match arm pattern");
+                }
+
+                const Token enum_name = advance();
+                if (auto err = consume(TokenKind::ColonColon, "expected '::' in match arm pattern");
+                    err.has_value())
+                {
+                    return *err;
+                }
+
+                if (!check(TokenKind::Identifier))
+                {
+                    return error_at(peek(), "expected variant name in match arm pattern");
+                }
+                const Token variant_name = advance();
+
+                std::optional<std::string_view> payload_name;
+                curlee::source::Span pattern_span = span_cover(enum_name.span, variant_name.span);
+
+                if (match(TokenKind::LParen))
+                {
+                    if (!check(TokenKind::Identifier))
+                    {
+                        return error_at(peek(), "expected payload binding name in match arm");
+                    }
+                    const Token payload = advance();
+                    payload_name = payload.lexeme;
+                    if (auto err = consume(TokenKind::RParen,
+                                           "expected ')' after match arm payload binding");
+                        err.has_value())
+                    {
+                        return *err;
+                    }
+                    pattern_span = span_cover(enum_name.span, previous().span);
+                }
+
+                if (auto err = consume(TokenKind::Equal, "expected '=>' after match arm pattern");
+                    err.has_value())
+                {
+                    return *err;
+                }
+                if (auto err = consume(TokenKind::Greater, "expected '=>' after match arm pattern");
+                    err.has_value())
+                {
+                    return *err;
+                }
+
+                auto body_res = parse_block();
+                if (std::holds_alternative<curlee::diag::Diagnostic>(body_res))
+                {
+                    return std::get<curlee::diag::Diagnostic>(std::move(body_res));
+                }
+                auto body = std::make_unique<Block>(std::get<Block>(std::move(body_res)));
+
+                arms.push_back(
+                    MatchArm{.span = span_cover(pattern_span, body->span),
+                             .pattern = MatchArmPattern{.span = pattern_span,
+                                                        .enum_name = enum_name.lexeme,
+                                                        .variant_name = variant_name.lexeme,
+                                                        .payload_name = payload_name},
+                             .body = std::move(body)});
+            }
+
+            if (auto err = consume(TokenKind::RBrace, "expected '}' after match arms");
+                err.has_value())
+            {
+                return *err;
+            }
+
+            Stmt stmt;
+            stmt.span = span_cover(kw.span, previous().span);
+            stmt.node = MatchStmt{.value = std::move(value), .arms = std::move(arms)};
+            return stmt;
+        }
+
         if (match(TokenKind::KwReturn))
         {
             const Token kw = previous();
@@ -2016,6 +2136,24 @@ class Dumper
         dump_expr(s.cond);
         out_ << ") ";
         dump_block(*s.body);
+    }
+
+    void dump_stmt_node(const MatchStmt& s)
+    {
+        out_ << "match (";
+        dump_expr(s.value);
+        out_ << ") {";
+        for (const auto& arm : s.arms)
+        {
+            out_ << " " << arm.pattern.enum_name << "::" << arm.pattern.variant_name;
+            if (arm.pattern.payload_name.has_value())
+            {
+                out_ << "(" << *arm.pattern.payload_name << ")";
+            }
+            out_ << " => ";
+            dump_block(*arm.body);
+        }
+        out_ << " }";
     }
 
     void dump_expr(const Expr& e)

@@ -23,6 +23,7 @@ using curlee::parser::Function;
 using curlee::parser::GroupExpr;
 using curlee::parser::IfStmt;
 using curlee::parser::LetStmt;
+using curlee::parser::MatchStmt;
 using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
@@ -157,6 +158,7 @@ class Checker
             std::optional<Type> payload;
         };
         std::unordered_map<std::string_view, VariantInfo> variants;
+        std::vector<std::string_view> variant_order;
     };
 
     std::unordered_map<std::string_view, StructInfo> structs_;
@@ -229,6 +231,7 @@ class Checker
                     }
                 }
                 info.variants.emplace(v.name, std::move(vi));
+                info.variant_order.push_back(v.name);
             }
             it->second = std::move(info);
         }
@@ -300,8 +303,8 @@ class Checker
 
     void require_capability(std::string_view cap_name, Span use_span)
     {
-        info_.required_capabilities.push_back(curlee::types::TypeInfo::RequiredCapability{
-            .name = cap_name, .span = use_span});
+        info_.required_capabilities.push_back(
+            curlee::types::TypeInfo::RequiredCapability{.name = cap_name, .span = use_span});
 
         if (!has_capability_value(cap_name))
         {
@@ -511,6 +514,143 @@ class Checker
             check_stmt(stmt, expected_return);
         }
         pop_scope();
+    }
+
+    void check_stmt_node(const MatchStmt& s, Span stmt_span, Type expected_return)
+    {
+        const auto value_t = check_expr(s.value);
+        if (!value_t.has_value())
+        {
+            return;
+        }
+        if (value_t->kind != TypeKind::Enum)
+        {
+            error_at(stmt_span,
+                     "match expects an enum value, got " + std::string(to_string(*value_t)));
+            for (const auto& arm : s.arms)
+            {
+                push_scope();
+                if (arm.body != nullptr)
+                {
+                    for (const auto& nested : arm.body->stmts)
+                    {
+                        check_stmt(nested, expected_return);
+                    }
+                }
+                pop_scope();
+            }
+            return;
+        }
+
+        const auto enum_it = enums_.find(value_t->name);
+        if (enum_it == enums_.end()) // GCOVR_EXCL_LINE
+        {
+            error_at(stmt_span,
+                     "unknown enum type '" + std::string(value_t->name) + "'"); // GCOVR_EXCL_LINE
+            return;                                                             // GCOVR_EXCL_LINE
+        }
+
+        std::unordered_map<std::string_view, Span> seen_variants;
+
+        for (const auto& arm : s.arms)
+        {
+            const auto& pattern = arm.pattern;
+
+            if (pattern.enum_name != value_t->name)
+            {
+                error_at(pattern.span, "match arm uses enum '" + std::string(pattern.enum_name) +
+                                           "' but matched value is '" + std::string(value_t->name) +
+                                           "'");
+            }
+
+            const auto variant_it = enum_it->second.variants.find(pattern.variant_name);
+            if (variant_it == enum_it->second.variants.end())
+            {
+                error_at(pattern.span, "unknown variant '" + std::string(pattern.variant_name) +
+                                           "' for enum '" + std::string(value_t->name) + "'");
+                push_scope();
+                if (arm.body != nullptr)
+                {
+                    for (const auto& nested : arm.body->stmts)
+                    {
+                        check_stmt(nested, expected_return);
+                    }
+                }
+                pop_scope();
+                continue;
+            }
+
+            if (const auto seen_it = seen_variants.find(pattern.variant_name);
+                seen_it != seen_variants.end())
+            {
+                Diagnostic d;
+                d.severity = Severity::Error;
+                d.message = "duplicate match arm for variant '" + std::string(value_t->name) +
+                            "::" + std::string(pattern.variant_name) + "'";
+                d.span = pattern.span;
+                d.notes.push_back(curlee::diag::Related{.message = "previous arm is here",
+                                                        .span = seen_it->second});
+                diags_.push_back(std::move(d));
+            }
+            else
+            {
+                seen_variants.emplace(pattern.variant_name, pattern.span);
+            }
+
+            push_scope();
+            if (variant_it->second.payload.has_value())
+            {
+                if (!pattern.payload_name.has_value())
+                {
+                    error_at(pattern.span, "match arm for '" + std::string(value_t->name) +
+                                               "::" + std::string(pattern.variant_name) +
+                                               "' must bind payload with (name)");
+                }
+                else
+                {
+                    declare_var(*pattern.payload_name, *variant_it->second.payload);
+                }
+            }
+            else if (pattern.payload_name.has_value())
+            {
+                error_at(pattern.span, "match arm for '" + std::string(value_t->name) +
+                                           "::" + std::string(pattern.variant_name) +
+                                           "' cannot bind payload (variant has no payload)");
+            }
+
+            if (arm.body != nullptr)
+            {
+                for (const auto& nested : arm.body->stmts)
+                {
+                    check_stmt(nested, expected_return);
+                }
+            }
+            pop_scope();
+        }
+
+        std::vector<std::string_view> missing;
+        for (const auto& variant_name : enum_it->second.variant_order)
+        {
+            if (!seen_variants.contains(variant_name))
+            {
+                missing.push_back(variant_name);
+            }
+        }
+        if (!missing.empty())
+        {
+            std::string msg =
+                "non-exhaustive match on enum '" + std::string(value_t->name) + "': missing arm";
+            msg += (missing.size() == 1) ? " " : "s ";
+            for (std::size_t i = 0; i < missing.size(); ++i)
+            {
+                if (i != 0)
+                {
+                    msg += ", ";
+                }
+                msg += std::string(value_t->name) + "::" + std::string(missing[i]);
+            }
+            error_at(stmt_span, std::move(msg));
+        }
     }
 
     [[nodiscard]] std::optional<Type> check_expr(const Expr& e)

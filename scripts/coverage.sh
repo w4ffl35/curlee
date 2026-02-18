@@ -130,6 +130,7 @@ if command -v gcovr >/dev/null 2>&1; then
     --exclude '^wiki/'
     --exclude ".*${build_dir}/CMakeFiles/.*"
     --gcov-ignore-errors no_working_dir_found
+    --merge-mode-functions merge-use-line-min
     --print-summary
     --txt
     --txt-metric branch

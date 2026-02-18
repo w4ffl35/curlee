@@ -1303,6 +1303,115 @@ int main()
         }
     }
 
+    {
+        const auto info = type_check_should_succeed("enum Option { Some(Int); None; }"
+                                                    "fn main(v: Option) -> Int {"
+                                                    "  match (v) {"
+                                                    "    Option::Some(x) => { return x; }"
+                                                    "    Option::None => { return 0; }"
+                                                    "  }"
+                                                    "}",
+                                                    "match success with payload-bearing variants");
+        if (info.expr_types.empty())
+        {
+            fail("expected type info to be collected for match success program");
+        }
+    }
+
+    {
+        const auto diags = type_check_should_fail("enum Option { Some(Int); None; }"
+                                                  "fn main(v: Option) -> Int {"
+                                                  "  match (v) {"
+                                                  "    Option::Some(x) => { return x; }"
+                                                  "  }"
+                                                  "  return 0;"
+                                                  "}",
+                                                  "match missing-arm diagnostics");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("non-exhaustive match") != std::string::npos &&
+                d.message.find("Option::None") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected non-exhaustive match diagnostic with missing variant list");
+        }
+    }
+
+    {
+        const auto diags = type_check_should_fail("enum E { A; B; }"
+                                                  "fn main(v: E) -> Int {"
+                                                  "  match (v) {"
+                                                  "    E::A => { return 1; }"
+                                                  "    E::A => { return 2; }"
+                                                  "    E::B => { return 3; }"
+                                                  "  }"
+                                                  "}",
+                                                  "match duplicate-arm diagnostics");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("duplicate match arm") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected duplicate match arm diagnostic");
+        }
+    }
+
+    {
+        const auto diags = type_check_should_fail("enum Option { Some(Int); None; }"
+                                                  "fn main(v: Option) -> Int {"
+                                                  "  match (v) {"
+                                                  "    Option::Some => { return 0; }"
+                                                  "    Option::None => { return 1; }"
+                                                  "  }"
+                                                  "}",
+                                                  "match payload-binding required diagnostics");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("must bind payload") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected payload-binding required diagnostic in match arm");
+        }
+    }
+
+    {
+        const auto diags = type_check_should_fail("enum Option { Some(Int); None; }"
+                                                  "fn main(v: Option) -> Int {"
+                                                  "  match (v) {"
+                                                  "    Option::Some(x) => { return x; }"
+                                                  "    Option::None(z) => { return 0; }"
+                                                  "  }"
+                                                  "}",
+                                                  "match payload-binding forbidden diagnostics");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("cannot bind payload") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected payload-binding forbidden diagnostic for no-payload variant");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

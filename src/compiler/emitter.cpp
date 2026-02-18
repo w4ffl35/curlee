@@ -22,6 +22,7 @@ using curlee::parser::ExprStmt;
 using curlee::parser::Function;
 using curlee::parser::IfStmt;
 using curlee::parser::LetStmt;
+using curlee::parser::MatchStmt;
 using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
@@ -439,6 +440,11 @@ class Emitter
         chunk_.emit(OpCode::Jump, stmt.cond.span);
         chunk_.emit_u16(static_cast<std::uint16_t>(loop_start), stmt.cond.span);
         patch_u16(exit_patch, static_cast<std::uint16_t>(ip()));
+    }
+
+    void emit_stmt_node(const MatchStmt&, Span span)
+    {
+        diags_.push_back(error_at(span, "match statements are not supported in runnable code"));
     }
 
     void emit_expr(const Expr& expr)

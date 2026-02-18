@@ -42,6 +42,7 @@ enum class TokenKind
 
     KwStruct,
     KwEnum,
+    KwMatch,
 
     // Punctuation / operators
     LParen,
@@ -137,6 +138,8 @@ struct Token
         return "kw_struct";
     case TokenKind::KwEnum:
         return "kw_enum";
+    case TokenKind::KwMatch:
+        return "kw_match";
 
     case TokenKind::LParen:
         return "l_paren";
