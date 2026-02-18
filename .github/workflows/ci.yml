@@ -60,3 +60,196 @@ jobs:
       - name: Coverage
         run: |
           bash scripts/coverage.sh --fail-under 100 --fail-under-branch 100 --fail-under-function 100
+
+  release-workflow-contract:
+    name: Release workflow contract
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify release preflight contract
+        run: |
+          set -euo pipefail
+          file=".github/workflows/release.yml"
+
+          grep -q "release-preflight:" "$file"
+          grep -q "needs: \[release-preflight\]" "$file"
+          grep -q "ctest --preset linux-debug --output-on-failure" "$file"
+          grep -q "bash scripts/smoke.sh --both" "$file"
+          grep -q "bash scripts/coverage.sh --fail-under 100 --fail-under-branch 100 --fail-under-function 100" "$file"
+          grep -q "actions/attest-build-provenance@v2" "$file"
+          grep -q "anchore/sbom-action@v0" "$file"
+          grep -q "dist/SBOM.spdx.json" "$file"
+          grep -q "gh attestation verify" "$file"
+
+  compatibility-policy-contract:
+    name: Compatibility policy contract
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify compatibility policy artifact
+        run: |
+          set -euo pipefail
+
+          policy_file=".github/compatibility-policy.json"
+          bundle_header="include/curlee/bundle/bundle.h"
+
+          test -f "$policy_file"
+          test -f "$bundle_header"
+
+          python3 - <<'PY'
+          import json
+          import re
+          import sys
+
+          policy = json.load(open('.github/compatibility-policy.json', encoding='utf-8'))
+          required_top = {'policy_version', 'semver', 'bundle', 'deprecation'}
+          missing_top = required_top - set(policy.keys())
+          if missing_top:
+              print('missing_top_keys', sorted(missing_top))
+              sys.exit(1)
+
+          semver = policy['semver']
+          bundle = policy['bundle']
+          deprecation = policy['deprecation']
+
+          if semver.get('contract_applies_from_major') != 1:
+              print('unexpected contract_applies_from_major', semver.get('contract_applies_from_major'))
+              sys.exit(1)
+
+          if bundle.get('format_version') != 1:
+              print('unexpected bundle format_version', bundle.get('format_version'))
+              sys.exit(1)
+
+          if deprecation.get('minimum_minor_releases_before_removal', 0) < 2:
+              print('minimum_minor_releases_before_removal must be >= 2')
+              sys.exit(1)
+
+          header = open('include/curlee/bundle/bundle.h', encoding='utf-8').read()
+          match = re.search(r'kBundleFormatVersion\s*=\s*(\d+)', header)
+          if not match:
+              print('kBundleFormatVersion constant not found')
+              sys.exit(1)
+
+          header_version = int(match.group(1))
+          if header_version != bundle['format_version']:
+              print('bundle format mismatch', {'policy': bundle['format_version'], 'header': header_version})
+              sys.exit(1)
+
+          print('compatibility_policy_contract=ok')
+          PY
+
+  quality-audit:
+    name: Quality audit gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run quality audit (deterministic JSON)
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          python3 scripts/quality_audit.py --format json --out build/quality-audit-report.json
+
+      - name: Enforce blocking policy (severity=error)
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import sys
+
+          report = json.load(open("build/quality-audit-report.json", encoding="utf-8"))
+          blocking = []
+          for file_entry in report.get("files", []):
+            for violation in file_entry.get("violations", []):
+              if violation.get("severity") == "error":
+                blocking.append((file_entry.get("path", "<unknown>"), violation))
+
+          summary = report.get("summary", {})
+          print("quality_audit_summary", summary)
+
+          if blocking:
+            print(f"blocking_violations={len(blocking)}")
+            for path, violation in blocking[:20]:
+              line = violation.get("line")
+              line_part = f":{line}" if line is not None else ""
+              print(f"- {path}{line_part}: [{violation.get('severity')}] {violation.get('rule')} - {violation.get('message')}")
+            sys.exit(1)
+          print("blocking_violations=0")
+          PY
+
+      - name: Upload quality audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-audit-report
+          path: build/quality-audit-report.json
+
+  quality-audit-contract:
+    name: Quality audit contract
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify blocking failure behavior
+        run: |
+          set -euo pipefail
+
+          tmp_dir="$(mktemp -d)"
+          trap 'rm -rf "$tmp_dir"' EXIT
+
+          mkdir -p "$tmp_dir/src"
+          cat > "$tmp_dir/src/long_line.cpp" <<'CPP'
+          int main(){ return 0; } // 12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+          CPP
+
+          git -C "$tmp_dir" init >/dev/null
+          git -C "$tmp_dir" add src/long_line.cpp
+
+          python3 scripts/quality_audit.py --repo-root "$tmp_dir" --format json --out "$tmp_dir/report.json"
+
+          set +e
+          export TMP_DIR="$tmp_dir"
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          path = os.path.join(os.environ["TMP_DIR"], "report.json")
+          report = json.load(open(path, encoding="utf-8"))
+          errors = 0
+          for file_entry in report.get("files", []):
+            for violation in file_entry.get("violations", []):
+              if violation.get("severity") == "error":
+                errors += 1
+          sys.exit(1 if errors > 0 else 0)
+          PY
+          rc=$?
+          set -e
+
+          if [[ "$rc" -eq 0 ]]; then
+            echo "expected blocking-policy evaluator to fail when error-severity violations exist"
+            exit 1
+          fi
+
+  orphan-golden-check:
+    name: Orphan golden check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect orphan golden/expected files
+        run: |
+          set -euo pipefail
+          python3 scripts/check_orphan_goldens.py --format text

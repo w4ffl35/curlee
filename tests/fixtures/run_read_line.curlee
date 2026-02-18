@@ -1,0 +1,5 @@
+import std.io as io;
+
+fn main(input: cap io.stdin) -> String {
+  return io.read_line(input);
+}

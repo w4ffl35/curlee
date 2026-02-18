@@ -1,0 +1,4 @@
+[tty.clear]
+[tty.write_at row=0 col=0 text="A"]
+[tty.write_at row=0 col=1 text="B"]
+curlee run: result 0

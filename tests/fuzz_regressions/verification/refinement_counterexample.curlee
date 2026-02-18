@@ -1,0 +1,10 @@
+fn risky_div(x: Int, y: Int) -> Int
+  [ requires y != 0;
+    ensures result > 5; ]
+{
+  return x / y;
+}
+
+fn main() -> Int {
+  return risky_div(10, 5);
+}

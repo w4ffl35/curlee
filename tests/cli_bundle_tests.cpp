@@ -1,6 +1,7 @@
 #include <curlee/bundle/bundle.h>
 #include <curlee/cli/cli.h>
 #include <curlee/vm/chunk_codec.h>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -79,6 +80,46 @@ static curlee::vm::Chunk make_return_int_chunk(std::int64_t v)
     return chunk;
 }
 
+static curlee::vm::Chunk make_python_call_chunk()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    const curlee::source::Span span{.start = 0, .end = 0};
+    chunk.emit(OpCode::PythonCall, span);
+    chunk.emit(OpCode::Return, span);
+    return chunk;
+}
+
+static curlee::vm::Chunk make_opcode_scan_chunk()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    const curlee::source::Span span{.start = 0, .end = 0};
+
+    const auto enum_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("E")));
+    const auto variant_idx =
+        static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("V")));
+
+    chunk.emit(OpCode::MakeEnum, span);
+    chunk.emit_u16(enum_idx, span);
+    chunk.emit_u16(variant_idx, span);
+    chunk.code.push_back(0);
+    chunk.spans.push_back(span);
+    chunk.emit(OpCode::Pop, span);
+
+    chunk.emit(OpCode::EnumIs, span);
+    chunk.emit_u16(enum_idx, span);
+    chunk.emit_u16(variant_idx, span);
+
+    chunk.emit(OpCode::EnumUnwrap, span);
+    chunk.emit_u16(enum_idx, span);
+    chunk.emit_u16(variant_idx, span);
+
+    chunk.emit_constant(Value::int_v(0), span);
+    chunk.emit(OpCode::Return, span);
+    return chunk;
+}
+
 int main()
 {
     namespace fs = std::filesystem;
@@ -139,6 +180,291 @@ int main()
         {
             fail("expected stderr to mention expected curlee bundle <verify|info> <file.bundle>");
         }
+    }
+
+    // bundle build: produces an artifact consumable by verify and run.
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_build_e2e");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path root = dir / "src";
+        const fs::path entry_abs = root / "main.curlee";
+        const fs::path mod_abs = root / "lib" / "math.curlee";
+        const fs::path out_bundle = dir / "built.bundle";
+
+        fs::create_directories(mod_abs.parent_path());
+        write_all(entry_abs,
+                  R"(import lib.math;
+
+fn main() -> Int {
+  return lib.math.nine();
+}
+)");
+        write_all(mod_abs,
+                  R"(fn nine() -> Int {
+  return 9;
+}
+)");
+
+        {
+            std::string out;
+            std::string err;
+            const int rc = run_cli({"curlee", "bundle", "build", "--root", root.string(),
+                                    "--cap", "io.stdout", "main.curlee", out_bundle.string()},
+                                   out, err);
+            if (rc != 0)
+            {
+                fail("expected bundle build to succeed; stderr: " + err);
+            }
+            if (out.find("curlee bundle build: wrote ") == std::string::npos)
+            {
+                fail("expected bundle build stdout to mention output path");
+            }
+            if (!err.empty())
+            {
+                fail("expected bundle build stderr to be empty on success");
+            }
+        }
+
+        {
+            std::string out;
+            std::string err;
+            const int rc = run_cli({"curlee", "bundle", "verify", out_bundle.string()}, out, err);
+            if (rc != 0)
+            {
+                fail("expected bundle verify to succeed for built artifact");
+            }
+            if (out != "curlee bundle verify: ok\n")
+            {
+                fail("unexpected bundle verify stdout after build: " + out);
+            }
+            if (!err.empty())
+            {
+                fail("expected bundle verify stderr to be empty");
+            }
+        }
+
+        const auto loaded_built = read_bundle(out_bundle.string());
+        if (auto* err = std::get_if<BundleError>(&loaded_built))
+        {
+            fail("expected to read built bundle: " + err->message);
+        }
+        const auto& built = std::get<Bundle>(loaded_built);
+        if (std::find(built.manifest.capabilities.begin(), built.manifest.capabilities.end(),
+                      "io.stdout") == built.manifest.capabilities.end())
+        {
+            fail("expected built bundle capabilities to include explicit --cap value");
+        }
+        if (built.manifest.imports.empty())
+        {
+            fail("expected built bundle to include at least one import pin");
+        }
+
+        {
+            std::string out;
+            std::string err;
+            const int rc =
+                run_cli({"curlee", "run", "--cap", "io.stdout", "--bundle",
+                         out_bundle.string(), entry_abs.string()},
+                        out, err);
+            if (rc != 0)
+            {
+                fail("expected run --bundle to succeed for built artifact; stderr: " + err);
+            }
+            if (out.find("curlee run: result 9") == std::string::npos)
+            {
+                fail("expected bundled execution result to be 9");
+            }
+            if (!err.empty())
+            {
+                fail("expected run --bundle stderr to be empty on success");
+            }
+        }
+
+        fs::remove_all(dir);
+    }
+
+    // bundle build: interactive stdin opcode is accepted (non-Python call scanner path).
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_build_stdin_opcode");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path entry = dir / "main.curlee";
+        const fs::path out_bundle = dir / "stdin.bundle";
+
+        write_all(entry,
+                  R"(fn main(input: cap io.stdin) -> Int {
+  __read_line(input);
+  return 0;
+}
+)");
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli({"curlee", "bundle", "build", "--cap", "io.stdin",
+                                entry.string(), out_bundle.string()},
+                               out, err);
+        if (rc != 0)
+        {
+            fail("expected bundle build to succeed for stdin opcode program; stderr: " + err);
+        }
+        if (!err.empty())
+        {
+            fail("expected empty stderr for stdin opcode bundle build");
+        }
+
+        fs::remove_all(dir);
+    }
+
+    // bundle build: v1-forbidden capabilities are rejected.
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_build_forbidden_cap");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path entry = dir / "main.curlee";
+        write_all(entry,
+                  R"(fn main() -> Int {
+  return 1;
+}
+)");
+
+        for (const std::string& forbidden_cap : {std::string("python.ffi"),
+                                                 std::string("python.sandbox")})
+        {
+            std::string out;
+            std::string err;
+            const int rc =
+                run_cli({"curlee", "bundle", "build", "--cap", forbidden_cap, entry.string(),
+                         (dir / "x.bundle").string()},
+                        out, err);
+            if (rc == 0)
+            {
+                fail("expected bundle build to fail for v1-forbidden capability");
+            }
+            if (err.find("capability not part of Curlee v1 surface: " + forbidden_cap) ==
+                std::string::npos)
+            {
+                fail("expected stderr to mention v1-forbidden capability");
+            }
+        }
+
+        fs::remove_all(dir);
+    }
+
+    // bundle build: option parsing and arity errors are reported.
+    {
+        const std::vector<std::vector<std::string>> bad_argvs = {
+            {"curlee", "bundle", "build", "--root"},
+            {"curlee", "bundle", "build", "--root="},
+            {"curlee", "bundle", "build", "--stdlib-root"},
+            {"curlee", "bundle", "build", "--stdlib-root="},
+            {"curlee", "bundle", "build", "--cap"},
+            {"curlee", "bundle", "build", "--cap="},
+            {"curlee", "bundle", "build", "--nope", "a.curlee", "a.bundle"},
+            {"curlee", "bundle", "build", "only-entry.curlee"},
+        };
+
+        for (const auto& argv_storage : bad_argvs)
+        {
+            std::string out;
+            std::string err;
+            const int rc = run_cli(argv_storage, out, err);
+            if (rc == 0)
+            {
+                fail("expected bundle build bad-args case to fail");
+            }
+            if (err.empty())
+            {
+                fail("expected stderr for bundle build bad-args case");
+            }
+        }
+    }
+
+    // bundle build: frontend parse/check failures are surfaced.
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_build_bad_source");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path bad_entry = dir / "bad.curlee";
+        write_all(bad_entry, "fn main( -> Int { return 1; }\n");
+
+        std::string out;
+        std::string err;
+        const int rc =
+            run_cli({"curlee", "bundle", "build", bad_entry.string(), (dir / "x.bundle").string()},
+                    out, err);
+        if (rc == 0)
+        {
+            fail("expected bundle build to fail for parse/check errors");
+        }
+        if (err.empty())
+        {
+            fail("expected stderr for parse/check failure");
+        }
+
+        fs::remove_all(dir);
+    }
+
+    // bundle build: emitter diagnostics are surfaced (no main entry function).
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_build_no_main");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path entry = dir / "no_main.curlee";
+        write_all(entry,
+                  R"(fn helper() -> Int {
+  return 1;
+}
+)");
+
+        std::string out;
+        std::string err;
+        const int rc =
+            run_cli({"curlee", "bundle", "build", entry.string(), (dir / "x.bundle").string()},
+                    out, err);
+        if (rc == 0)
+        {
+            fail("expected bundle build to fail without main");
+        }
+        if (err.find("no entry function 'main' found") == std::string::npos)
+        {
+            fail("expected emitter diagnostic for missing main");
+        }
+
+        fs::remove_all(dir);
+    }
+
+    // bundle build: write failures are surfaced.
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_build_write_fail");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path entry = dir / "main.curlee";
+        write_all(entry,
+                  R"(fn main() -> Int {
+  return 1;
+}
+)");
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli({"curlee", "bundle", "build", entry.string(), dir.string()}, out, err);
+        if (rc == 0)
+        {
+            fail("expected bundle build to fail when output path is a directory");
+        }
+        if (err.find("bundle build failed") == std::string::npos)
+        {
+            fail("expected stderr to mention bundle build write failure");
+        }
+
+        fs::remove_all(dir);
     }
 
     {
@@ -257,6 +583,73 @@ int main()
         {
             fail("expected stdout to be empty on verify failure");
         }
+    }
+
+    // bundle verify: decode failures are surfaced after bundle load.
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_verify_decode_error");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path bundle_path = dir / "decode_error.bundle";
+        Bundle bundle;
+        bundle.manifest.capabilities = {};
+        bundle.manifest.imports = {};
+        bundle.bytecode = {0x00, 0x01, 0x02};
+
+        const auto write_err = write_bundle(bundle_path.string(), bundle);
+        if (!write_err.message.empty())
+        {
+            fail("expected bundle write to succeed");
+        }
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli({"curlee", "bundle", "verify", bundle_path.string()}, out, err);
+        if (rc == 0)
+        {
+            fail("expected bundle verify to fail for invalid chunk decode");
+        }
+        if (err.find("bundle verify failed: invalid bundle bytecode: invalid chunk header") ==
+            std::string::npos)
+        {
+            fail("expected verify stderr to mention invalid bundle bytecode decode error");
+        }
+
+        fs::remove_all(dir);
+    }
+
+    // bundle verify: opcode scanning supports enum opcodes used in chunk payloads.
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_verify_opcode_scan");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path bundle_path = dir / "opcode_scan.bundle";
+        Bundle bundle;
+        bundle.manifest.capabilities = {};
+        bundle.manifest.imports = {};
+        bundle.bytecode = curlee::vm::encode_chunk(make_opcode_scan_chunk());
+
+        const auto write_err = write_bundle(bundle_path.string(), bundle);
+        if (!write_err.message.empty())
+        {
+            fail("expected bundle write to succeed");
+        }
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli({"curlee", "bundle", "verify", bundle_path.string()}, out, err);
+        if (rc != 0)
+        {
+            fail("expected bundle verify to succeed for enum-opcode payload; stderr: " + err);
+        }
+        if (out != "curlee bundle verify: ok\n")
+        {
+            fail("unexpected verify stdout for enum-opcode payload: " + out);
+        }
+
+        fs::remove_all(dir);
     }
 
     // bundle: read failures return an error exit code.
@@ -402,9 +795,9 @@ int main()
         fs::remove_all(dir);
     }
 
-    // Bundle mode: manifest capabilities must be granted at runtime.
+    // Bundle mode: v1-forbidden capabilities are rejected at runtime.
     {
-        const fs::path dir = temp_path("curlee_cli_bundle_caps");
+        const fs::path dir = temp_path("curlee_cli_bundle_caps_forbidden");
         fs::remove_all(dir);
         fs::create_directories(dir);
 
@@ -427,7 +820,6 @@ int main()
             fail("expected bundle write to succeed");
         }
 
-        // Denied when required capability is not granted.
         {
             std::string out;
             std::string err;
@@ -435,32 +827,150 @@ int main()
                 {"curlee", "run", "--bundle", bundle_path.string(), entry.string()}, out, err);
             if (rc == 0)
             {
-                fail("expected run to fail when bundle capability is not granted");
+                fail("expected run to fail when bundle uses v1-forbidden capability");
             }
-            if (err.find("missing capability required by bundle: python.ffi") == std::string::npos)
+            if (err.find("bundle capability not part of Curlee v1 surface: python.ffi") ==
+                std::string::npos)
             {
-                fail("expected stderr to mention missing capability required by bundle");
+                fail("expected stderr to mention v1-forbidden bundle capability");
             }
         }
 
-        // Allowed when capability is granted.
+        fs::remove_all(dir);
+    }
+
+    // Bundle mode: explicitly granted v1-forbidden capabilities are rejected.
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_caps_forbidden_grant");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path entry = dir / "main.curlee";
+        const fs::path bundle_path = dir / "ok.bundle";
+
+        {
+            std::ofstream out(entry);
+            out << "fn main() -> Int { return 0; }\n";
+        }
+
+        Bundle bundle;
+        bundle.manifest.capabilities = {};
+        bundle.manifest.imports = {};
+        bundle.bytecode = curlee::vm::encode_chunk(make_return_int_chunk(0));
+
+        const auto write_err = write_bundle(bundle_path.string(), bundle);
+        if (!write_err.message.empty())
+        {
+            fail("expected bundle write to succeed");
+        }
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli({"curlee", "run", "--cap", "python.ffi", "--bundle",
+                                bundle_path.string(), entry.string()},
+                               out, err);
+        if (rc == 0)
+        {
+            fail("expected run to fail when forbidden capability is explicitly granted");
+        }
+        if (err.find("capability not part of Curlee v1 surface: python.ffi") ==
+            std::string::npos)
+        {
+            fail("expected stderr to mention forbidden granted capability");
+        }
+
+        fs::remove_all(dir);
+    }
+
+    // Bundle verify: v1-forbidden capabilities are rejected.
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_verify_forbidden_cap");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path bundle_path = dir / "forbidden_cap.bundle";
+
+        Bundle bundle;
+        bundle.manifest.capabilities = {"python.ffi"};
+        bundle.manifest.imports = {};
+        bundle.bytecode = curlee::vm::encode_chunk(make_return_int_chunk(0));
+
+        const auto write_err = write_bundle(bundle_path.string(), bundle);
+        if (!write_err.message.empty())
+        {
+            fail("expected bundle write to succeed");
+        }
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli({"curlee", "bundle", "verify", bundle_path.string()}, out, err);
+        if (rc == 0)
+        {
+            fail("expected bundle verify to fail for v1-forbidden capability");
+        }
+        if (err.find("bundle verify failed: capability not part of Curlee v1 surface: python.ffi") ==
+            std::string::npos)
+        {
+            fail("expected verify stderr to mention v1-forbidden capability");
+        }
+
+        fs::remove_all(dir);
+    }
+
+    // Bundle mode: PythonCall opcode is rejected in v1.
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_python_call_reject");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path entry = dir / "main.curlee";
+        const fs::path bundle_path = dir / "python_call.bundle";
+
+        {
+            std::ofstream out(entry);
+            out << "fn main() -> Int { return 0; }\n";
+        }
+
+        Bundle bundle;
+        bundle.manifest.capabilities = {};
+        bundle.manifest.imports = {};
+        bundle.bytecode = curlee::vm::encode_chunk(make_python_call_chunk());
+
+        const auto write_err = write_bundle(bundle_path.string(), bundle);
+        if (!write_err.message.empty())
+        {
+            fail("expected bundle write to succeed");
+        }
+
         {
             std::string out;
             std::string err;
-            const int rc = run_cli({"curlee", "run", "--cap", "python.ffi", "--bundle",
-                                    bundle_path.string(), entry.string()},
-                                   out, err);
-            if (rc != 0)
+            const int rc =
+                run_cli({"curlee", "bundle", "verify", bundle_path.string()}, out, err);
+            if (rc == 0)
             {
-                fail("expected run to succeed when bundle capability is granted");
+                fail("expected bundle verify to fail for PythonCall opcode");
             }
-            if (!err.empty())
+            if (err.find("bundle verify failed: bundle bytecode uses python interop opcode not "
+                         "supported in Curlee v1") == std::string::npos)
             {
-                fail("expected stderr to be empty on success");
+                fail("expected verify stderr to mention python interop opcode rejection");
             }
-            if (out.find("curlee run: result 0") == std::string::npos)
+        }
+
+        {
+            std::string out;
+            std::string err;
+            const int rc = run_cli(
+                {"curlee", "run", "--bundle", bundle_path.string(), entry.string()}, out, err);
+            if (rc == 0)
             {
-                fail("expected stdout to include result 0");
+                fail("expected run to fail for PythonCall opcode in bundle");
+            }
+            if (err.find("bundle bytecode uses python interop opcode not supported in Curlee v1") ==
+                std::string::npos)
+            {
+                fail("expected run stderr to mention python interop opcode rejection");
             }
         }
 

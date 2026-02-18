@@ -1,0 +1,11 @@
+fn projected_balance(balance: Int, burn_per_day: Int, days: Int) -> Int {
+  return balance - (burn_per_day * days);
+}
+
+fn main() -> Int {
+  let remaining: Int = projected_balance(1000, 20, 30);
+  if (remaining < 500) {
+    return 1;
+  }
+  return 0;
+}

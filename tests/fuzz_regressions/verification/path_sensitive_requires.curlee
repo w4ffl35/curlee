@@ -1,0 +1,11 @@
+fn div_checked(x: Int, y: Int) -> Int
+  [ requires x > 0;
+    requires y > 0;
+    ensures result > 0; ]
+{
+  return x / y;
+}
+
+fn main() -> Int {
+  return div_checked(10, 2);
+}

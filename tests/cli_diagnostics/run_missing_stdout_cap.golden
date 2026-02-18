@@ -1,0 +1,5 @@
+tests/fixtures/r.curlee:2:3: error: capability not granted: io.stdout
+  |
+  |   print("x");
+  |   ^^^^^^^^^^
+note: grant it with: curlee run --cap io.stdout <file.curlee>

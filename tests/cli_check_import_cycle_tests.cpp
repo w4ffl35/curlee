@@ -5,77 +5,98 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unistd.h>
 #include <vector>
 
 namespace fs = std::filesystem;
 
-[[noreturn]] static void fail(const std::string& msg)
+struct CapturedRun
 {
-    std::cerr << "FAIL: " << msg << "\n";
-    std::exit(1);
-}
+    int rc = 0;
+    std::string out;
+    std::string err;
+};
 
-static int run_cli_capture(const std::vector<std::string>& argv_storage, std::string& out,
-                           std::string& err)
+class CliTestFixture
 {
-    std::ostringstream captured_out;
-    std::ostringstream captured_err;
-
-    auto* old_out = std::cout.rdbuf(captured_out.rdbuf());
-    auto* old_err = std::cerr.rdbuf(captured_err.rdbuf());
-
-    std::vector<std::string> args = argv_storage;
-    std::vector<char*> argv;
-    argv.reserve(args.size());
-    for (auto& s : args)
+  public:
+    [[noreturn]] static void fail(std::string_view message)
     {
-        argv.push_back(s.data());
+        std::cerr << "FAIL: " << message << "\n";
+        std::exit(1);
     }
 
-    const int rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
-
-    std::cout.rdbuf(old_out);
-    std::cerr.rdbuf(old_err);
-
-    out = captured_out.str();
-    err = captured_err.str();
-    return rc;
-}
-
-static void expect_contains(const std::string& haystack, const std::string& needle,
-                            const std::string& what)
-{
-    if (haystack.find(needle) == std::string::npos)
+    static CapturedRun run(std::initializer_list<std::string> args_list)
     {
-        fail("expected " + what + " to contain '" + needle + "'\n---\n" + haystack + "\n---");
-    }
-}
+        std::ostringstream captured_out;
+        std::ostringstream captured_err;
 
-static void expect_empty(const std::string& s, const std::string& what)
-{
-    if (!s.empty())
-    {
-        fail("expected " + what + " to be empty\n---\n" + s + "\n---");
-    }
-}
+        std::streambuf* old_out = std::cout.rdbuf(captured_out.rdbuf());
+        std::streambuf* old_err = std::cerr.rdbuf(captured_err.rdbuf());
 
-static void write_file(const fs::path& path, const std::string& contents)
-{
-    fs::create_directories(path.parent_path());
+        std::vector<std::string> args(args_list);
+        std::vector<char*> argv;
+        argv.reserve(args.size());
+        for (std::string& arg : args)
+        {
+            argv.push_back(arg.data());
+        }
 
-    std::ofstream f(path, std::ios::binary | std::ios::trunc);
-    if (!f)
-    {
-        fail("failed to open file: " + path.string());
+        CapturedRun result;
+        result.rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
+
+        std::cout.rdbuf(old_out);
+        std::cerr.rdbuf(old_err);
+
+        result.out = captured_out.str();
+        result.err = captured_err.str();
+        return result;
     }
 
-    f << contents;
-    if (!f)
+    static void require_empty(const std::string& value, std::string_view label)
     {
-        fail("failed to write file: " + path.string());
+        if (value.empty())
+        {
+            return;
+        }
+        fail("expected " + std::string(label) + " to be empty");
     }
-}
+
+    static void require_contains(
+        const std::string& haystack,
+        std::string_view needle,
+        std::string_view label
+    )
+    {
+        if (haystack.find(needle) != std::string::npos)
+        {
+            return;
+        }
+        fail("expected " + std::string(label) + " to contain '" + std::string(needle) + "'");
+    }
+
+    static void write_file(const fs::path& path, std::string_view contents)
+    {
+        std::error_code ec;
+        fs::create_directories(path.parent_path(), ec);
+        if (ec)
+        {
+            fail("failed to create directories for " + path.string());
+        }
+
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        if (!file)
+        {
+            fail("failed to open file " + path.string());
+        }
+        file << contents;
+        if (!file)
+        {
+            fail("failed to write file " + path.string());
+        }
+    }
+};
 
 int main()
 {
@@ -86,27 +107,33 @@ int main()
             fs::temp_directory_path() / ("curlee_cli_cycle_" + std::to_string(pid));
 
         // entry imports a
-        write_file(dir / "entry.curlee", "import a;\n\nfn main() -> Int {\n  return 0;\n}\n");
+        CliTestFixture::write_file(
+            dir / "entry.curlee",
+            "import a;\n\nfn main() -> Int {\n  return 0;\n}\n"
+        );
 
         // a imports b
-        write_file(dir / "a.curlee", "import b;\n\nfn f() -> Int {\n  return 0;\n}\n");
+        CliTestFixture::write_file(
+            dir / "a.curlee",
+            "import b;\n\nfn f() -> Int {\n  return 0;\n}\n"
+        );
 
         // b imports a (cycle)
-        write_file(dir / "b.curlee", "import a;\n\nfn g() -> Int {\n  return 0;\n}\n");
+        CliTestFixture::write_file(
+            dir / "b.curlee",
+            "import a;\n\nfn g() -> Int {\n  return 0;\n}\n"
+        );
 
-        std::string out;
-        std::string err;
-        const int rc =
-            run_cli_capture({"curlee", "check", (dir / "entry.curlee").string()}, out, err);
-        if (rc != 1)
+        const auto run = CliTestFixture::run({"curlee", "check", (dir / "entry.curlee").string()});
+        if (run.rc != 1)
         {
-            fail("expected error exit code for import cycle");
+            CliTestFixture::fail("expected error exit code for import cycle");
         }
 
-        expect_empty(out, "stdout");
-        expect_contains(err, "error:", "stderr");
-        expect_contains(err, "import cycle detected", "stderr");
-        expect_contains(err, "cycle involves", "stderr");
+        CliTestFixture::require_empty(run.out, "stdout");
+        CliTestFixture::require_contains(run.err, "error:", "stderr");
+        CliTestFixture::require_contains(run.err, "import cycle detected", "stderr");
+        CliTestFixture::require_contains(run.err, "cycle involves", "stderr");
     }
 
     return 0;

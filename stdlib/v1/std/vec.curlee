@@ -1,0 +1,21 @@
+fn new_int(max_len: Int) -> Vec {
+  return __vec_new_int(max_len);
+}
+
+fn len_int(v: Vec) -> Int {
+  return __vec_len_int(v);
+}
+
+fn push_int(v: Vec, value: Int) -> Unit {
+  __vec_push_int(v, value);
+  return;
+}
+
+fn get_int(v: Vec, index: Int) -> Int {
+  return __vec_get_int(v, index);
+}
+
+fn set_int(v: Vec, index: Int, value: Int) -> Unit {
+  __vec_set_int(v, index, value);
+  return;
+}

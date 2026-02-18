@@ -1,0 +1,7 @@
+import std.vec as vec;
+
+fn main() -> Int {
+  let v: Vec = vec.new_int(1);
+  vec.push_int(v, 1);
+  return vec.get_int(v, 4);
+}

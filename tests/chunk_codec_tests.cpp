@@ -132,6 +132,19 @@ static void expect_roundtrip(const curlee::vm::Chunk& expected,
             break;
         case curlee::vm::ValueKind::Unit:
             break;
+        case curlee::vm::ValueKind::Enum:
+            expect_eq(a.enum_name, b.enum_name, what + ": enum name constant");
+            expect_eq(a.variant_name, b.variant_name, what + ": enum variant constant");
+            if (a.payload == nullptr || b.payload == nullptr)
+            {
+                expect(a.payload == nullptr && b.payload == nullptr,
+                       what + ": enum payload presence");
+            }
+            else
+            {
+                expect(*a.payload == *b.payload, what + ": enum payload constant");
+            }
+            break;
         }
     }
 }
@@ -172,6 +185,9 @@ static std::vector<std::uint8_t> encode_chunk_v1(const curlee::vm::Chunk& chunk)
             break;
         case curlee::vm::ValueKind::Unit:
             append_u8(out, 3);
+            break;
+        case curlee::vm::ValueKind::Enum:
+            fail("v1 encoder does not support enum constants");
             break;
         }
     }

@@ -544,7 +544,11 @@ int main()
         auto flag = ctx.bool_const("flag");
         lower_ctx.bool_vars.emplace("flag", flag);
 
-        auto pred = make_binary(TokenKind::OrOr, make_name("flag"), make_unary(TokenKind::Bang, make_name("flag")));
+        auto pred = make_binary(
+            TokenKind::OrOr,
+            make_name("flag"),
+            make_unary(TokenKind::Bang, make_name("flag"))
+        );
         auto lowered = lower_predicate(pred, lower_ctx);
         if (std::holds_alternative<curlee::diag::Diagnostic>(lowered))
         {
@@ -566,8 +570,11 @@ int main()
         auto x = ctx.int_const("x");
         lower_ctx.int_vars.emplace("x", x);
 
-        auto pred = make_binary(TokenKind::AndAnd, make_binary(TokenKind::LessEqual, make_name("x"), make_int("0")),
-                                make_binary(TokenKind::GreaterEqual, make_name("x"), make_int("0")));
+        auto pred = make_binary(
+            TokenKind::AndAnd,
+            make_binary(TokenKind::LessEqual, make_name("x"), make_int("0")),
+            make_binary(TokenKind::GreaterEqual, make_name("x"), make_int("0"))
+        );
         auto lowered = lower_predicate(pred, lower_ctx);
         if (std::holds_alternative<curlee::diag::Diagnostic>(lowered))
         {
@@ -590,8 +597,11 @@ int main()
         auto x = ctx.int_const("x");
         lower_ctx.int_vars.emplace("x", x);
 
-        auto pred = make_binary(TokenKind::Greater, make_binary(TokenKind::Minus, make_name("x"), make_int("1")),
-                                make_int("0"));
+        auto pred = make_binary(
+            TokenKind::Greater,
+            make_binary(TokenKind::Minus, make_name("x"), make_int("1")),
+            make_int("0")
+        );
         auto lowered = lower_predicate(pred, lower_ctx);
         if (std::holds_alternative<curlee::diag::Diagnostic>(lowered))
         {
@@ -612,8 +622,11 @@ int main()
         auto& ctx = solver.context();
         LoweringContext lower_ctx(ctx);
 
-        auto pred = make_binary(TokenKind::EqualEqual, make_binary(TokenKind::Star, make_bool(true), make_int("1")),
-                                make_int("0"));
+        auto pred = make_binary(
+            TokenKind::EqualEqual,
+            make_binary(TokenKind::Star, make_bool(true), make_int("1")),
+            make_int("0")
+        );
         auto lowered = lower_predicate(pred, lower_ctx);
         if (!std::holds_alternative<curlee::diag::Diagnostic>(lowered))
         {

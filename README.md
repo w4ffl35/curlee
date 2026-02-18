@@ -1,6 +1,6 @@
 # Curlee
 
-![status: alpha](https://img.shields.io/badge/status-alpha-lightgrey)
+![status: production-readiness](https://img.shields.io/badge/status-production--readiness-blue)
 
 Curlee is an experimental **verification-first programming language** and C++23 compiler/runtime.
 
@@ -77,11 +77,12 @@ flowchart LR
 Example (intended syntax):
 
 ```curlee
-fn divide(numerator: Int, denominator: Int) -> Int
-  [ requires denominator != 0;
-    ensures result * denominator == numerator; ]
+fn add(a: Int, b: Int) -> Int
+  [ requires a > 0;
+    requires b > 0;
+    ensures result > a && result > b; ]
 {
-  return numerator / denominator;
+  return a + b;
 }
 ```
 
@@ -96,14 +97,25 @@ The MVP logic fragment is intentionally small and decidable.
 
 ## Project status
 
-This repository is early-stage (alpha research prototype).
+Curlee is in **production-readiness stabilization**.
 
-Expectations:
+Current expectations:
 
 - The language and bytecode are not stable yet.
 - Diagnostics, CLI output, and tests are expected to evolve.
 - Verification is intentionally limited to a small fragment; out-of-scope contracts are rejected.
 - If Curlee cannot prove a contract, it will not run the program.
+
+### Production support policy (v1 target)
+
+The production support matrix and exit-alpha criteria are tracked in the wiki:
+
+- https://github.com/w4ffl35/curlee/wiki/Release-Checklist-and-Versioning
+
+Canonical policy anchors:
+
+- `Production support matrix`
+- `Exit-alpha criteria`
 
 ### MVP scope (current)
 
@@ -114,11 +126,17 @@ Curlee currently supports two useful workflows:
 
 The runnable subset is intentionally small:
 
-- Expressions: `Int` / `Bool` literals, names, `+`, grouping.
-- Statements: `let`, `return`, `if/else`, `while`.
-- Calls: simple **no-arg** calls to a named function.
+The supported fragment evolves quickly; the **wiki is the source of truth**:
 
-Out of scope (for now): strings, general unary/binary ops, function parameters, modules/import execution.
+- Supported fragment + runnable subset: https://github.com/w4ffl35/curlee/wiki/Stability-and-Supported-Fragment
+- Syntax reference: https://github.com/w4ffl35/curlee/wiki/Language-Syntax
+- Modules/imports: https://github.com/w4ffl35/curlee/wiki/Modules-and-Imports
+- Execution model (fuel, capabilities, interop): https://github.com/w4ffl35/curlee/wiki/Running-Programs
+
+At a high level:
+
+- `curlee check` supports imports (including aliasing and module-qualified calls) and function parameters, and verifies contracts within the MVP scope.
+- `curlee run` executes a conservative, deterministic subset on the VM after successful verification (see the wiki for the exact runnable subset).
 
 ---
 
@@ -128,6 +146,7 @@ User-facing documentation lives in the GitHub wiki:
 
 - https://github.com/w4ffl35/curlee/wiki
 - Supported fragment + stability: https://github.com/w4ffl35/curlee/wiki/Stability-and-Supported-Fragment
+- C++23 code quality standards: https://github.com/w4ffl35/curlee/wiki/C%2B%2B23-Code-Quality-Standards
 
 ## Datasets
 
@@ -249,7 +268,7 @@ Then:
 These fixtures are in the repo and should produce a diagnostic:
 
 ```bash
-./build/linux-debug/curlee check tests/fixtures/check_requires_divide.curlee
+./build/linux-debug/curlee check tests/fixtures/check_requires_fail.curlee
 ./build/linux-debug/curlee check tests/fixtures/check_ensures_fail.curlee
 ```
 

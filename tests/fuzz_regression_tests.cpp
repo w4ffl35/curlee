@@ -1,7 +1,11 @@
 #include <algorithm>
 #include <cstdint>
+#include <curlee/compiler/emitter.h>
 #include <curlee/lexer/lexer.h>
 #include <curlee/parser/parser.h>
+#include <curlee/types/type_check.h>
+#include <curlee/verification/checker.h>
+#include <curlee/vm/vm.h>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -68,6 +72,67 @@ void run_parser_fixture(const std::filesystem::path& path)
     (void)curlee::parser::parse(tokens);
 }
 
+void run_verification_fixture(const std::filesystem::path& path)
+{
+    const auto bytes = read_all_bytes(path);
+    const std::string input(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+
+    const auto lexed = curlee::lexer::lex(input);
+    if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+    {
+        return;
+    }
+
+    const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+    const auto parsed = curlee::parser::parse(tokens);
+    if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+    {
+        return;
+    }
+
+    const auto& program = std::get<curlee::parser::Program>(parsed);
+    const auto typed = curlee::types::type_check(program);
+    if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(typed))
+    {
+        return;
+    }
+
+    const auto& type_info = std::get<curlee::types::TypeInfo>(typed);
+    (void)curlee::verification::verify(program, type_info);
+}
+
+void run_vm_fixture(const std::filesystem::path& path)
+{
+    const auto bytes = read_all_bytes(path);
+    const std::string input(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+
+    const auto lexed = curlee::lexer::lex(input);
+    if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+    {
+        return;
+    }
+
+    const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+    const auto parsed = curlee::parser::parse(tokens);
+    if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+    {
+        return;
+    }
+
+    const auto& program = std::get<curlee::parser::Program>(parsed);
+    const auto emitted = curlee::compiler::emit_bytecode(program);
+    if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+    {
+        return;
+    }
+
+    const auto& chunk = std::get<curlee::vm::Chunk>(emitted);
+    curlee::vm::VM machine;
+    curlee::vm::VM::Capabilities caps;
+    caps.insert("io.stdout");
+    (void)machine.run(chunk, 256, caps);
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -82,6 +147,8 @@ int main(int argc, char** argv)
 
     const auto lexer_files = collect_files(root / "lexer");
     const auto parser_files = collect_files(root / "parser");
+    const auto verification_files = collect_files(root / "verification");
+    const auto vm_files = collect_files(root / "vm");
 
     for (const auto& path : lexer_files)
     {
@@ -91,6 +158,16 @@ int main(int argc, char** argv)
     for (const auto& path : parser_files)
     {
         run_parser_fixture(path);
+    }
+
+    for (const auto& path : verification_files)
+    {
+        run_verification_fixture(path);
+    }
+
+    for (const auto& path : vm_files)
+    {
+        run_vm_fixture(path);
     }
 
     return 0;

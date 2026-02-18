@@ -1,0 +1,14 @@
+fn clear(tty: cap io.tty) -> Unit {
+  __tty_clear(tty);
+  return;
+}
+
+fn write_at(row: Int, col: Int, text: String, tty: cap io.tty) -> Unit {
+  __tty_write_at(row, col, text, tty);
+  return;
+}
+
+fn flush(tty: cap io.tty) -> Unit {
+  __tty_flush(tty);
+  return;
+}

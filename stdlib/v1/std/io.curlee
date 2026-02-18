@@ -1,0 +1,7 @@
+fn identity_int(value: Int, out: cap io.stdout) -> Int {
+  return value;
+}
+
+fn read_line(input: cap io.stdin) -> String {
+  return __read_line(input);
+}

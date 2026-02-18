@@ -1,0 +1,6 @@
+fn call0(p: cap python.ffi) -> Unit {
+  unsafe {
+    python_ffi.call();
+  }
+  return 0;
+}

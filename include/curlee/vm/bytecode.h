@@ -39,7 +39,22 @@ enum class OpCode : std::uint8_t
     Call,
     Ret,
     Print,
+    ReadLine,
+    FsReadText,
+    FsWriteText,
+    TtyClear,
+    TtyWriteAt,
+    TtyFlush,
+    RngNextInt,
+    VecNew,
+    VecLen,
+    VecPush,
+    VecGet,
+    VecSet,
     PythonCall,
+    MakeEnum,
+    EnumIs,
+    EnumUnwrap,
 };
 
 /** @brief A compiled chunk of bytecode, constants and span map. */

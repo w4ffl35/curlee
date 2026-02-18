@@ -1,0 +1,1 @@
+{"kind":"diagnostic","severity":"error","message":"stdin line too long","file":"tests/fixtures/run_read_line_over_limit.curlee","span":{"start":131,"end":149},"notes":[]}

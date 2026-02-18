@@ -1,3 +1,4 @@
+#include <cerrno>
 #include <cstdlib>
 #include <curlee/cli/cli.h>
 #include <filesystem>
@@ -5,75 +6,89 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unistd.h>
 #include <vector>
 
 namespace fs = std::filesystem;
 
-[[noreturn]] static void fail(const std::string& msg)
+struct CliRun
 {
-    std::cerr << "FAIL: " << msg << "\n";
+    int exit_code = 0;
+    std::string stdout_text;
+    std::string stderr_text;
+};
+
+[[noreturn]] static void die(std::string_view message)
+{
+    std::cerr << "FAIL: " << message << "\n";
     std::exit(1);
 }
 
-static int run_cli_capture(const std::vector<std::string>& argv_storage, std::string& out,
-                           std::string& err)
+static void write_text(const fs::path& destination, std::string_view text)
 {
-    std::ostringstream captured_out;
-    std::ostringstream captured_err;
+    std::error_code ec;
+    fs::create_directories(destination.parent_path(), ec);
+    if (ec)
+    {
+        die("unable to create parent directories for " + destination.string());
+    }
 
-    auto* old_out = std::cout.rdbuf(captured_out.rdbuf());
-    auto* old_err = std::cerr.rdbuf(captured_err.rdbuf());
+    std::ofstream output(destination, std::ios::binary | std::ios::trunc);
+    if (!output)
+    {
+        die("unable to open " + destination.string());
+    }
 
-    std::vector<std::string> args = argv_storage;
+    output << text;
+    if (!output.good())
+    {
+        die("unable to write " + destination.string());
+    }
+}
+
+static CliRun run_check_command(const fs::path& entry_file)
+{
+    std::ostringstream out_capture;
+    std::ostringstream err_capture;
+    std::streambuf* prior_out = std::cout.rdbuf(out_capture.rdbuf());
+    std::streambuf* prior_err = std::cerr.rdbuf(err_capture.rdbuf());
+
+    std::vector<std::string> owned_args = {"curlee", "check", entry_file.string()};
     std::vector<char*> argv;
-    argv.reserve(args.size());
-    for (auto& s : args)
+    argv.reserve(owned_args.size());
+    for (std::string& item : owned_args)
     {
-        argv.push_back(s.data());
+        argv.push_back(item.data());
     }
 
-    const int rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
+    CliRun run;
+    run.exit_code = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
 
-    std::cout.rdbuf(old_out);
-    std::cerr.rdbuf(old_err);
-
-    out = captured_out.str();
-    err = captured_err.str();
-    return rc;
+    std::cout.rdbuf(prior_out);
+    std::cerr.rdbuf(prior_err);
+    run.stdout_text = out_capture.str();
+    run.stderr_text = err_capture.str();
+    return run;
 }
 
-static void expect_contains(const std::string& haystack, const std::string& needle,
-                            const std::string& what)
+static void require_contains_text(
+    const std::string& text,
+    std::string_view needle,
+    std::string_view channel_name
+)
 {
-    if (haystack.find(needle) == std::string::npos)
+    if (text.find(needle) == std::string::npos)
     {
-        fail("expected " + what + " to contain '" + needle + "'\n---\n" + haystack + "\n---");
-    }
-}
-
-static void expect_empty(const std::string& s, const std::string& what)
-{
-    if (!s.empty())
-    {
-        fail("expected " + what + " to be empty\n---\n" + s + "\n---");
+        die("expected " + std::string(channel_name) + " to include '" + std::string(needle) + "'");
     }
 }
 
-static void write_file(const fs::path& path, const std::string& contents)
+static void require_empty_text(const std::string& text, std::string_view channel_name)
 {
-    fs::create_directories(path.parent_path());
-
-    std::ofstream f(path, std::ios::binary | std::ios::trunc);
-    if (!f)
+    if (!text.empty())
     {
-        fail("failed to open file: " + path.string());
-    }
-
-    f << contents;
-    if (!f)
-    {
-        fail("failed to write file: " + path.string());
+        die("expected empty " + std::string(channel_name));
     }
 }
 
@@ -85,38 +100,31 @@ static std::string fn_body_return_zero(const std::string& name)
 int main()
 {
     // check: hit the max import depth guard (kMaxImportDepth=64)
+    const auto pid = static_cast<unsigned long>(::getpid());
+    const fs::path temp_root =
+        fs::temp_directory_path() / ("curlee_cli_depth_" + std::to_string(pid));
+
+    write_text(temp_root / "entry.curlee", "import m0;\n\nfn main() -> Int {\n  return 0;\n}\n");
+
+    for (int depth = 0; depth < 64; ++depth)
     {
-        const auto pid = static_cast<unsigned long>(::getpid());
-        const fs::path dir =
-            fs::temp_directory_path() / ("curlee_cli_depth_" + std::to_string(pid));
-
-        // Entry imports m0.
-        write_file(dir / "entry.curlee", "import m0;\n\nfn main() -> Int {\n  return 0;\n}\n");
-
-        // m0 -> m1 -> ... -> m63 -> m64
-        // Depth is 1 at m0, so m64 is depth 65 and should trigger the guard (depth > 64).
-        for (int i = 0; i < 64; ++i)
-        {
-            const std::string mod = "m" + std::to_string(i);
-            const std::string next = "m" + std::to_string(i + 1);
-            write_file(dir / (mod + ".curlee"),
-                       "import " + next + ";\n\n" + fn_body_return_zero("f" + std::to_string(i)));
-        }
-        write_file(dir / "m64.curlee", fn_body_return_zero("f64"));
-
-        std::string out;
-        std::string err;
-        const int rc =
-            run_cli_capture({"curlee", "check", (dir / "entry.curlee").string()}, out, err);
-        if (rc != 1)
-        {
-            fail("expected error exit code for deep import graph");
-        }
-
-        expect_empty(out, "stdout");
-        expect_contains(err, "error:", "stderr");
-        expect_contains(err, "import graph too deep", "stderr");
+        const std::string current = "m" + std::to_string(depth);
+        const std::string next = "m" + std::to_string(depth + 1);
+        const std::string payload =
+            "import " + next + ";\n\n" + fn_body_return_zero("f" + std::to_string(depth));
+        write_text(temp_root / (current + ".curlee"), payload);
     }
+    write_text(temp_root / "m64.curlee", fn_body_return_zero("f64"));
+
+    const CliRun run = run_check_command(temp_root / "entry.curlee");
+    if (run.exit_code != 1)
+    {
+        die("expected non-zero exit for deep import graph");
+    }
+
+    require_empty_text(run.stdout_text, "stdout");
+    require_contains_text(run.stderr_text, "error:", "stderr");
+    require_contains_text(run.stderr_text, "import graph too deep", "stderr");
 
     return 0;
 }

@@ -1,0 +1,4 @@
+tests/fixtures/run_vec_index_error.curlee:8:1: error: vec index out of bounds
+  |
+  | 
+  | ^

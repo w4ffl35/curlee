@@ -1,0 +1,4 @@
+tests/fixtures/run_vec_capacity_error.curlee:9:1: error: vec capacity exceeded
+  |
+  | 
+  | ^

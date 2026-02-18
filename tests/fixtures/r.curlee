@@ -1,0 +1,4 @@
+fn main(out: cap io.stdout) -> Int {
+  print("x");
+  return 0;
+}

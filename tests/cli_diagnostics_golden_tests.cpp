@@ -4,12 +4,50 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
 
-static std::string slurp(const fs::path& path)
+namespace
+{
+
+struct CapturedRun
+{
+    int rc = 0;
+    std::string out;
+    std::string err;
+};
+
+struct EnvVarGuard
+{
+    std::string key;
+    bool had_old = false;
+    std::string old_value;
+
+    explicit EnvVarGuard(std::string key_in) : key(std::move(key_in))
+    {
+        if (const char* old = std::getenv(key.c_str()); old != nullptr)
+        {
+            had_old = true;
+            old_value = old;
+        }
+    }
+
+    ~EnvVarGuard()
+    {
+        if (had_old)
+        {
+            ::setenv(key.c_str(), old_value.c_str(), 1);
+            return;
+        }
+        ::unsetenv(key.c_str());
+    }
+};
+
+std::string slurp(const fs::path& path)
 {
     std::ifstream in(path, std::ios::binary);
     if (!in)
@@ -22,93 +60,44 @@ static std::string slurp(const fs::path& path)
     return buffer.str();
 }
 
-static bool run_missing_file_case(const fs::path& golden_path)
+CapturedRun run_cli(std::vector<std::string> argv_storage)
 {
     std::ostringstream captured_out;
     std::ostringstream captured_err;
 
-    auto* old_cout = std::cout.rdbuf(captured_out.rdbuf());
-    auto* old_cerr = std::cerr.rdbuf(captured_err.rdbuf());
+    std::streambuf* old_cout = std::cout.rdbuf(captured_out.rdbuf());
+    std::streambuf* old_cerr = std::cerr.rdbuf(captured_err.rdbuf());
 
-    const std::string rel_path = "tests/fixtures/does_not_exist.cur";
-
-    std::vector<std::string> argv_storage = {"curlee", "lex", rel_path};
     std::vector<char*> argv;
     argv.reserve(argv_storage.size());
-    for (auto& s : argv_storage)
+    for (std::string& s : argv_storage)
     {
         argv.push_back(s.data());
     }
 
-    const int rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
+    CapturedRun run;
+    run.rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
 
     std::cout.rdbuf(old_cout);
     std::cerr.rdbuf(old_cerr);
-
-    const std::string got = captured_err.str();
-    const std::string expected = slurp(golden_path);
-
-    if (rc == 0)
-    {
-        std::cerr << "expected non-zero exit code for missing file\n";
-        return false;
-    }
-
-    if (got != expected)
-    {
-        std::cerr << "GOLDEN MISMATCH: " << golden_path.filename().string() << "\n";
-        std::cerr << "--- expected ---\n" << expected;
-        std::cerr << "--- got ---\n" << got;
-        return false;
-    }
-
-    return true;
+    run.out = captured_out.str();
+    run.err = captured_err.str();
+    return run;
 }
 
-static bool run_check_requires_divide_case(const fs::path& golden_path)
+CapturedRun run_cli_with_stdin(std::vector<std::string> argv_storage, const std::string& stdin_text)
 {
-    std::ostringstream captured_out;
-    std::ostringstream captured_err;
+    std::istringstream input(stdin_text);
+    std::streambuf* old_cin = std::cin.rdbuf(input.rdbuf());
+    std::cin.clear();
 
-    auto* old_cout = std::cout.rdbuf(captured_out.rdbuf());
-    auto* old_cerr = std::cerr.rdbuf(captured_err.rdbuf());
+    const auto run = run_cli(std::move(argv_storage));
 
-    const std::string rel_path = "tests/fixtures/check_requires_divide.curlee";
-
-    std::vector<std::string> argv_storage = {"curlee", "check", rel_path};
-    std::vector<char*> argv;
-    argv.reserve(argv_storage.size());
-    for (auto& s : argv_storage)
-    {
-        argv.push_back(s.data());
-    }
-
-    const int rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
-
-    std::cout.rdbuf(old_cout);
-    std::cerr.rdbuf(old_cerr);
-
-    const std::string got = captured_err.str();
-    const std::string expected = slurp(golden_path);
-
-    if (rc == 0)
-    {
-        std::cerr << "expected non-zero exit code for check-requires-divide\n";
-        return false;
-    }
-
-    if (got != expected)
-    {
-        std::cerr << "GOLDEN MISMATCH: " << golden_path.filename().string() << "\n";
-        std::cerr << "--- expected ---\n" << expected;
-        std::cerr << "--- got ---\n" << got;
-        return false;
-    }
-
-    return true;
+    std::cin.rdbuf(old_cin);
+    return run;
 }
 
-static bool run_check_refinement_implies_case(const fs::path& golden_path)
+bool check_exit_code(const std::string& case_name, int rc, bool expect_zero)
 {
     std::ostringstream captured_out;
     std::ostringstream captured_err;
@@ -807,41 +796,113 @@ static bool run_run_python_ffi_case(std::vector<std::string> argv_storage,
         std::cerr << "expected exit code 0 for " << case_name << "\n";
         return false;
     }
-
-    if (expected_exit_code != 0 && rc == 0)
+    if (!expect_zero && rc == 0)
     {
         std::cerr << "expected non-zero exit code for " << case_name << "\n";
         return false;
     }
-
-    if (got_err != expected_err)
-    {
-        std::cerr << "GOLDEN MISMATCH (stderr): " << err_golden_path.filename().string() << "\n";
-        std::cerr << "--- expected ---\n" << expected_err;
-        std::cerr << "--- got ---\n" << got_err;
-        return false;
-    }
-
-    if (got_out != expected_out)
-    {
-        std::cerr << "GOLDEN MISMATCH (stdout): " << out_golden_path.filename().string() << "\n";
-        std::cerr << "--- expected ---\n" << expected_out;
-        std::cerr << "--- got ---\n" << got_out;
-        return false;
-    }
-
     return true;
 }
 
+bool check_text_equal(const std::string& label,
+                     const fs::path& golden_path,
+                     const std::string& got,
+                     const std::string& expected)
+{
+    if (got == expected)
+    {
+        return true;
+    }
+
+    std::cerr << "GOLDEN MISMATCH (" << label << "): " << golden_path.filename().string() << "\n";
+    std::cerr << "--- expected ---\n" << expected;
+    std::cerr << "--- got ---\n" << got;
+    return false;
+}
+
+bool run_stderr_case(const std::string& case_name,
+                     std::vector<std::string> argv_storage,
+                     const fs::path& err_golden_path,
+                     bool expect_zero)
+{
+    const CapturedRun run = run_cli(std::move(argv_storage));
+    if (!check_exit_code(case_name, run.rc, expect_zero))
+    {
+        return false;
+    }
+
+    const std::string expected_err = slurp(err_golden_path);
+    return check_text_equal("stderr", err_golden_path, run.err, expected_err);
+}
+
+bool run_stdio_case(const std::string& case_name,
+                    std::vector<std::string> argv_storage,
+                    const fs::path& out_golden_path,
+                    const fs::path& err_golden_path,
+                    bool expect_zero)
+{
+    const CapturedRun run = run_cli(std::move(argv_storage));
+    if (!check_exit_code(case_name, run.rc, expect_zero))
+    {
+        return false;
+    }
+
+    const std::string expected_out = slurp(out_golden_path);
+    const std::string expected_err = slurp(err_golden_path);
+
+    if (!check_text_equal("stderr", err_golden_path, run.err, expected_err))
+    {
+        return false;
+    }
+    return check_text_equal("stdout", out_golden_path, run.out, expected_out);
+}
+
+bool run_stdio_case_with_stdin(const std::string& case_name,
+                               std::vector<std::string> argv_storage,
+                               std::string stdin_text,
+                               const fs::path& out_golden_path,
+                               const fs::path& err_golden_path,
+                               bool expect_zero)
+{
+    const CapturedRun run = run_cli_with_stdin(std::move(argv_storage), stdin_text);
+    if (!check_exit_code(case_name, run.rc, expect_zero))
+    {
+        return false;
+    }
+
+    const std::string expected_out = slurp(out_golden_path);
+    const std::string expected_err = slurp(err_golden_path);
+
+    if (!check_text_equal("stderr", err_golden_path, run.err, expected_err))
+    {
+        return false;
+    }
+    return check_text_equal("stdout", out_golden_path, run.out, expected_out);
+}
+
+bool run_stderr_case_with_stdin(const std::string& case_name,
+                                std::vector<std::string> argv_storage,
+                                std::string stdin_text,
+                                const fs::path& err_golden_path,
+                                bool expect_zero)
+{
+    const CapturedRun run = run_cli_with_stdin(std::move(argv_storage), stdin_text);
+    if (!check_exit_code(case_name, run.rc, expect_zero))
+    {
+        return false;
+    }
+
+    const std::string expected_err = slurp(err_golden_path);
+    return check_text_equal("stderr", err_golden_path, run.err, expected_err);
+}
+
+} // namespace
+
 int main(int argc, char** argv)
 {
-    if (argc != 8)
+    if (argc != 2)
     {
-        std::cerr
-            << "usage: curlee_cli_diagnostics_golden_tests <tests/cli_diagnostics-dir> "
-               "<fake-python-runner-error> <fake-python-runner-hang> <fake-python-runner-spam> "
-               "<fake-python-runner-env-check> <fake-python-runner-sandbox-required> "
-               "<fake-bwrap>\n";
+        std::cerr << "usage: curlee_cli_diagnostics_golden_tests <tests/cli_diagnostics-dir>\n";
         return 2;
     }
 
@@ -873,35 +934,8 @@ int main(int argc, char** argv)
     const fs::path check_python_ffi_requires_unsafe_golden =
         dir / "check_python_ffi_requires_unsafe.golden";
 
-    const fs::path run_python_ffi_sandbox_exec_failed_out_golden =
-        dir / "run_python_ffi_sandbox_exec_failed.stdout.golden";
-    const fs::path run_python_ffi_sandbox_exec_failed_err_golden =
-        dir / "run_python_ffi_sandbox_exec_failed.stderr.golden";
-    const fs::path check_struct_ok_golden = dir / "check_struct_ok.golden";
-    const fs::path run_python_ffi_missing_cap_out_golden =
-        dir / "run_python_ffi_missing_cap.stdout.golden";
-    const fs::path run_python_ffi_missing_cap_err_golden =
-        dir / "run_python_ffi_missing_cap.stderr.golden";
-    const fs::path run_python_ffi_not_implemented_out_golden =
-        dir / "run_python_ffi_not_implemented.stdout.golden";
-    const fs::path run_python_ffi_not_implemented_err_golden =
-        dir / "run_python_ffi_not_implemented.stderr.golden";
-    const fs::path run_python_ffi_runner_error_out_golden =
-        dir / "run_python_ffi_runner_error.stdout.golden";
-    const fs::path run_python_ffi_runner_error_err_golden =
-        dir / "run_python_ffi_runner_error.stderr.golden";
-    const fs::path run_python_ffi_runner_timeout_out_golden =
-        dir / "run_python_ffi_runner_timeout.stdout.golden";
-    const fs::path run_python_ffi_runner_timeout_err_golden =
-        dir / "run_python_ffi_runner_timeout.stderr.golden";
-    const fs::path run_python_ffi_runner_output_limit_out_golden =
-        dir / "run_python_ffi_runner_output_limit.stdout.golden";
-    const fs::path run_python_ffi_runner_output_limit_err_golden =
-        dir / "run_python_ffi_runner_output_limit.stderr.golden";
-    const fs::path run_python_ffi_runner_env_sanitized_out_golden =
-        dir / "run_python_ffi_runner_env_sanitized.stdout.golden";
-    const fs::path run_python_ffi_runner_env_sanitized_err_golden =
-        dir / "run_python_ffi_runner_env_sanitized.stderr.golden";
+    EnvVarGuard stdlib_root_guard("CURLEE_STDLIB_ROOT");
+    ::setenv("CURLEE_STDLIB_ROOT", stdlib_v1_root.string().c_str(), 1);
 
     const fs::path run_python_ffi_sandbox_required_out_golden =
         dir / "run_python_ffi_sandbox_required.stdout.golden";
@@ -923,38 +957,58 @@ int main(int argc, char** argv)
 
     try
     {
-        if (!run_missing_file_case(golden))
+        if (!run_stderr_case("missing-file",
+                             {"curlee", "lex", rel_missing_file.string()},
+                             dir / "missing_file.golden",
+                             false))
         {
             return 1;
         }
 
-        if (!run_check_requires_divide_case(check_requires_divide_golden))
+        if (!run_stderr_case("check-requires-divide",
+                             {"curlee", "check", rel_requires_divide.string()},
+                             dir / "check_requires_divide.golden",
+                             false))
         {
             return 1;
         }
 
-        if (!run_check_refinement_implies_case(check_refinement_implies_golden))
+        if (!run_stderr_case("check-refinement-implies",
+                             {"curlee", "check", rel_refinement_implies.string()},
+                             dir / "check_refinement_implies.golden",
+                             true))
         {
             return 1;
         }
 
-        if (!run_check_requires_if_path_sensitive_case(check_requires_if_path_sensitive_golden))
+        if (!run_stderr_case("check-requires-if-path-sensitive",
+                             {"curlee", "check", rel_if_path_sensitive.string()},
+                             dir / "check_requires_if_path_sensitive.golden",
+                             true))
         {
             return 1;
         }
 
-        if (!run_check_requires_while_condition_fact_case(
-                check_requires_while_condition_fact_golden))
+        if (!run_stderr_case("check-requires-while-condition-fact",
+                             {"curlee", "check", rel_while_condition_fact.string()},
+                             dir / "check_requires_while_condition_fact.golden",
+                             true))
         {
             return 1;
         }
 
-        if (!run_check_unknown_name_case(check_unknown_name_golden))
+        if (!run_stderr_case("check-unknown-name",
+                             {"curlee", "check", rel_unknown_name.string()},
+                             dir / "check_unknown_name.golden",
+                             false))
         {
             return 1;
         }
 
-        if (!run_check_type_error_case(check_type_error_golden))
+        if (!run_stderr_case("check-type-error",
+                             {"curlee", "check", rel_type_error.string()},
+                             dir / "check_type_error.golden",
+                             false))
         {
             return 1;
         }
@@ -969,197 +1023,139 @@ int main(int argc, char** argv)
             return 1;
         }
 
-        if (!run_check_python_ffi_requires_unsafe_case(check_python_ffi_requires_unsafe_golden))
+        if (!run_stderr_case("check-struct-ok",
+                             {"curlee", "check", rel_struct_ok.string()},
+                             dir / "check_struct_ok.golden",
+                             true))
         {
             return 1;
         }
 
-        if (!run_check_struct_ok_case(check_struct_ok_golden))
+        if (!run_stderr_case("run-requires-divide",
+                             {"curlee", "run", rel_requires_divide.string()},
+                             dir / "run_requires_divide.golden",
+                             false))
         {
             return 1;
         }
 
-        if (!run_run_requires_divide_case(run_requires_divide_golden))
+        if (!run_stderr_case("check-ensures-fail",
+                             {"curlee", "check", rel_ensures_fail.string()},
+                             dir / "check_ensures_fail.golden",
+                             false))
         {
             return 1;
         }
 
-        if (!run_check_ensures_fail_case(check_ensures_fail_golden))
+        if (!run_stderr_case("run-ensures-fail",
+                             {"curlee", "run", rel_ensures_fail.string()},
+                             dir / "run_ensures_fail.golden",
+                             false))
         {
             return 1;
         }
 
-        if (!run_run_ensures_fail_case(run_ensures_fail_golden))
+        if (!run_stderr_case("run-struct-not-runnable",
+                             {"curlee", "run", rel_struct_ok.string()},
+                             dir / "run_struct_not_runnable.golden",
+                             false))
         {
             return 1;
         }
 
-        if (!run_run_struct_not_runnable_case(run_struct_not_runnable_golden))
+        if (!run_stderr_case("run-missing-stdout-cap",
+                             {"curlee", "run", rel_run_missing_stdout_cap.string()},
+                             dir / "run_missing_stdout_cap.golden",
+                             false))
         {
             return 1;
         }
 
-        if (!run_run_success_case(run_success_out_golden, run_success_err_golden))
+        if (!run_stderr_case("run-missing-tty-cap",
+                             {"curlee", "run", rel_run_missing_tty_cap.string()},
+                             dir / "run_missing_tty_cap.golden",
+                             false))
         {
             return 1;
         }
 
-        if (!run_run_success_with_cap_case(run_success_out_golden, run_success_err_golden))
+        if (!run_stderr_case("run-missing-stdin-cap-json",
+                             {"curlee", "run", "--diag-format", "json",
+                              rel_run_read_line.string()},
+                             dir / "run_missing_stdin_cap.json.golden",
+                             false))
         {
             return 1;
         }
 
+        if (!run_stdio_case("run-tty-order",
+                            {"curlee", "run", "--cap", "io.tty", rel_run_tty_order.string()},
+                            dir / "run_tty_order.stdout.golden",
+                            dir / "run_tty_order.stderr.golden",
+                            true))
         {
-            const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
-            const std::vector<std::string> argv_storage = {"curlee", "run", rel_path};
-            if (!run_run_python_ffi_case(argv_storage, run_python_ffi_missing_cap_out_golden,
-                                         run_python_ffi_missing_cap_err_golden,
-                                         "run-python-ffi-missing-cap", 1))
-            {
-                return 1;
-            }
+            return 1;
         }
 
+        if (!run_stdio_case("run-with-stdout-cap",
+                            {"curlee", "run", "--cap", "io.stdout",
+                             rel_run_missing_stdout_cap.string()},
+                            dir / "run_with_stdout_cap.stdout.golden",
+                            dir / "run_with_stdout_cap.stderr.golden",
+                            true))
         {
-            const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
-            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python.ffi",
-                                                           rel_path};
-            if (!run_run_python_ffi_case(argv_storage, run_python_ffi_not_implemented_out_golden,
-                                         run_python_ffi_not_implemented_err_golden,
-                                         "run-python-ffi-not-implemented", 0))
-            {
-                return 1;
-            }
+            return 1;
         }
 
-        // Runner failure surfaced deterministically.
+        if (!run_stdio_case("run-success",
+                            {"curlee", "run", rel_run_success.string()},
+                            dir / "run_success.stdout.golden",
+                            dir / "run_success.stderr.golden",
+                            true))
         {
-            (void)setenv("CURLEE_PYTHON_RUNNER", fake_runner_error.c_str(), 1);
-
-            const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
-            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python.ffi",
-                                                           rel_path};
-            if (!run_run_python_ffi_case(argv_storage, run_python_ffi_runner_error_out_golden,
-                                         run_python_ffi_runner_error_err_golden,
-                                         "run-python-ffi-runner-error", 1))
-            {
-                return 1;
-            }
-
-            (void)unsetenv("CURLEE_PYTHON_RUNNER");
+            return 1;
         }
 
-        // Runner timeout surfaced deterministically.
+        if (!run_stdio_case("run-success-with-cap",
+                            {"curlee", "run", "--cap", "python.ffi", rel_run_success.string()},
+                            dir / "run_success.stdout.golden",
+                            dir / "run_success.stderr.golden",
+                            true))
         {
-            (void)setenv("CURLEE_PYTHON_RUNNER", fake_runner_hang.c_str(), 1);
-
-            const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
-            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python.ffi",
-                                                           rel_path};
-            if (!run_run_python_ffi_case(argv_storage, run_python_ffi_runner_timeout_out_golden,
-                                         run_python_ffi_runner_timeout_err_golden,
-                                         "run-python-ffi-runner-timeout", 1))
-            {
-                return 1;
-            }
-
-            (void)unsetenv("CURLEE_PYTHON_RUNNER");
+            return 1;
         }
 
-        // Runner output limit surfaced deterministically.
+        if (!run_stdio_case_with_stdin("run-read-line-success",
+                                       {"curlee", "run", "--cap", "io.stdin",
+                                        rel_run_read_line.string()},
+                                       "hello from stdin\n",
+                                       dir / "run_read_line.stdout.golden",
+                                       dir / "run_read_line.stderr.golden",
+                                       true))
         {
-            (void)setenv("CURLEE_PYTHON_RUNNER", fake_runner_spam.c_str(), 1);
-
-            const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
-            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python.ffi",
-                                                           rel_path};
-            if (!run_run_python_ffi_case(argv_storage,
-                                         run_python_ffi_runner_output_limit_out_golden,
-                                         run_python_ffi_runner_output_limit_err_golden,
-                                         "run-python-ffi-runner-output-limit", 1))
-            {
-                return 1;
-            }
-
-            (void)unsetenv("CURLEE_PYTHON_RUNNER");
+            return 1;
         }
 
-        // Runner environment is scrubbed/deterministic.
+        if (!run_stdio_case_with_stdin("run-read-line-eof",
+                                       {"curlee", "run", "--cap", "io.stdin",
+                                        rel_run_read_line.string()},
+                                       "",
+                                       dir / "run_read_line_eof.stdout.golden",
+                                       dir / "run_read_line_eof.stderr.golden",
+                                       true))
         {
-            (void)setenv("FOO", "bar", 1);
-            (void)setenv("CURLEE_PYTHON_RUNNER", fake_runner_env_check.c_str(), 1);
-
-            const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
-            const std::vector<std::string> argv_storage = {"curlee", "run", "--cap", "python.ffi",
-                                                           rel_path};
-            if (!run_run_python_ffi_case(argv_storage,
-                                         run_python_ffi_runner_env_sanitized_out_golden,
-                                         run_python_ffi_runner_env_sanitized_err_golden,
-                                         "run-python-ffi-runner-env-sanitized", 0))
-            {
-                return 1;
-            }
-
-            (void)unsetenv("CURLEE_PYTHON_RUNNER");
-            (void)unsetenv("FOO");
+            return 1;
         }
 
-        // Sandbox requested via capability: VM should run python runner under bwrap.
-        // We use a fake runner that refuses to run unless it sees CURLEE_PYTHON_SANDBOX=1.
-        // The fake bwrap sets that env var before exec'ing the runner.
+        if (!run_stderr_case_with_stdin("run-read-line-over-limit-json",
+                                        {"curlee", "run", "--cap", "io.stdin",
+                                         "--diag-format", "json",
+                                         rel_run_read_line_over_limit.string()},
+                                        std::string(4097, 'a') + "\n",
+                                        dir / "run_read_line_over_limit.json.golden",
+                                        false))
         {
-            (void)setenv("CURLEE_PYTHON_RUNNER", fake_runner_sandbox_required.c_str(), 1);
-            (void)setenv("CURLEE_BWRAP", fake_bwrap.c_str(), 1);
-
-            const std::string rel_path = "tests/fixtures/run_python_ffi.curlee";
-
-            // Without the sandbox capability, this should fail.
-            {
-                const std::vector<std::string> argv_storage = {"curlee", "run", "--cap",
-                                                               "python.ffi", rel_path};
-                if (!run_run_python_ffi_case(argv_storage,
-                                             run_python_ffi_sandbox_required_out_golden,
-                                             run_python_ffi_sandbox_required_err_golden,
-                                             "run-python-ffi-sandbox-required", 1))
-                {
-                    return 1;
-                }
-            }
-
-            // With the sandbox capability, the fake bwrap wrapper makes the runner succeed.
-            {
-                const std::vector<std::string> argv_storage = {
-                    "curlee", "run", "--cap", "python.ffi", "--cap", "python.sandbox", rel_path};
-                if (!run_run_python_ffi_case(argv_storage, run_python_ffi_sandboxed_out_golden,
-                                             run_python_ffi_sandboxed_err_golden,
-                                             "run-python-ffi-sandboxed", 0))
-                {
-                    return 1;
-                }
-            }
-
-            // If sandboxing is requested but the sandbox wrapper cannot be executed,
-            // Curlee must fail deterministically (no fallback to unsandboxed execution).
-            {
-                const std::string missing_bwrap =
-                    "/this/path/should/not/exist/curlee_bwrap_missing";
-                (void)setenv("CURLEE_BWRAP", missing_bwrap.c_str(), 1);
-
-                const std::vector<std::string> argv_storage = {
-                    "curlee", "run", "--cap", "python.ffi", "--cap", "python.sandbox", rel_path};
-                if (!run_run_python_ffi_case(argv_storage,
-                                             run_python_ffi_sandbox_exec_failed_out_golden,
-                                             run_python_ffi_sandbox_exec_failed_err_golden,
-                                             "run-python-ffi-sandbox-exec-failed", 1))
-                {
-                    return 1;
-                }
-
-                (void)setenv("CURLEE_BWRAP", fake_bwrap.c_str(), 1);
-            }
-
-            (void)unsetenv("CURLEE_PYTHON_RUNNER");
-            (void)unsetenv("CURLEE_BWRAP");
+            return 1;
         }
 
         // Graphics backend init failure surfaces deterministic runtime diagnostic.

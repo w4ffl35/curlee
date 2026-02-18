@@ -1,0 +1,5 @@
+import sub.m;
+
+fn main() -> Int {
+  return 0;
+}

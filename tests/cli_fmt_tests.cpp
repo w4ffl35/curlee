@@ -64,7 +64,8 @@ int main()
     const fs::path missing_path = temp_dir / "format_missing.cpp";
 
     const std::string unformatted = "int   main(){return 0;}\n";
-    const std::string formatted = "int main()\n{\n    return 0;\n}\n";
+    const std::string formatted =
+        read_file(find_repo_relative(fs::path("tests") / "cli_fmt" / "formatted.expected"));
 
     write_file(file_path, unformatted);
 
@@ -88,6 +89,29 @@ int main()
     if (got != formatted)
     {
         fail("formatted output did not match expected style");
+    }
+
+    // Formatting should be stable: formatting already-formatted code should be a no-op.
+    {
+        std::vector<std::string> argv_storage = {"curlee", "fmt", file_path.string()};
+        std::vector<char*> argv;
+        argv.reserve(argv_storage.size());
+        for (auto& s : argv_storage)
+        {
+            argv.push_back(s.data());
+        }
+
+        const int rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
+        if (rc != 0)
+        {
+            fail("expected fmt to succeed for already-formatted file");
+        }
+    }
+
+    const auto got_stable = read_file(file_path);
+    if (got_stable != formatted)
+    {
+        fail("expected fmt to be idempotent for already-formatted file");
     }
 
     // Paths containing quotes must be escaped correctly.
@@ -156,6 +180,38 @@ int main()
         if (rc == 0)
         {
             fail("expected fmt --check to fail on unformatted file");
+        }
+    }
+
+    {
+        std::vector<std::string> argv_storage = {"curlee", "fmt", file_path.string()};
+        std::vector<char*> argv;
+        argv.reserve(argv_storage.size());
+        for (auto& s : argv_storage)
+        {
+            argv.push_back(s.data());
+        }
+
+        const int rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
+        if (rc != 0)
+        {
+            fail("expected fmt to succeed before fmt --check pass case");
+        }
+    }
+
+    {
+        std::vector<std::string> argv_storage = {"curlee", "fmt", "--check", file_path.string()};
+        std::vector<char*> argv;
+        argv.reserve(argv_storage.size());
+        for (auto& s : argv_storage)
+        {
+            argv.push_back(s.data());
+        }
+
+        const int rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
+        if (rc != 0)
+        {
+            fail("expected fmt --check to pass on formatted file");
         }
     }
 

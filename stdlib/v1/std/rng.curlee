@@ -1,0 +1,3 @@
+fn next_int(max_exclusive: Int, rng: cap rng.seeded) -> Int {
+  return __rng_next_int(max_exclusive, rng);
+}

@@ -1,0 +1,8 @@
+fn read_text(path: String, r: cap fs.read) -> String {
+  return __fs_read_text(path, r);
+}
+
+fn write_text(path: String, content: String, w: cap fs.write) -> Unit {
+  __fs_write_text(path, content, w);
+  return;
+}

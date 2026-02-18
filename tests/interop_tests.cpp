@@ -39,9 +39,9 @@ int main()
             fail("expected stub to return error until implemented");
         }
         const auto& err = std::get<PythonFfiError>(res);
-        if (err.message != "python interop not implemented")
+        if (err.message != "python interop is unavailable in Curlee v1")
         {
-            fail("expected not implemented error when capability present");
+            fail("expected v1 unavailable error when capability present");
         }
     }
 

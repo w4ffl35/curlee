@@ -1,6 +1,7 @@
 #include <cassert>
 #include <curlee/lexer/lexer.h>
 #include <curlee/parser/parser.h>
+#include <curlee/resolver/module_loader.h>
 #include <curlee/resolver/resolver.h>
 #include <curlee/source/source_file.h>
 #include <filesystem>
@@ -90,8 +91,10 @@ class Resolver
 {
   public:
     Resolver(std::optional<std::filesystem::path> base_path,
-             std::optional<std::filesystem::path> entry_dir)
-        : base_path_(std::move(base_path)), entry_dir_(std::move(entry_dir))
+             std::optional<std::filesystem::path> entry_dir,
+             std::vector<std::filesystem::path> stdlib_roots = {})
+        : base_path_(std::move(base_path)), entry_dir_(std::move(entry_dir)),
+          stdlib_roots_(std::move(stdlib_roots))
     {
     }
 
@@ -126,7 +129,7 @@ class Resolver
     std::vector<Diagnostic> diagnostics_;
     std::optional<std::filesystem::path> base_path_;
     std::optional<std::filesystem::path> entry_dir_;
-    int unsafe_depth_ = 0;
+    std::vector<std::filesystem::path> stdlib_roots_;
     bool resolving_ensures_ = false;
 
     struct ModuleInfo
@@ -142,31 +145,27 @@ class Resolver
     // alias name (e.g. "baz") -> module path key in modules_by_path_
     std::unordered_map<std::string_view, std::string> module_aliases_;
 
-    static bool is_python_ffi_call(const Expr& callee)
+    static constexpr std::string_view kPythonFfiUnsupportedMessage =
+        "python_ffi is not part of the Curlee v1 surface (see Python-Interop-(Future))";
+
+    static bool is_builtin_call_name(std::string_view name)
     {
-        const auto* member = std::get_if<MemberExpr>(&callee.node);
-        if (member == nullptr)
-        {
-            return false;
-        }
-        if (member->base == nullptr) // GCOVR_EXCL_LINE
-        {
-            return false; // GCOVR_EXCL_LINE
-        }
-
-        const auto* base_name = std::get_if<NameExpr>(&member->base->node);
-        if (base_name == nullptr)
-        {
-            return false;
-        }
-
-        return base_name->name == "python_ffi" && member->member == "call";
+         return name == "print" || name == "__read_line" || name == "__tty_clear" ||
+             name == "__fs_read_text" || name == "__fs_write_text" ||
+             name == "__tty_write_at" || name == "__tty_flush" ||
+             name == "__rng_next_int" || name == "__vec_new_int" ||
+             name == "__vec_len_int" || name == "__vec_push_int" ||
+             name == "__vec_get_int" || name == "__vec_set_int" ||
+             name == "variant_is" ||
+             name == "variant_unwrap";
     }
 
     void resolve_imports(const curlee::parser::Program& program)
     {
         for (const auto& imp : program.imports)
         {
+            const std::string import_name = join_path(imp.path);
+
             if (!base_path_.has_value())
             {
                 Diagnostic d;
@@ -177,48 +176,19 @@ class Resolver
                 continue;
             }
 
-            const std::string import_name = join_path(imp.path);
-
-            std::vector<std::filesystem::path> roots;
-            roots.push_back(*base_path_);
-            if (entry_dir_.has_value() && *entry_dir_ != *base_path_)
+            ModuleSearchOptions opts;
+            opts.importing_file_dir = *base_path_;
+            if (entry_dir_.has_value())
             {
-                roots.push_back(*entry_dir_);
+                opts.entry_dir = *entry_dir_;
             }
+            opts.stdlib_roots = stdlib_roots_;
+            opts.debug_trace = std::getenv("CURLEE_DEBUG_IMPORTS") != nullptr;
 
-            bool found = false;
-            std::filesystem::path first_expected = *base_path_;
-            for (const auto& part : imp.path)
-            {
-                first_expected /= std::string(part);
-            }
-            first_expected += ".curlee";
-
-            curlee::source::SourceFile loaded_file;
-
-            for (const auto& root : roots)
-            {
-                std::filesystem::path module_path = root;
-                for (const auto& part : imp.path)
-                {
-                    module_path /= std::string(part);
-                }
-                module_path += ".curlee";
-
-                const auto loaded = source::load_source_file(module_path.string());
-                if (std::holds_alternative<source::SourceFile>(loaded))
-                {
-                    found = true;
-                    loaded_file = std::get<source::SourceFile>(loaded);
-                    break;
-                }
-            }
-
+            auto found = resolve_module_path(imp.path, opts);
             if (!found)
             {
-                Diagnostic d;
-                d.severity = Severity::Error;
-                d.message = "import not found: '" + import_name + "'";
+                Diagnostic d = std::move(found.error());
                 d.span = imp.span;
                 d.notes.push_back(Related{.message = "expected module at " +
                                                      first_expected.string(), // GCOVR_EXCL_LINE
@@ -226,6 +196,21 @@ class Resolver
                 diagnostics_.push_back(std::move(d));
                 continue;
             }
+
+            const auto& mod_path = found->path;
+            const auto loaded = source::load_source_file(mod_path.string());
+            if (std::holds_alternative<source::LoadError>(loaded))
+            {
+                Diagnostic d;
+                d.severity = Severity::Error;
+                d.message = "failed to load imported module: " +
+                            std::get<source::LoadError>(loaded).message;
+                d.span = imp.span;
+                diagnostics_.push_back(d);
+                continue;
+            }
+
+            source::SourceFile loaded_file = std::get<source::SourceFile>(loaded);
 
             // Record the module and parse its exports.
             imported_files_.push_back(std::move(loaded_file));
@@ -419,14 +404,12 @@ class Resolver
 
     void resolve_stmt_node(const UnsafeStmt& s, Span)
     {
-        ++unsafe_depth_;
         push_scope();
         for (const auto& stmt : s.body->stmts)
         {
             resolve_stmt(stmt);
         }
         pop_scope();
-        --unsafe_depth_;
     }
 
     void resolve_stmt_node(const IfStmt& s, Span)
@@ -507,16 +490,20 @@ class Resolver
 
     void resolve_expr_node(const CallExpr& e, Span)
     {
-        if (is_python_ffi_call(*e.callee) && unsafe_depth_ == 0)
+        bool resolve_callee = true;
+        if (const auto* callee_name = std::get_if<NameExpr>(&e.callee->node); callee_name != nullptr)
         {
-            Diagnostic d;
-            d.severity = Severity::Error;
-            d.message = "python_ffi.call requires an unsafe context";
-            d.span = e.callee->span;
-            diagnostics_.push_back(std::move(d));
+            if (is_builtin_call_name(callee_name->name))
+            {
+                resolve_callee = false;
+            }
         }
 
-        resolve_expr(*e.callee);
+        if (resolve_callee)
+        {
+            resolve_expr(*e.callee);
+        }
+
         for (const auto& a : e.args)
         {
             resolve_expr(a);
@@ -533,7 +520,11 @@ class Resolver
         if (const auto* base_name = std::get_if<NameExpr>(&e.base->node);
             base_name != nullptr && base_name->name == "python_ffi")
         {
-            // Builtin module name used for interop. Do not require declaration.
+            Diagnostic d;
+            d.severity = Severity::Error;
+            d.message = std::string(kPythonFfiUnsupportedMessage);
+            d.span = span;
+            diagnostics_.push_back(std::move(d));
             return;
         }
 
@@ -655,14 +646,15 @@ ResolveResult resolve(const curlee::parser::Program& program,
 
 ResolveResult resolve(const curlee::parser::Program& program,
                       const curlee::source::SourceFile& source,
-                      std::optional<std::filesystem::path> entry_dir)
+                      std::optional<std::filesystem::path> entry_dir,
+                      std::vector<std::filesystem::path> stdlib_roots)
 {
     std::optional<std::filesystem::path> base;
     if (!source.path.empty())
     {
         base = std::filesystem::path(source.path).parent_path();
     }
-    Resolver r(std::move(base), std::move(entry_dir));
+    Resolver r(std::move(base), std::move(entry_dir), std::move(stdlib_roots));
     return r.run(program);
 }
 
