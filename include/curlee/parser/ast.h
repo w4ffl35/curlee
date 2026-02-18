@@ -25,6 +25,7 @@ struct TypeName
     curlee::source::Span span;
     bool is_capability = false;
     std::string_view name;
+    std::optional<std::string_view> type_arg;
 };
 
 /** Forward declaration for predicate nodes. */

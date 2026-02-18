@@ -6,6 +6,7 @@
 #include <curlee/vm/vm.h>
 #include <fcntl.h>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <poll.h>
@@ -29,6 +30,48 @@ struct ProcResult
 
 constexpr int kPythonRunnerTimeoutMs = 500;
 constexpr std::size_t kPythonRunnerMaxOutputBytes = 1 * 1024 * 1024;
+constexpr std::size_t kMaxStdinLineBytes = 4096;
+constexpr std::size_t kMaxFsPathBytes = 512;
+constexpr std::size_t kMaxFsTextBytes = 1 * 1024 * 1024;
+constexpr std::size_t kMaxVecCapacity = 65536;
+
+struct StdinReadResult
+{
+    bool ok = false;
+    bool too_long = false;
+    std::string line;
+};
+
+[[nodiscard]] StdinReadResult read_stdin_line_bounded(std::size_t max_bytes)
+{
+    StdinReadResult out;
+    out.ok = true;
+
+    while (true)
+    {
+        const int c = std::cin.get();
+        if (c == std::char_traits<char>::eof())
+        {
+            break;
+        }
+
+        if (c == '\n')
+        {
+            break;
+        }
+
+        if (out.line.size() >= max_bytes)
+        {
+            out.ok = false;
+            out.too_long = true;
+            return out;
+        }
+
+        out.line.push_back(static_cast<char>(c));
+    }
+
+    return out;
+} // GCOVR_EXCL_LINE
 
 ProcResult run_process_argv(const std::vector<const char*>& argv, const std::string& exe_path,
                             const std::string& stdin_data, int timeout_ms,
@@ -405,6 +448,171 @@ std::optional<std::string> extract_error_message(std::string_view json)
     return std::nullopt;
 }
 
+std::string tty_write_trace(long long row, long long col, std::string_view text)
+{
+    return "[tty.write_at row=" + std::to_string(row) + " col=" + std::to_string(col) +
+           " text=\"" + std::string(text) + "\"]\n";
+}
+
+[[nodiscard]] bool is_fs_access_denied(int err)
+{
+    return err == EACCES || err == EPERM; // GCOVR_EXCL_LINE
+}
+
+[[nodiscard]] std::optional<std::string> normalize_fs_path(std::string_view raw)
+{
+    if (raw.empty())
+    {
+        return std::nullopt;
+    }
+
+    if (raw.size() > kMaxFsPathBytes)
+    {
+        return std::nullopt;
+    }
+
+    if (raw.find('\0') != std::string_view::npos)
+    {
+        return std::nullopt;
+    }
+
+    const std::filesystem::path path(raw);
+    if (path.is_absolute())
+    {
+        return std::nullopt;
+    }
+
+    for (const auto& part : path)
+    {
+        const auto component = part.string();
+        if (component == "..")
+        {
+            return std::nullopt;
+        }
+    }
+
+    const std::string normalized = path.lexically_normal().generic_string();
+    if (normalized.empty() || normalized == ".") // GCOVR_EXCL_LINE
+    {
+        return std::nullopt;
+    }
+    if (!normalized.empty() && normalized.front() == '/') // GCOVR_EXCL_LINE
+    {
+        return std::nullopt; // GCOVR_EXCL_LINE
+    }
+
+    return normalized;
+}
+
+[[nodiscard]] std::variant<std::string, std::string_view> read_text_file_bounded(std::string_view path,
+                                                                                  std::size_t max_bytes)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+
+    const fs::path file_path(path);
+    const bool exists = fs::exists(file_path, ec);
+    if (ec) // GCOVR_EXCL_LINE
+    {
+        if (ec == std::errc::permission_denied) // GCOVR_EXCL_LINE
+        {
+            return std::string_view{"fs access denied"}; // GCOVR_EXCL_LINE
+        }
+        return std::string_view{"fs read failed"}; // GCOVR_EXCL_LINE
+    }
+
+    if (!exists)
+    {
+        return std::string_view{"fs file not found"};
+    }
+
+    if (!fs::is_regular_file(file_path, ec)) // GCOVR_EXCL_LINE
+    {
+        if (ec == std::errc::permission_denied) // GCOVR_EXCL_LINE
+        {
+            return std::string_view{"fs access denied"}; // GCOVR_EXCL_LINE
+        }
+        return std::string_view{"fs read failed"};
+    }
+
+    const auto file_size = fs::file_size(file_path, ec);
+    if (ec) // GCOVR_EXCL_LINE
+    {
+        if (ec == std::errc::permission_denied) // GCOVR_EXCL_LINE
+        {
+            return std::string_view{"fs access denied"}; // GCOVR_EXCL_LINE
+        }
+        return std::string_view{"fs read failed"}; // GCOVR_EXCL_LINE
+    }
+
+    if (file_size > max_bytes)
+    {
+        return std::string_view{"fs file too large"};
+    }
+
+    errno = 0;
+    std::ifstream in(file_path, std::ios::binary);
+    if (!in.is_open()) // GCOVR_EXCL_LINE
+    {
+        if (is_fs_access_denied(errno)) // GCOVR_EXCL_LINE
+        {
+            return std::string_view{"fs access denied"};
+        }
+        return std::string_view{"fs read failed"}; // GCOVR_EXCL_LINE
+    }
+
+    std::string out;
+    out.resize(static_cast<std::size_t>(file_size));
+    if (file_size > 0) // GCOVR_EXCL_LINE
+    {
+        in.read(out.data(), static_cast<std::streamsize>(file_size));
+        if (!in.good() && !in.eof()) // GCOVR_EXCL_LINE
+        {
+            return std::string_view{"fs read failed"}; // GCOVR_EXCL_LINE
+        }
+    }
+    return out;
+}
+
+[[nodiscard]] std::optional<std::string_view> write_text_file_bounded(std::string_view path,
+                                                                       std::string_view content,
+                                                                       std::size_t max_bytes)
+{
+    if (content.size() > max_bytes)
+    {
+        return std::string_view{"fs content too large"};
+    }
+
+    const std::filesystem::path file_path(path);
+    errno = 0;
+    std::ofstream out(file_path, std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) // GCOVR_EXCL_LINE
+    {
+        if (is_fs_access_denied(errno)) // GCOVR_EXCL_LINE
+        {
+            return std::string_view{"fs access denied"};
+        }
+        return std::string_view{"fs write failed"}; // GCOVR_EXCL_LINE
+    }
+
+    out.write(content.data(), static_cast<std::streamsize>(content.size()));
+    if (!out.good()) // GCOVR_EXCL_LINE
+    {
+        return std::string_view{"fs write failed"}; // GCOVR_EXCL_LINE
+    }
+
+    return std::nullopt;
+}
+
+std::uint64_t next_rng_word(std::uint64_t& state)
+{
+    state += 0x9e3779b97f4a7c15ULL;
+    std::uint64_t z = state;
+    z = (z ^ (z >> 30U)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27U)) * 0x94d049bb133111ebULL;
+    return z ^ (z >> 31U);
+}
+
 const curlee::vm::VM::Capabilities kEmptyCaps;
 
 const curlee::vm::VM::Capabilities& empty_caps()
@@ -462,23 +670,30 @@ std::optional<Value> VM::pop()
 
 VmResult VM::run(const Chunk& chunk)
 {
-    return run(chunk, std::numeric_limits<std::size_t>::max(), empty_caps());
+    return run(chunk, std::numeric_limits<std::size_t>::max(), empty_caps(), std::nullopt);
 }
 
 VmResult VM::run(const Chunk& chunk, std::size_t fuel)
 {
-    return run(chunk, fuel, empty_caps());
+    return run(chunk, fuel, empty_caps(), std::nullopt);
 }
 
 VmResult VM::run(const Chunk& chunk, const Capabilities& capabilities)
 {
-    return run(chunk, std::numeric_limits<std::size_t>::max(), capabilities);
+    return run(chunk, std::numeric_limits<std::size_t>::max(), capabilities, std::nullopt);
 }
 
 VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capabilities)
 {
+    return run(chunk, fuel, capabilities, std::nullopt);
+}
+
+VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capabilities,
+                 std::optional<std::uint64_t> rng_seed)
+{
     const std::size_t fuel_limit = fuel;
     std::size_t steps = 0;
+    std::optional<std::uint64_t> rng_state = rng_seed;
 
     auto finalize_result = [&](VmResult result) -> VmResult
     {
@@ -486,10 +701,12 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
         result.profile.fuel_limit = fuel_limit;
         result.profile.fuel_remaining = fuel;
         result.profile.fuel_used = fuel_limit - fuel;
+        result.profile.rng_seed = rng_seed;
         return result;
     };
 
     stack_.clear();
+    std::vector<std::string> tty_pending_output;
     std::vector<Value> locals(chunk.max_locals, Value::unit_v());
     std::vector<std::size_t> call_stack;
 
@@ -875,6 +1092,383 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
                 return finalize_result(err_result("stack underflow", span));
             }
             // MVP: stub effect. No ambient IO; host can later wire an output sink.
+            push(Value::unit_v());
+            break;
+        }
+        case OpCode::ReadLine:
+        {
+            if (!capabilities.contains("io.stdin"))
+            {
+                return finalize_result(err_result("missing capability io.stdin", span));
+            }
+
+            auto cap_value = pop();
+            if (!cap_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+
+            const auto line = read_stdin_line_bounded(kMaxStdinLineBytes);
+            if (!line.ok)
+            {
+                return finalize_result(err_result("stdin line too long", span));
+            }
+
+            push(Value::string_v(line.line));
+            break;
+        }
+        case OpCode::FsReadText:
+        {
+            if (!capabilities.contains("fs.read"))
+            {
+                return finalize_result(err_result("missing capability fs.read", span));
+            }
+
+            auto cap_value = pop();
+            auto path_value = pop();
+            if (!cap_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (!path_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+
+            if (path_value->kind != ValueKind::String)
+            {
+                return finalize_result(err_result("fs path must be String", span));
+            }
+
+            const auto path = normalize_fs_path(path_value->string_value);
+            if (!path.has_value())
+            {
+                return finalize_result(err_result("invalid fs path", span));
+            }
+
+            auto read_result = read_text_file_bounded(*path, kMaxFsTextBytes);
+            if (const auto* err = std::get_if<std::string_view>(&read_result))
+            {
+                return finalize_result(err_result(*err, span));
+            }
+
+            push(Value::string_v(std::get<std::string>(std::move(read_result))));
+            break;
+        }
+        case OpCode::FsWriteText:
+        {
+            if (!capabilities.contains("fs.write"))
+            {
+                return finalize_result(err_result("missing capability fs.write", span));
+            }
+
+            auto cap_value = pop();
+            auto content_value = pop();
+            auto path_value = pop();
+            if (!cap_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (!content_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (!path_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+
+            if (path_value->kind != ValueKind::String)
+            {
+                return finalize_result(err_result("fs path must be String", span));
+            }
+            if (content_value->kind != ValueKind::String)
+            {
+                return finalize_result(err_result("fs content must be String", span));
+            }
+
+            const auto path = normalize_fs_path(path_value->string_value);
+            if (!path.has_value())
+            {
+                return finalize_result(err_result("invalid fs path", span));
+            }
+
+            const auto write_error =
+                write_text_file_bounded(*path, content_value->string_value, kMaxFsTextBytes);
+            if (write_error.has_value())
+            {
+                return finalize_result(err_result(*write_error, span));
+            }
+
+            push(Value::unit_v());
+            break;
+        }
+        case OpCode::TtyClear:
+        {
+            if (!capabilities.contains("io.tty"))
+            {
+                return finalize_result(err_result("missing capability io.tty", span));
+            }
+
+            auto tty_value = pop();
+            if (!tty_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+
+            tty_pending_output.push_back("[tty.clear]\n");
+            push(Value::unit_v());
+            break;
+        }
+        case OpCode::TtyWriteAt:
+        {
+            if (!capabilities.contains("io.tty"))
+            {
+                return finalize_result(err_result("missing capability io.tty", span));
+            }
+
+            auto tty_value = pop();
+            auto text_value = pop();
+            auto col_value = pop();
+            auto row_value = pop();
+            if (!tty_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (!text_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (!col_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (!row_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+
+            if (row_value->kind != ValueKind::Int)
+            {
+                return finalize_result(err_result("tty coordinates must be Int", span));
+            }
+            if (col_value->kind != ValueKind::Int)
+            {
+                return finalize_result(err_result("tty coordinates must be Int", span));
+            }
+            if (text_value->kind != ValueKind::String)
+            {
+                return finalize_result(err_result("tty text must be String", span));
+            }
+
+            const long long row = row_value->int_value;
+            const long long col = col_value->int_value;
+            if (row < 0)
+            {
+                return finalize_result(err_result("tty coordinates must be >= 0", span));
+            }
+            if (col < 0)
+            {
+                return finalize_result(err_result("tty coordinates must be >= 0", span));
+            }
+            if (row > 999)
+            {
+                return finalize_result(err_result("tty coordinates out of bounds (max 999)", span));
+            }
+            if (col > 999)
+            {
+                return finalize_result(err_result("tty coordinates out of bounds (max 999)", span));
+            }
+
+            tty_pending_output.push_back(tty_write_trace(row, col, text_value->string_value));
+            push(Value::unit_v());
+            break;
+        }
+        case OpCode::TtyFlush:
+        {
+            if (!capabilities.contains("io.tty"))
+            {
+                return finalize_result(err_result("missing capability io.tty", span));
+            }
+
+            auto tty_value = pop();
+            if (!tty_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+
+            for (const auto& segment : tty_pending_output)
+            {
+                std::cout << segment;
+            }
+            std::cout.flush();
+            tty_pending_output.clear();
+            push(Value::unit_v());
+            break;
+        }
+        case OpCode::RngNextInt:
+        {
+            if (!capabilities.contains("rng.seeded"))
+            {
+                return finalize_result(err_result("missing capability rng.seeded", span));
+            }
+
+            auto rng_cap_value = pop();
+            auto max_exclusive_value = pop();
+            if (!rng_cap_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            (void)rng_cap_value;
+            if (!max_exclusive_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+
+            if (max_exclusive_value->kind != ValueKind::Int)
+            {
+                return finalize_result(err_result("rng max_exclusive must be Int", span));
+            }
+
+            const long long max_exclusive = max_exclusive_value->int_value;
+            if (max_exclusive <= 0)
+            {
+                return finalize_result(err_result("rng max_exclusive must be > 0", span));
+            }
+
+            if (!rng_state.has_value())
+            {
+                return finalize_result(err_result("missing RNG seed; pass --seed <n>", span));
+            }
+
+            const std::uint64_t word = next_rng_word(*rng_state);
+            const auto bound = static_cast<std::uint64_t>(max_exclusive);
+            const long long sampled = static_cast<long long>(word % bound);
+            push(Value::int_v(sampled));
+            break;
+        }
+        case OpCode::VecNew:
+        {
+            auto max_len_value = pop();
+            if (!max_len_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (max_len_value->kind != ValueKind::Int)
+            {
+                return finalize_result(err_result("vec max_len must be Int", span));
+            }
+
+            const auto max_len = max_len_value->int_value;
+            if (max_len < 0)
+            {
+                return finalize_result(err_result("vec max_len must be >= 0", span));
+            }
+            if (static_cast<std::size_t>(max_len) > kMaxVecCapacity)
+            {
+                return finalize_result(err_result("vec max_len too large", span));
+            }
+
+            push(Value::vec_v(static_cast<std::size_t>(max_len)));
+            break;
+        }
+        case OpCode::VecLen:
+        {
+            auto vec_value = pop();
+            if (!vec_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (vec_value->kind != ValueKind::Vec || vec_value->vec_value == nullptr)
+            {
+                return finalize_result(err_result("vec value must be Vec", span));
+            }
+
+            push(Value::int_v(static_cast<long long>(vec_value->vec_value->items.size())));
+            break;
+        }
+        case OpCode::VecPush:
+        {
+            auto value = pop();
+            auto vec_value = pop();
+            if (!value.has_value() || !vec_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (vec_value->kind != ValueKind::Vec || vec_value->vec_value == nullptr)
+            {
+                return finalize_result(err_result("vec value must be Vec", span));
+            }
+            if (value->kind != ValueKind::Int)
+            {
+                return finalize_result(err_result("vec element must be Int", span));
+            }
+
+            auto& items = vec_value->vec_value->items;
+            if (items.size() >= vec_value->vec_value->max_len)
+            {
+                return finalize_result(err_result("vec capacity exceeded", span));
+            }
+
+            items.push_back(*value);
+            push(Value::unit_v());
+            break;
+        }
+        case OpCode::VecGet:
+        {
+            auto index = pop();
+            auto vec_value = pop();
+            if (!index.has_value() || !vec_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (vec_value->kind != ValueKind::Vec || vec_value->vec_value == nullptr)
+            {
+                return finalize_result(err_result("vec value must be Vec", span));
+            }
+            if (index->kind != ValueKind::Int)
+            {
+                return finalize_result(err_result("vec index must be Int", span));
+            }
+
+            const auto i = index->int_value;
+            if (i < 0 || static_cast<std::size_t>(i) >= vec_value->vec_value->items.size())
+            {
+                return finalize_result(err_result("vec index out of bounds", span));
+            }
+
+            push(vec_value->vec_value->items[static_cast<std::size_t>(i)]);
+            break;
+        }
+        case OpCode::VecSet:
+        {
+            auto value = pop();
+            auto index = pop();
+            auto vec_value = pop();
+            if (!value.has_value() || !index.has_value() || !vec_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (vec_value->kind != ValueKind::Vec || vec_value->vec_value == nullptr)
+            {
+                return finalize_result(err_result("vec value must be Vec", span));
+            }
+            if (index->kind != ValueKind::Int)
+            {
+                return finalize_result(err_result("vec index must be Int", span));
+            }
+            if (value->kind != ValueKind::Int)
+            {
+                return finalize_result(err_result("vec element must be Int", span));
+            }
+
+            const auto i = index->int_value;
+            if (i < 0 || static_cast<std::size_t>(i) >= vec_value->vec_value->items.size())
+            {
+                return finalize_result(err_result("vec index out of bounds", span));
+            }
+
+            vec_value->vec_value->items[static_cast<std::size_t>(i)] = *value;
             push(Value::unit_v());
             break;
         }

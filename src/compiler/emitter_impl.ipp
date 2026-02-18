@@ -114,9 +114,15 @@ class Emitter
 
         for (const auto& f : program.functions)
         {
-            if (f.name == "print")
+            if (f.name == "print" || f.name == "__read_line" || f.name == "__tty_clear" ||
+                f.name == "__fs_read_text" || f.name == "__fs_write_text" ||
+                f.name == "__tty_write_at" || f.name == "__tty_flush" ||
+                f.name == "__rng_next_int" || f.name == "__vec_new_int" ||
+                f.name == "__vec_len_int" || f.name == "__vec_push_int" ||
+                f.name == "__vec_get_int" || f.name == "__vec_set_int")
             {
-                diags_.push_back(error_at(f.span, "cannot declare builtin function 'print'"));
+                diags_.push_back(error_at(f.span, "cannot declare builtin function '" +
+                                                      std::string(f.name) + "'"));
                 return diags_;
             }
         }
@@ -271,7 +277,8 @@ class Emitter
         for (std::size_t i = 0; i < fn.params.size(); ++i)
         {
             const auto& p = fn.params[i];
-            if (!p.type.is_capability && p.type.name != "Int" && p.type.name != "Bool")
+            if (!p.type.is_capability && p.type.name != "Int" && p.type.name != "Bool" &&
+                p.type.name != "Vec")
             {
                 diags_.push_back(
                     error_at(p.type.span, "parameter type not supported in runnable code: '" +
@@ -799,6 +806,297 @@ class Emitter
                 return;
             }
             chunk_.emit(OpCode::Print, span);
+            return;
+        }
+
+        // Builtin: __read_line(<cap io.stdin>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__read_line")
+        {
+            if (expr.args.size() != 1)
+            {
+                diags_.push_back(error_at(span, "__read_line expects exactly 1 argument"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::ReadLine, span);
+            return;
+        }
+
+        // Builtin: __tty_clear(<cap io.tty>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__tty_clear")
+        {
+            if (expr.args.size() != 1)
+            {
+                diags_.push_back(error_at(span, "__tty_clear expects exactly 1 argument"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::TtyClear, span);
+            return;
+        }
+
+        // Builtin: __fs_read_text(<path>, <cap fs.read>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__fs_read_text")
+        {
+            if (expr.args.size() != 2)
+            {
+                diags_.push_back(error_at(span, "__fs_read_text expects exactly 2 arguments"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            emit_expr(expr.args[1]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::FsReadText, span);
+            return;
+        }
+
+        // Builtin: __fs_write_text(<path>, <content>, <cap fs.write>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__fs_write_text")
+        {
+            if (expr.args.size() != 3)
+            {
+                diags_.push_back(error_at(span, "__fs_write_text expects exactly 3 arguments"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            emit_expr(expr.args[1]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            emit_expr(expr.args[2]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::FsWriteText, span);
+            return;
+        }
+
+        // Builtin: __tty_write_at(<row>, <col>, <text>, <cap io.tty>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__tty_write_at")
+        {
+            if (expr.args.size() != 4)
+            {
+                diags_.push_back(error_at(span, "__tty_write_at expects exactly 4 arguments"));
+                return;
+            }
+
+            for (const auto& arg : expr.args)
+            {
+                emit_expr(arg);
+                if (!diags_.empty())
+                {
+                    return;
+                }
+            }
+
+            chunk_.emit(OpCode::TtyWriteAt, span);
+            return;
+        }
+
+        // Builtin: __tty_flush(<cap io.tty>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__tty_flush")
+        {
+            if (expr.args.size() != 1)
+            {
+                diags_.push_back(error_at(span, "__tty_flush expects exactly 1 argument"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::TtyFlush, span);
+            return;
+        }
+
+        // Builtin: __rng_next_int(<max_exclusive>, <cap rng.seeded>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__rng_next_int")
+        {
+            if (expr.args.size() != 2)
+            {
+                diags_.push_back(error_at(span, "__rng_next_int expects exactly 2 arguments"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            emit_expr(expr.args[1]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::RngNextInt, span);
+            return;
+        }
+
+        // Builtin: __vec_new_int(<max_len>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__vec_new_int")
+        {
+            if (expr.args.size() != 1)
+            {
+                diags_.push_back(error_at(span, "__vec_new_int expects exactly 1 argument"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::VecNew, span);
+            return;
+        }
+
+        // Builtin: __vec_len_int(<vec>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__vec_len_int")
+        {
+            if (expr.args.size() != 1)
+            {
+                diags_.push_back(error_at(span, "__vec_len_int expects exactly 1 argument"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::VecLen, span);
+            return;
+        }
+
+        // Builtin: __vec_push_int(<vec>, <value>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__vec_push_int")
+        {
+            if (expr.args.size() != 2)
+            {
+                diags_.push_back(error_at(span, "__vec_push_int expects exactly 2 arguments"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            emit_expr(expr.args[1]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::VecPush, span);
+            return;
+        }
+
+        // Builtin: __vec_get_int(<vec>, <index>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__vec_get_int")
+        {
+            if (expr.args.size() != 2)
+            {
+                diags_.push_back(error_at(span, "__vec_get_int expects exactly 2 arguments"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            emit_expr(expr.args[1]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::VecGet, span);
+            return;
+        }
+
+        // Builtin: __vec_set_int(<vec>, <index>, <value>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__vec_set_int")
+        {
+            if (expr.args.size() != 3)
+            {
+                diags_.push_back(error_at(span, "__vec_set_int expects exactly 3 arguments"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            emit_expr(expr.args[1]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            emit_expr(expr.args[2]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::VecSet, span);
             return;
         }
 

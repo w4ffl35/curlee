@@ -106,14 +106,109 @@ class Checker
             // Placeholder; per-call validation happens in CallExpr checking.
             print_sig.params.push_back(Type{.kind = TypeKind::Unit});
             functions_.emplace("print", print_sig);
+
+            FunctionType read_line_sig;
+            read_line_sig.result = Type{.kind = TypeKind::String};
+            read_line_sig.params.push_back(Type{.kind = TypeKind::Capability, .name = "io.stdin"});
+            functions_.emplace("__read_line", read_line_sig);
+
+            FunctionType fs_read_text_sig;
+            fs_read_text_sig.result = Type{.kind = TypeKind::String};
+            fs_read_text_sig.params.push_back(Type{.kind = TypeKind::String});
+            fs_read_text_sig.params.push_back(
+                Type{.kind = TypeKind::Capability, .name = "fs.read"});
+            functions_.emplace("__fs_read_text", fs_read_text_sig);
+
+            FunctionType fs_write_text_sig;
+            fs_write_text_sig.result = Type{.kind = TypeKind::Unit};
+            fs_write_text_sig.params.push_back(Type{.kind = TypeKind::String});
+            fs_write_text_sig.params.push_back(Type{.kind = TypeKind::String});
+            fs_write_text_sig.params.push_back(
+                Type{.kind = TypeKind::Capability, .name = "fs.write"});
+            functions_.emplace("__fs_write_text", fs_write_text_sig);
+
+            FunctionType tty_clear_sig;
+            tty_clear_sig.result = Type{.kind = TypeKind::Unit};
+            tty_clear_sig.params.push_back(Type{.kind = TypeKind::Capability, .name = "io.tty"});
+            functions_.emplace("__tty_clear", tty_clear_sig);
+
+            FunctionType tty_write_at_sig;
+            tty_write_at_sig.result = Type{.kind = TypeKind::Unit};
+            tty_write_at_sig.params.push_back(Type{.kind = TypeKind::Int});
+            tty_write_at_sig.params.push_back(Type{.kind = TypeKind::Int});
+            tty_write_at_sig.params.push_back(Type{.kind = TypeKind::String});
+            tty_write_at_sig.params.push_back(Type{.kind = TypeKind::Capability, .name = "io.tty"});
+            functions_.emplace("__tty_write_at", tty_write_at_sig);
+
+            FunctionType tty_flush_sig;
+            tty_flush_sig.result = Type{.kind = TypeKind::Unit};
+            tty_flush_sig.params.push_back(Type{.kind = TypeKind::Capability, .name = "io.tty"});
+            functions_.emplace("__tty_flush", tty_flush_sig);
+
+            FunctionType rng_next_int_sig;
+            rng_next_int_sig.result = Type{.kind = TypeKind::Int};
+            rng_next_int_sig.params.push_back(Type{.kind = TypeKind::Int});
+            rng_next_int_sig.params.push_back(Type{.kind = TypeKind::Capability,
+                                                   .name = "rng.seeded"});
+            functions_.emplace("__rng_next_int", rng_next_int_sig);
+
+            FunctionType vec_new_int_sig;
+            vec_new_int_sig.result = Type{.kind = TypeKind::Vec,
+                                          .name = "Vec",
+                                          .element_kind = TypeKind::Int,
+                                          .element_name = "Int"};
+            vec_new_int_sig.params.push_back(Type{.kind = TypeKind::Int});
+            functions_.emplace("__vec_new_int", vec_new_int_sig);
+
+            FunctionType vec_len_int_sig;
+            vec_len_int_sig.result = Type{.kind = TypeKind::Int};
+            vec_len_int_sig.params.push_back(Type{.kind = TypeKind::Vec,
+                                                  .name = "Vec",
+                                                  .element_kind = TypeKind::Int,
+                                                  .element_name = "Int"});
+            functions_.emplace("__vec_len_int", vec_len_int_sig);
+
+            FunctionType vec_push_int_sig;
+            vec_push_int_sig.result = Type{.kind = TypeKind::Unit};
+            vec_push_int_sig.params.push_back(Type{.kind = TypeKind::Vec,
+                                                   .name = "Vec",
+                                                   .element_kind = TypeKind::Int,
+                                                   .element_name = "Int"});
+            vec_push_int_sig.params.push_back(Type{.kind = TypeKind::Int});
+            functions_.emplace("__vec_push_int", vec_push_int_sig);
+
+            FunctionType vec_get_int_sig;
+            vec_get_int_sig.result = Type{.kind = TypeKind::Int};
+            vec_get_int_sig.params.push_back(Type{.kind = TypeKind::Vec,
+                                                  .name = "Vec",
+                                                  .element_kind = TypeKind::Int,
+                                                  .element_name = "Int"});
+            vec_get_int_sig.params.push_back(Type{.kind = TypeKind::Int});
+            functions_.emplace("__vec_get_int", vec_get_int_sig);
+
+            FunctionType vec_set_int_sig;
+            vec_set_int_sig.result = Type{.kind = TypeKind::Unit};
+            vec_set_int_sig.params.push_back(Type{.kind = TypeKind::Vec,
+                                                  .name = "Vec",
+                                                  .element_kind = TypeKind::Int,
+                                                  .element_name = "Int"});
+            vec_set_int_sig.params.push_back(Type{.kind = TypeKind::Int});
+            vec_set_int_sig.params.push_back(Type{.kind = TypeKind::Int});
+            functions_.emplace("__vec_set_int", vec_set_int_sig);
         }
 
         // Collect function signatures first.
         for (const auto& f : program.functions)
         {
-            if (f.name == "print")
+            if (f.name == "print" || f.name == "__read_line" || f.name == "__tty_clear" ||
+                f.name == "__fs_read_text" || f.name == "__fs_write_text" ||
+                f.name == "__tty_write_at" || f.name == "__tty_flush" ||
+                f.name == "__rng_next_int" || f.name == "__vec_new_int" ||
+                f.name == "__vec_len_int" || f.name == "__vec_push_int" ||
+                f.name == "__vec_get_int" || f.name == "__vec_set_int")
             {
-                error_at(f.span, "cannot declare builtin function 'print'");
+                error_at(f.span, "cannot declare builtin function '" + std::string(f.name) +
+                                     "'");
                 continue;
             }
             auto sig = function_signature(f);
@@ -318,6 +413,19 @@ class Checker
         if (name.is_capability)
         {
             return Type{.kind = TypeKind::Capability, .name = name.name};
+        }
+
+        if (name.name == "Vec")
+        {
+            if (name.type_arg.has_value() && *name.type_arg != "Int")
+            {
+                error_at(name.span, "only Vec<Int> is supported in MVP-run");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Vec,
+                        .name = "Vec",
+                        .element_kind = TypeKind::Int,
+                        .element_name = "Int"};
         }
 
         const auto t = core_type_from_name(name.name);
@@ -936,6 +1044,384 @@ class Checker
                 error_at(span, "print only supports Int, Bool, or String");
                 return std::nullopt;
             }
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "__read_line")
+        {
+            if (e.args.size() != 1)
+            {
+                error_at(span, "__read_line expects exactly 1 argument");
+                return std::nullopt;
+            }
+
+            require_capability("io.stdin", span);
+
+            const auto arg_t = check_expr(e.args[0]);
+            if (!arg_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (arg_t->kind != TypeKind::Capability || arg_t->name != "io.stdin")
+            {
+                error_at(span, "__read_line expects argument of type cap io.stdin");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::String};
+        }
+
+        if (callee_name == "__tty_clear")
+        {
+            if (e.args.size() != 1)
+            {
+                error_at(span, "__tty_clear expects exactly 1 argument");
+                return std::nullopt;
+            }
+
+            require_capability("io.tty", span);
+
+            const auto arg_t = check_expr(e.args[0]);
+            if (!arg_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (arg_t->kind != TypeKind::Capability)
+            {
+                error_at(span, "__tty_clear expects argument of type cap io.tty");
+                return std::nullopt;
+            }
+            if (arg_t->name != "io.tty")
+            {
+                error_at(span, "__tty_clear expects argument of type cap io.tty");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "__fs_read_text")
+        {
+            if (e.args.size() != 2)
+            {
+                error_at(span, "__fs_read_text expects exactly 2 arguments");
+                return std::nullopt;
+            }
+
+            require_capability("fs.read", span);
+
+            const auto path_t = check_expr(e.args[0]);
+            const auto cap_t = check_expr(e.args[1]);
+            if (!path_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (!cap_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (path_t->kind != TypeKind::String)
+            {
+                error_at(span, "__fs_read_text expects (String, cap fs.read) arguments");
+                return std::nullopt;
+            }
+            if (cap_t->kind != TypeKind::Capability || cap_t->name != "fs.read") // GCOVR_EXCL_LINE
+            {
+                error_at(span, "__fs_read_text expects (String, cap fs.read) arguments");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::String};
+        }
+
+        if (callee_name == "__fs_write_text")
+        {
+            if (e.args.size() != 3)
+            {
+                error_at(span, "__fs_write_text expects exactly 3 arguments");
+                return std::nullopt;
+            }
+
+            require_capability("fs.write", span);
+
+            const auto path_t = check_expr(e.args[0]);
+            const auto content_t = check_expr(e.args[1]);
+            const auto cap_t = check_expr(e.args[2]);
+            if (!path_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (!content_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (!cap_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (path_t->kind != TypeKind::String || content_t->kind != TypeKind::String) // GCOVR_EXCL_LINE
+            {
+                error_at(span, "__fs_write_text expects (String, String, cap fs.write) arguments");
+                return std::nullopt;
+            }
+            if (cap_t->kind != TypeKind::Capability || cap_t->name != "fs.write") // GCOVR_EXCL_LINE
+            {
+                error_at(span, "__fs_write_text expects (String, String, cap fs.write) arguments");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "__tty_write_at")
+        {
+            if (e.args.size() != 4)
+            {
+                error_at(span, "__tty_write_at expects exactly 4 arguments");
+                return std::nullopt;
+            }
+
+            require_capability("io.tty", span);
+
+            const auto row_t = check_expr(e.args[0]);
+            const auto col_t = check_expr(e.args[1]);
+            const auto text_t = check_expr(e.args[2]);
+            const auto tty_t = check_expr(e.args[3]);
+            if (!row_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (!col_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (!text_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (!tty_t.has_value())
+            {
+                return std::nullopt;
+            }
+
+            if (row_t->kind != TypeKind::Int)
+            {
+                error_at(span,
+                         "__tty_write_at expects (Int, Int, String, cap io.tty) arguments");
+                return std::nullopt;
+            }
+            if (col_t->kind != TypeKind::Int)
+            {
+                error_at(span,
+                         "__tty_write_at expects (Int, Int, String, cap io.tty) arguments");
+                return std::nullopt;
+            }
+            if (text_t->kind != TypeKind::String)
+            {
+                error_at(span,
+                         "__tty_write_at expects (Int, Int, String, cap io.tty) arguments");
+                return std::nullopt;
+            }
+            if (tty_t->kind != TypeKind::Capability)
+            {
+                error_at(span,
+                         "__tty_write_at expects (Int, Int, String, cap io.tty) arguments");
+                return std::nullopt;
+            }
+            if (tty_t->name != "io.tty")
+            {
+                error_at(span,
+                         "__tty_write_at expects (Int, Int, String, cap io.tty) arguments");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "__tty_flush")
+        {
+            if (e.args.size() != 1)
+            {
+                error_at(span, "__tty_flush expects exactly 1 argument");
+                return std::nullopt;
+            }
+
+            require_capability("io.tty", span);
+
+            const auto arg_t = check_expr(e.args[0]);
+            if (!arg_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (arg_t->kind != TypeKind::Capability)
+            {
+                error_at(span, "__tty_flush expects argument of type cap io.tty");
+                return std::nullopt;
+            }
+            if (arg_t->name != "io.tty")
+            {
+                error_at(span, "__tty_flush expects argument of type cap io.tty");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "__rng_next_int")
+        {
+            if (e.args.size() != 2)
+            {
+                error_at(span, "__rng_next_int expects exactly 2 arguments");
+                return std::nullopt;
+            }
+
+            require_capability("rng.seeded", span);
+
+            const auto max_exclusive_t = check_expr(e.args[0]);
+            const auto rng_cap_t = check_expr(e.args[1]);
+            if (!max_exclusive_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (!rng_cap_t.has_value())
+            {
+                return std::nullopt;
+            }
+
+            if (max_exclusive_t->kind != TypeKind::Int)
+            {
+                error_at(span, "__rng_next_int expects (Int, cap rng.seeded) arguments");
+                return std::nullopt;
+            }
+            if (rng_cap_t->kind != TypeKind::Capability)
+            {
+                error_at(span, "__rng_next_int expects (Int, cap rng.seeded) arguments");
+                return std::nullopt;
+            }
+            if (rng_cap_t->name != "rng.seeded")
+            {
+                error_at(span, "__rng_next_int expects (Int, cap rng.seeded) arguments");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Int};
+        }
+
+        if (callee_name == "__vec_new_int")
+        {
+            if (e.args.size() != 1)
+            {
+                error_at(span, "__vec_new_int expects exactly 1 argument");
+                return std::nullopt;
+            }
+
+            const auto max_t = check_expr(e.args[0]);
+            if (!max_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (max_t->kind != TypeKind::Int)
+            {
+                error_at(span, "__vec_new_int expects argument of type Int");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Vec,
+                        .name = "Vec",
+                        .element_kind = TypeKind::Int,
+                        .element_name = "Int"};
+        }
+
+        if (callee_name == "__vec_len_int")
+        {
+            if (e.args.size() != 1)
+            {
+                error_at(span, "__vec_len_int expects exactly 1 argument");
+                return std::nullopt;
+            }
+
+            const auto vec_t = check_expr(e.args[0]);
+            if (!vec_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (vec_t->kind != TypeKind::Vec)
+            {
+                error_at(span, "__vec_len_int expects argument of type Vec<Int>");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Int};
+        }
+
+        if (callee_name == "__vec_push_int")
+        {
+            if (e.args.size() != 2)
+            {
+                error_at(span, "__vec_push_int expects exactly 2 arguments");
+                return std::nullopt;
+            }
+
+            const auto vec_t = check_expr(e.args[0]);
+            const auto value_t = check_expr(e.args[1]);
+            if (!vec_t.has_value() || !value_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (vec_t->kind != TypeKind::Vec || value_t->kind != TypeKind::Int)
+            {
+                error_at(span, "__vec_push_int expects (Vec<Int>, Int) arguments");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "__vec_get_int")
+        {
+            if (e.args.size() != 2)
+            {
+                error_at(span, "__vec_get_int expects exactly 2 arguments");
+                return std::nullopt;
+            }
+
+            const auto vec_t = check_expr(e.args[0]);
+            const auto index_t = check_expr(e.args[1]);
+            if (!vec_t.has_value() || !index_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (vec_t->kind != TypeKind::Vec || index_t->kind != TypeKind::Int)
+            {
+                error_at(span, "__vec_get_int expects (Vec<Int>, Int) arguments");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Int};
+        }
+
+        if (callee_name == "__vec_set_int")
+        {
+            if (e.args.size() != 3)
+            {
+                error_at(span, "__vec_set_int expects exactly 3 arguments");
+                return std::nullopt;
+            }
+
+            const auto vec_t = check_expr(e.args[0]);
+            const auto index_t = check_expr(e.args[1]);
+            const auto value_t = check_expr(e.args[2]);
+            if (!vec_t.has_value() || !index_t.has_value() || !value_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (vec_t->kind != TypeKind::Vec || index_t->kind != TypeKind::Int ||
+                value_t->kind != TypeKind::Int)
+            {
+                error_at(span, "__vec_set_int expects (Vec<Int>, Int, Int) arguments");
+                return std::nullopt;
+            }
+
             return Type{.kind = TypeKind::Unit};
         }
 

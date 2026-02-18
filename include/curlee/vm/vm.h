@@ -4,6 +4,7 @@
 #include <curlee/runtime/capabilities.h>
 #include <curlee/source/span.h>
 #include <curlee/vm/bytecode.h>
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -21,6 +22,7 @@ struct VmProfile
   std::size_t fuel_limit = 0;
   std::size_t fuel_used = 0;
   std::size_t fuel_remaining = 0;
+  std::optional<std::uint64_t> rng_seed;
 };
 
 /** @brief Result of executing a chunk in the VM. */
@@ -51,6 +53,11 @@ class VM
     /** @brief Run with fuel and explicit capabilities. */
     [[nodiscard]] VmResult run(const Chunk& chunk, std::size_t fuel,
                                const Capabilities& capabilities);
+
+    /** @brief Run with fuel, capabilities, and deterministic seeded RNG state. */
+    [[nodiscard]] VmResult run(const Chunk& chunk, std::size_t fuel,
+                   const Capabilities& capabilities,
+                   std::optional<std::uint64_t> rng_seed);
 
   private:
     std::vector<Value> stack_;

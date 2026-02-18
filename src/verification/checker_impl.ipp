@@ -32,10 +32,36 @@ using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
 using curlee::parser::Stmt;
+using curlee::parser::StructLiteralExpr;
 using curlee::parser::UnsafeStmt;
 using curlee::parser::WhileStmt;
 using curlee::source::Span;
 using curlee::types::TypeKind;
+
+static bool collect_member_chain(const Expr& expr, std::vector<std::string_view>& out)
+{
+    if (const auto* name = std::get_if<NameExpr>(&expr.node))
+    {
+        out.push_back(name->name);
+        return true;
+    }
+
+    if (const auto* mem = std::get_if<MemberExpr>(&expr.node))
+    {
+        if (mem->base == nullptr) // GCOVR_EXCL_LINE
+        {
+                return false; // GCOVR_EXCL_LINE
+        }
+        if (!collect_member_chain(*mem->base, out))
+        {
+            return false;
+        }
+        out.push_back(mem->member);
+        return true;
+    }
+
+    return false;
+}
 
 std::string token_to_string(curlee::lexer::TokenKind kind)
 {
@@ -203,6 +229,7 @@ struct ScopeState
 {
     std::unordered_map<std::string_view, z3::expr> int_vars;
     std::unordered_map<std::string_view, z3::expr> bool_vars;
+    std::unordered_map<std::string_view, std::string_view> struct_vars;
     std::size_t facts_size = 0;
 };
 
@@ -216,6 +243,7 @@ class Verifier
 
     VerificationResult run(const curlee::parser::Program& program)
     {
+        collect_structs(program);
         collect_signatures(program);
 
         for (const auto& f : program.functions)
@@ -231,6 +259,11 @@ class Verifier
     }
 
   private:
+    struct StructDef
+    {
+        std::unordered_map<std::string_view, curlee::types::Type> fields;
+    };
+
     const curlee::types::TypeInfo& type_info_;
     Solver solver_;
     LoweringContext lower_ctx_;
@@ -238,6 +271,52 @@ class Verifier
     std::vector<z3::expr> facts_;
     std::vector<ScopeState> scopes_;
     std::unordered_map<std::string_view, FunctionSig> functions_;
+    std::unordered_map<std::string_view, StructDef> structs_;
+    std::unordered_map<std::string_view, std::string_view> struct_vars_;
+
+    void collect_structs(const curlee::parser::Program& program)
+    {
+        structs_.clear();
+
+        for (const auto& s : program.structs)
+        {
+            structs_.emplace(s.name, StructDef{});
+        }
+
+        for (const auto& s : program.structs)
+        {
+            auto it = structs_.find(s.name);
+            if (it == structs_.end()) // GCOVR_EXCL_LINE
+            {
+                continue; // GCOVR_EXCL_LINE
+            }
+
+            for (const auto& field : s.fields)
+            {
+                if (field.type.is_capability) // GCOVR_EXCL_LINE
+                {
+                    it->second.fields.emplace(
+                        field.name,
+                        curlee::types::Type{.kind = TypeKind::Capability, .name = field.type.name});
+                    continue;
+                }
+
+                if (auto core_t = curlee::types::core_type_from_name(field.type.name);
+                    core_t.has_value())
+                {
+                    it->second.fields.emplace(field.name, *core_t);
+                    continue;
+                }
+
+                if (structs_.contains(field.type.name)) // GCOVR_EXCL_LINE
+                {
+                    it->second.fields.emplace(
+                        field.name,
+                        curlee::types::Type{.kind = TypeKind::Struct, .name = field.type.name});
+                }
+            }
+        }
+    }
 
     void push_scope()
     {
@@ -245,6 +324,7 @@ class Verifier
         auto& state = scopes_.back();
         state.int_vars = lower_ctx_.int_vars;
         state.bool_vars = lower_ctx_.bool_vars;
+        state.struct_vars = struct_vars_;
         state.facts_size = facts_.size();
     }
 
@@ -258,6 +338,7 @@ class Verifier
         scopes_.pop_back();
         lower_ctx_.int_vars = state.int_vars;
         lower_ctx_.bool_vars = state.bool_vars;
+        struct_vars_ = state.struct_vars;
         if (facts_.size() > state.facts_size)
         {
             facts_.erase(facts_.begin() + static_cast<std::ptrdiff_t>(state.facts_size),
@@ -275,9 +356,18 @@ class Verifier
             return TypeKind::Unit;
         }
 
+        if (name.name == "Vec")
+        {
+            return TypeKind::Unit;
+        }
+
         auto t = curlee::types::core_type_from_name(name.name);
         if (!t.has_value())
         {
+            if (structs_.contains(name.name))
+            {
+                return TypeKind::Struct;
+            }
             diags_.push_back(error_at(name.span, "unknown type '" + std::string(name.name) + "'"));
             return std::nullopt;
         }
@@ -287,9 +377,9 @@ class Verifier
             return t->kind;
         }
 
-        diags_.push_back(error_at(name.span, "verification does not support type '" +
-                                                 std::string(curlee::types::to_string(*t)) + "'"));
-        return std::nullopt;
+        // Non-scalar core types (String/Unit) are allowed in signatures but are treated as
+        // uninterpreted by the verifier. Predicate reasoning remains Int/Bool-only.
+        return TypeKind::Unit;
     }
 
     void collect_signatures(const curlee::parser::Program& program)
@@ -360,6 +450,11 @@ class Verifier
         }
     }
 
+    void declare_struct_var(std::string_view name, std::string_view struct_name)
+    {
+        struct_vars_.insert_or_assign(name, struct_name);
+    }
+
     void add_fact(const curlee::parser::Pred& pred)
     {
         auto lowered = lower_predicate(pred, lower_ctx_);
@@ -398,6 +493,85 @@ class Verifier
                         return *found;
                     }
                     return error_at(e.span, "unknown name '" + std::string(node.name) + "'");
+                }
+                else if constexpr (std::is_same_v<Node, MemberExpr>)
+                {
+                    if (node.base == nullptr) // GCOVR_EXCL_LINE
+                    {
+                        return error_at(e.span, "invalid member access"); // GCOVR_EXCL_LINE
+                    }
+
+                    std::vector<std::string_view> chain;
+                    if (!collect_member_chain(e, chain) || chain.size() < 2) // GCOVR_EXCL_LINE
+                    {
+                        return error_at(e.span, "unsupported expression in verification");
+                    }
+
+                    const auto root_it = struct_vars_.find(chain.front());
+                    if (root_it == struct_vars_.end())
+                    {
+                        return error_at(e.span, "unknown struct variable '" +
+                                                   std::string(chain.front()) + "'");
+                    }
+
+                    std::string_view current_struct = root_it->second;
+                    for (std::size_t i = 1; i < chain.size(); ++i) // GCOVR_EXCL_LINE
+                    {
+                        const auto struct_it = structs_.find(current_struct);
+                        if (struct_it == structs_.end()) // GCOVR_EXCL_LINE
+                        {
+                            return error_at(e.span, "unknown struct type '" + // GCOVR_EXCL_LINE
+                                                       std::string(current_struct) + "'"); // GCOVR_EXCL_LINE
+                        }
+
+                        const auto field_it = struct_it->second.fields.find(chain[i]);
+                        if (field_it == struct_it->second.fields.end()) // GCOVR_EXCL_LINE
+                        {
+                            return error_at(e.span, "unknown field '" + std::string(chain[i]) + // GCOVR_EXCL_LINE
+                                                       "' on struct '" + // GCOVR_EXCL_LINE
+                                                       std::string(current_struct) + "'"); // GCOVR_EXCL_LINE
+                        }
+
+                        const auto& field_t = field_it->second;
+                        if (i + 1 < chain.size()) // GCOVR_EXCL_LINE
+                        {
+                            if (field_t.kind != TypeKind::Struct) // GCOVR_EXCL_LINE
+                            {
+                                return error_at(e.span, "field '" + std::string(chain[i]) + // GCOVR_EXCL_LINE
+                                                           "' is not a struct in verification "
+                                                           "expression"); // GCOVR_EXCL_LINE
+                            }
+                            current_struct = field_t.name;
+                            continue;
+                        }
+
+                        std::string symbol;
+                        for (std::size_t j = 0; j < chain.size(); ++j)
+                        {
+                            if (j != 0)
+                            {
+                                symbol += '.';
+                            }
+                            symbol += std::string(chain[j]);
+                        }
+
+                        if (field_t.kind == TypeKind::Int) // GCOVR_EXCL_LINE
+                        {
+                            return ExprValue{solver_.context().int_const(symbol.c_str()),
+                                             TypeKind::Int, false};
+                        }
+                        if (field_t.kind == TypeKind::Bool) // GCOVR_EXCL_LINE
+                        {
+                            return ExprValue{solver_.context().bool_const(symbol.c_str()),
+                                             TypeKind::Bool, false};
+                        }
+
+                        return error_at( // GCOVR_EXCL_LINE
+                            e.span,
+                            "verification only supports Int/Bool struct fields in expressions"); // GCOVR_EXCL_LINE
+                    }
+
+                    return error_at(e.span, "unsupported expression in verification"); // GCOVR_EXCL_LINE
                 }
                 else if constexpr (std::is_same_v<Node, curlee::parser::UnaryExpr>)
                 {
@@ -825,6 +999,50 @@ class Verifier
         const auto core_t = curlee::types::core_type_from_name(s.type.name);
         if (!core_t.has_value())
         {
+            const auto struct_it = structs_.find(s.type.name);
+            if (struct_it != structs_.end())
+            {
+                declare_struct_var(s.name, s.type.name);
+
+                if (const auto* lit = std::get_if<StructLiteralExpr>(&s.value.node); // GCOVR_EXCL_LINE
+                    lit != nullptr && lit->type_name == s.type.name) // GCOVR_EXCL_LINE
+                {
+                    for (const auto& field : lit->fields)
+                    {
+                        const auto field_it = struct_it->second.fields.find(field.name);
+                        if (field_it == struct_it->second.fields.end() || field.value == nullptr) // GCOVR_EXCL_LINE
+                        {
+                            continue;
+                        }
+
+                        const auto lowered = lower_expr(*field.value);
+                        if (std::holds_alternative<Diagnostic>(lowered)) // GCOVR_EXCL_LINE
+                        {
+                            diags_.push_back(std::get<Diagnostic>(lowered));
+                            continue;
+                        }
+
+                        const auto lowered_value = std::get<ExprValue>(lowered);
+                        std::string symbol = std::string(s.name);
+                        symbol += ".";
+                        symbol += std::string(field.name);
+
+                        if (field_it->second.kind == TypeKind::Int && // GCOVR_EXCL_LINE
+                            lowered_value.kind == TypeKind::Int) // GCOVR_EXCL_LINE
+                        {
+                            facts_.push_back(solver_.context().int_const(symbol.c_str()) ==
+                                             lowered_value.expr);
+                        }
+                        else if (field_it->second.kind == TypeKind::Bool && // GCOVR_EXCL_LINE
+                                 lowered_value.kind == TypeKind::Bool) // GCOVR_EXCL_LINE
+                        {
+                            facts_.push_back(solver_.context().bool_const(symbol.c_str()) ==
+                                             lowered_value.expr);
+                        }
+                    }
+                }
+            }
+
             if (s.refinement.has_value())
             {
                 diags_.push_back(
@@ -971,6 +1189,7 @@ class Verifier
         lower_ctx_.result_bool.reset();
         lower_ctx_.int_vars.clear();
         lower_ctx_.bool_vars.clear();
+        struct_vars_.clear();
         facts_.clear();
         scopes_.clear();
 
@@ -980,6 +1199,10 @@ class Verifier
             const auto& param = f.params[i];
             const auto param_kind = sig_it->second.params[i];
             declare_var(param.name, param_kind);
+            if (param_kind == TypeKind::Struct)
+            {
+                declare_struct_var(param.name, param.type.name);
+            }
 
             if (param.refinement.has_value())
             {

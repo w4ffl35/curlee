@@ -133,7 +133,14 @@ class Resolver
 
     static bool is_builtin_call_name(std::string_view name)
     {
-        return name == "print" || name == "variant_is" || name == "variant_unwrap";
+         return name == "print" || name == "__read_line" || name == "__tty_clear" ||
+             name == "__fs_read_text" || name == "__fs_write_text" ||
+             name == "__tty_write_at" || name == "__tty_flush" ||
+             name == "__rng_next_int" || name == "__vec_new_int" ||
+             name == "__vec_len_int" || name == "__vec_push_int" ||
+             name == "__vec_get_int" || name == "__vec_set_int" ||
+             name == "variant_is" ||
+             name == "variant_unwrap";
     }
 
     void resolve_imports(const curlee::parser::Program& program)

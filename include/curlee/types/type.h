@@ -21,6 +21,7 @@ enum class TypeKind
     String,
     Unit,
     Capability,
+    Vec,
     Struct,
     Enum,
 };
@@ -36,6 +37,9 @@ struct Type
     // For nominal types (Struct/Enum), this is the declared type name.
     // Empty for core scalar types.
     std::string_view name = {};
+    // For Vec<T>, this stores the element type kind/name.
+    std::optional<TypeKind> element_kind = std::nullopt;
+    std::string_view element_name = {};
 };
 
 [[nodiscard]] constexpr bool operator==(Type a, Type b)
@@ -47,6 +51,10 @@ struct Type
     if (a.kind == TypeKind::Capability || a.kind == TypeKind::Struct || a.kind == TypeKind::Enum)
     {
         return a.name == b.name;
+    }
+    if (a.kind == TypeKind::Vec)
+    {
+        return a.element_kind == b.element_kind && a.element_name == b.element_name;
     }
     return true;
 }
@@ -90,6 +98,8 @@ struct CapabilityType
         return "Unit";
     case TypeKind::Capability:
         return "cap";
+    case TypeKind::Vec:
+        return "Vec";
     case TypeKind::Struct:
         return "Struct";
     case TypeKind::Enum:
@@ -103,6 +113,10 @@ struct CapabilityType
     if (t.kind == TypeKind::Capability || t.kind == TypeKind::Struct || t.kind == TypeKind::Enum)
     {
         return t.name;
+    }
+    if (t.kind == TypeKind::Vec)
+    {
+        return "Vec";
     }
     return to_string(t.kind);
 }

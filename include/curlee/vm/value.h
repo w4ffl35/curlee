@@ -4,6 +4,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 /**
  * @file value.h
@@ -13,6 +14,9 @@
 namespace curlee::vm
 {
 
+struct Value;
+struct VecValue;
+
 /** @brief Kind of a runtime value. */
 enum class ValueKind
 {
@@ -21,6 +25,7 @@ enum class ValueKind
     String,
     Unit,
     Enum,
+    Vec,
 };
 
 /**
@@ -37,6 +42,7 @@ struct Value
     std::string enum_name;
     std::string variant_name;
     std::shared_ptr<Value> payload;
+    std::shared_ptr<VecValue> vec_value;
 
     static Value int_v(std::int64_t v)
     {
@@ -48,6 +54,7 @@ struct Value
             .enum_name = {},
             .variant_name = {},
             .payload = nullptr,
+            .vec_value = nullptr,
         };
     } // GCOVR_EXCL_LINE
 
@@ -61,6 +68,7 @@ struct Value
             .enum_name = {},
             .variant_name = {},
             .payload = nullptr,
+            .vec_value = nullptr,
         };
     }
 
@@ -76,6 +84,8 @@ struct Value
 
     static Value unit_v() { return Value{}; }
 
+    static Value vec_v(std::size_t max_len);
+
     static Value enum_v(std::string enum_name, std::string variant_name,
                         std::optional<Value> payload = std::nullopt)
     {
@@ -90,6 +100,21 @@ struct Value
         return out;
     } // GCOVR_EXCL_LINE
 };
+
+struct VecValue
+{
+    std::size_t max_len = 0;
+    std::vector<Value> items;
+};
+
+inline Value Value::vec_v(std::size_t max_len)
+{
+    Value out;
+    out.kind = ValueKind::Vec;
+    out.vec_value = std::make_shared<VecValue>();
+    out.vec_value->max_len = max_len;
+    return out;
+} // GCOVR_EXCL_LINE
 
 /** @brief Equality comparison for values. */
 inline bool operator==(const Value& a, const Value& b)
@@ -118,6 +143,13 @@ inline bool operator==(const Value& a, const Value& b)
             return a.payload == nullptr && b.payload == nullptr; // GCOVR_EXCL_LINE
         }
         return *a.payload == *b.payload;
+    case ValueKind::Vec:
+        if (a.vec_value == nullptr || b.vec_value == nullptr)
+        {
+            return a.vec_value == nullptr && b.vec_value == nullptr;
+        }
+        return a.vec_value->max_len == b.vec_value->max_len &&
+               a.vec_value->items == b.vec_value->items;
     }
     return false;
 }
@@ -141,6 +173,13 @@ inline std::string to_string(const Value& v)
             return v.enum_name + "::" + v.variant_name;
         }
         return v.enum_name + "::" + v.variant_name + "(" + to_string(*v.payload) + ")";
+    case ValueKind::Vec:
+        if (v.vec_value == nullptr)
+        {
+            return "Vec<?>(null)";
+        }
+        return "Vec(len=" + std::to_string(v.vec_value->items.size()) + "/" +
+               std::to_string(v.vec_value->max_len) + ")";
     }
     return "<unknown>";
 }

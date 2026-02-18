@@ -23,6 +23,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -93,7 +94,7 @@ void print_usage(std::ostream& out)
     out << "  curlee lex <file.curlee>\n";
     out << "  curlee parse <file.curlee>\n";
     out << "  curlee check <file.curlee>\n";
-        out << "  curlee run [--fuel <n>] [--profile] [--profile-format <text|json>] "
+        out << "  curlee run [--fuel <n>] [--seed <n>] [--profile] [--profile-format <text|json>] "
             "[--bundle <file.bundle>] [--cap <capability>]... <file.curlee>\n";
         out << "  curlee <lex|parse|check|run> [--diag-format <text|json>] ...\n";
     out << "  curlee fmt [--check] <file>\n";
@@ -206,14 +207,26 @@ void emit_profile(std::ostream& out, const curlee::vm::VmProfile& profile, bool 
     {
         out << "curlee profile: steps=" << profile.steps << " fuel_limit=" << profile.fuel_limit
             << " fuel_used=" << profile.fuel_used
-            << " fuel_remaining=" << profile.fuel_remaining << " ok=" << (ok ? "true" : "false")
+            << " fuel_remaining=" << profile.fuel_remaining
+            << " rng_seed="
+            << (profile.rng_seed.has_value() ? std::to_string(*profile.rng_seed) : "none")
+            << " ok=" << (ok ? "true" : "false")
             << "\n";
         return;
     }
 
     out << "{\"kind\":\"profile\",\"steps\":" << profile.steps
         << ",\"fuel_limit\":" << profile.fuel_limit << ",\"fuel_used\":" << profile.fuel_used
-        << ",\"fuel_remaining\":" << profile.fuel_remaining << ",\"ok\":"
+        << ",\"fuel_remaining\":" << profile.fuel_remaining << ",\"rng_seed\":";
+    if (profile.rng_seed.has_value())
+    {
+        out << *profile.rng_seed;
+    }
+    else
+    {
+        out << "null";
+    }
+    out << ",\"ok\":"
         << (ok ? "true" : "false") << "}\n";
 }
 // GCOVR_EXCL_STOP
@@ -548,7 +561,7 @@ bool chunk_uses_python_call(const curlee::vm::Chunk& chunk)
         }
 
         std::size_t operand_bytes = 0;
-        switch (op)
+        switch (op) // GCOVR_EXCL_LINE
         {
         case curlee::vm::OpCode::Constant:
         case curlee::vm::OpCode::LoadLocal:
@@ -568,8 +581,40 @@ bool chunk_uses_python_call(const curlee::vm::Chunk& chunk)
             operand_bytes = 4;
             break;
 
-        default:
+        case curlee::vm::OpCode::Add:
+        case curlee::vm::OpCode::Sub:
+        case curlee::vm::OpCode::Mul:
+        case curlee::vm::OpCode::Div:
+        case curlee::vm::OpCode::Neg:
+        case curlee::vm::OpCode::Not:
+        case curlee::vm::OpCode::Equal:
+        case curlee::vm::OpCode::NotEqual:
+        case curlee::vm::OpCode::Less:
+        case curlee::vm::OpCode::LessEqual:
+        case curlee::vm::OpCode::Greater:
+        case curlee::vm::OpCode::GreaterEqual:
+        case curlee::vm::OpCode::Pop:
+        case curlee::vm::OpCode::Return:
+        case curlee::vm::OpCode::Ret:
+        case curlee::vm::OpCode::Print:
+        case curlee::vm::OpCode::ReadLine:
+        case curlee::vm::OpCode::FsReadText:
+        case curlee::vm::OpCode::FsWriteText:
+        case curlee::vm::OpCode::TtyClear:
+        case curlee::vm::OpCode::TtyWriteAt:
+        case curlee::vm::OpCode::TtyFlush:
+        case curlee::vm::OpCode::RngNextInt:
+        case curlee::vm::OpCode::VecNew:
+        case curlee::vm::OpCode::VecLen:
+        case curlee::vm::OpCode::VecPush:
+        case curlee::vm::OpCode::VecGet:
+        case curlee::vm::OpCode::VecSet:
+        case curlee::vm::OpCode::PythonCall:
+            operand_bytes = 0;
             break;
+
+        default: // GCOVR_EXCL_LINE
+            break; // GCOVR_EXCL_LINE
         }
 
         if (ip + operand_bytes > chunk.code.size())
@@ -585,6 +630,7 @@ bool chunk_uses_python_call(const curlee::vm::Chunk& chunk)
 
 int cmd_read_only(std::string_view cmd, const std::string& path,
                   const curlee::runtime::Capabilities& granted_caps, std::size_t fuel,
+                  std::optional<std::uint64_t> rng_seed = std::nullopt,
                   DiagOutputFormat diag_format = DiagOutputFormat::Text,
                   RuntimeProfileOptions profile_options = {},
                   const std::vector<std::filesystem::path>& stdlib_roots = {},
@@ -1071,7 +1117,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
 
         const auto& chunk = std::get<vm::Chunk>(emitted);
         vm::VM machine;
-        const auto result = machine.run(chunk, fuel, granted_caps);
+        const auto result = machine.run(chunk, fuel, granted_caps, rng_seed);
         if (!result.ok)
         {
             diag::Diagnostic d;
@@ -1165,6 +1211,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
 
 int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entry_path,
                    const curlee::runtime::Capabilities& granted_caps, std::size_t fuel,
+                   std::optional<std::uint64_t> rng_seed,
                    DiagOutputFormat diag_format, RuntimeProfileOptions profile_options)
 {
     auto loaded = source::load_source_file(entry_path);
@@ -1262,7 +1309,7 @@ int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entr
 
     vm::VM machine;
 
-    const auto result = machine.run(chunk, fuel, effective_caps);
+    const auto result = machine.run(chunk, fuel, effective_caps, rng_seed);
     if (!result.ok)
     {
         diag::Diagnostic d;
@@ -1301,9 +1348,10 @@ int cmd_bundle_build(const std::string& entry_path_arg, const std::string& bundl
 
     std::vector<curlee::bundle::ImportPin> import_pins;
     std::vector<std::uint8_t> bytecode;
-    const int rc = cmd_read_only("bundle-build", entry_path.string(), empty_caps(), kDefaultFuel,
-                                 diag_format, {}, stdlib_roots, input_root, &import_pins,
-                                 &bytecode);
+    const int rc =
+        cmd_read_only("bundle-build", entry_path.string(), empty_caps(), kDefaultFuel,
+                      std::nullopt, diag_format, {}, stdlib_roots, input_root, &import_pins,
+                      &bytecode);
     if (rc != kExitOk)
     {
         return rc;
@@ -1353,9 +1401,10 @@ int cmd_collect_dependency_snapshot(const std::string& entry_path_arg,
     }
 
     std::vector<std::uint8_t> bytecode;
-    const int rc = cmd_read_only("bundle-build", entry_path.string(), empty_caps(), kDefaultFuel,
-                                 diag_format, {}, stdlib_roots, input_root, &out_import_pins,
-                                 &bytecode);
+    const int rc =
+        cmd_read_only("bundle-build", entry_path.string(), empty_caps(), kDefaultFuel,
+                      std::nullopt, diag_format, {}, stdlib_roots, input_root,
+                      &out_import_pins, &bytecode);
     if (rc != kExitOk)
     {
         return rc;
@@ -1447,6 +1496,19 @@ int cmd_deps_verify(const std::string& entry_path_arg, const std::string& lock_p
 std::optional<std::size_t> parse_size(std::string_view s)
 {
     std::size_t out = 0;
+    const char* begin = s.data();
+    const char* end = s.data() + s.size();
+    const auto res = std::from_chars(begin, end, out);
+    if (res.ec != std::errc{} || res.ptr != end)
+    {
+        return std::nullopt;
+    }
+    return out;
+}
+
+std::optional<std::uint64_t> parse_u64(std::string_view s)
+{
+    std::uint64_t out = 0;
     const char* begin = s.data();
     const char* end = s.data() + s.size();
     const auto res = std::from_chars(begin, end, out);
@@ -1569,7 +1631,8 @@ int run(int argc, char** argv)
     if (argc == 2 && !first.starts_with('-') && ends_with(first, ".curlee"))
     {
         return cmd_read_only("run", std::string(first), empty_caps(), kDefaultFuel,
-                             DiagOutputFormat::Text, {}, load_stdlib_roots_from_env());
+                             std::nullopt, DiagOutputFormat::Text, {},
+                             load_stdlib_roots_from_env());
     }
 
     const std::string_view cmd = argv[1];
@@ -1947,6 +2010,7 @@ int run(int argc, char** argv)
         std::optional<curlee::bundle::Bundle> bundle;
         std::optional<std::string> path;
         std::size_t fuel = kDefaultFuel;
+        std::optional<std::uint64_t> seed;
         RuntimeProfileOptions profile_options;
         auto stdlib_roots = load_stdlib_roots_from_env();
 
@@ -2046,6 +2110,26 @@ int run(int argc, char** argv)
                 continue;
             }
 
+            if (a == "--seed")
+            {
+                if (i + 1 >= args.size())
+                {
+                    std::cerr << "error: expected integer after --seed\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                const auto parsed = parse_u64(args[i + 1]);
+                if (!parsed.has_value())
+                {
+                    std::cerr << "error: expected non-negative integer for --seed\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                seed = *parsed;
+                i += 2;
+                continue;
+            }
+
             if (a == "--profile")
             {
                 profile_options.enabled = true;
@@ -2108,6 +2192,21 @@ int run(int argc, char** argv)
                 continue;
             }
 
+            if (a.starts_with("--seed="))
+            {
+                const auto raw = a.substr(std::string_view("--seed=").size());
+                const auto parsed = parse_u64(raw);
+                if (!parsed.has_value())
+                {
+                    std::cerr << "error: expected non-negative integer for --seed=\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                seed = *parsed;
+                ++i;
+                continue;
+            }
+
             if (a.starts_with("--bundle="))
             {
                 const auto p = a.substr(std::string_view("--bundle=").size());
@@ -2166,10 +2265,12 @@ int run(int argc, char** argv)
 
         if (bundle.has_value())
         {
-            return cmd_run_bundle(*bundle, *path, caps, fuel, diag_format, profile_options);
+            return cmd_run_bundle(*bundle, *path, caps, fuel, seed, diag_format,
+                                  profile_options);
         }
 
-        return cmd_read_only(cmd, *path, caps, fuel, diag_format, profile_options, stdlib_roots);
+        return cmd_read_only(cmd, *path, caps, fuel, seed, diag_format, profile_options,
+                             stdlib_roots);
     }
 
     if (args.size() != 1)
@@ -2180,7 +2281,7 @@ int run(int argc, char** argv)
     }
 
     const std::string path(args[0]);
-    return cmd_read_only(cmd, path, empty_caps(), kDefaultFuel, diag_format, {},
+    return cmd_read_only(cmd, path, empty_caps(), kDefaultFuel, std::nullopt, diag_format, {},
                          load_stdlib_roots_from_env());
 }
 
