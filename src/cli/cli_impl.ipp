@@ -16,9 +16,11 @@
 #include <curlee/vm/value.h>
 #include <curlee/vm/vm.h>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -48,6 +50,15 @@ constexpr int kExitError = 1;
 constexpr int kExitUsage = 2;
 
 constexpr std::size_t kDefaultFuel = 10000;
+constexpr std::string_view kDepsLockHeader = "CURLEE_DEPS_LOCK";
+constexpr int kDepsLockFormatVersion = 1;
+
+struct DependencyLockfile
+{
+    int format_version = kDepsLockFormatVersion;
+    std::string entry_hash;
+    std::vector<curlee::bundle::ImportPin> imports;
+};
 
 curlee::runtime::Capabilities empty_caps()
 {
@@ -67,10 +78,12 @@ void print_usage(std::ostream& out)
     out << "  curlee run [--fuel <n>] [--bundle <file.bundle>] [--cap <capability>]... "
            "<file.curlee>\n";
     out << "  curlee fmt [--check] <file>\n";
-        out << "  curlee bundle build [--root <dir>] [--stdlib-root <dir>] [--cap <capability>]... "
-            "<entry.curlee> <out.bundle>\n";
+    out << "  curlee bundle build [--root <dir>] [--stdlib-root <dir>] [--cap <capability>]... "
+           "<entry.curlee> <out.bundle>\n";
     out << "  curlee bundle verify <file.bundle>\n";
     out << "  curlee bundle info <file.bundle>\n";
+    out << "  curlee deps lock [--root <dir>] [--stdlib-root <dir>] <entry.curlee> <deps.lock>\n";
+    out << "  curlee deps verify [--root <dir>] [--stdlib-root <dir>] <entry.curlee> <deps.lock>\n";
 }
 
 bool ends_with(std::string_view s, std::string_view suffix)
@@ -125,6 +138,240 @@ std::string join_import_pins(const std::vector<curlee::bundle::ImportPin>& pins)
     }
     return out;
 } // GCOVR_EXCL_LINE
+
+// GCOVR_EXCL_START
+std::vector<std::string> split_nonempty_csv(std::string_view value)
+{
+    std::vector<std::string> parts;
+    std::string current;
+    for (const char ch : value)
+    {
+        if (ch == ',')
+        {
+            if (!current.empty())
+            {
+                parts.push_back(current);
+                current.clear();
+            }
+            continue;
+        }
+        current.push_back(ch);
+    }
+
+    if (!current.empty())
+    {
+        parts.push_back(current);
+    }
+
+    return parts;
+}
+
+bool import_pins_equal(const std::vector<curlee::bundle::ImportPin>& lhs,
+                       const std::vector<curlee::bundle::ImportPin>& rhs)
+{
+    if (lhs.size() != rhs.size())
+    {
+        return false;
+    }
+
+    for (std::size_t i = 0; i < lhs.size(); ++i)
+    {
+        if (lhs[i].path != rhs[i].path || lhs[i].hash != rhs[i].hash)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+std::string hash_text(std::string_view value)
+{
+    std::vector<std::uint8_t> bytes;
+    bytes.reserve(value.size());
+    for (const char c : value)
+    {
+        bytes.push_back(static_cast<std::uint8_t>(c));
+    }
+    return curlee::bundle::hash_bytes(bytes);
+}
+
+bool is_relative_inside(const std::filesystem::path& absolute_path,
+                       const std::filesystem::path& absolute_root)
+{
+    const auto rel = absolute_path.lexically_relative(absolute_root);
+    if (rel.empty())
+    {
+        return false;
+    }
+
+    const auto it = rel.begin();
+    if (it != rel.end() && *it == "..")
+    {
+        return false;
+    }
+
+    return true;
+}
+
+std::optional<std::string> stable_dependency_id_for_path(
+    const std::filesystem::path& module_path,
+    const std::filesystem::path& entry_dir,
+    const std::vector<std::filesystem::path>& stdlib_roots)
+{
+    namespace fs = std::filesystem;
+
+    const fs::path abs_module = fs::absolute(module_path).lexically_normal();
+    const fs::path abs_entry = fs::absolute(entry_dir).lexically_normal();
+
+    auto format_rel = [](std::string_view prefix, const fs::path& rel_path) -> std::string
+    {
+        std::string rel = rel_path.generic_string();
+        if (ends_with(rel, ".curlee"))
+        {
+            rel.resize(rel.size() - std::string_view(".curlee").size());
+        }
+        return std::string(prefix) + rel;
+    };
+
+    if (is_relative_inside(abs_module, abs_entry))
+    {
+        return format_rel("entry/", abs_module.lexically_relative(abs_entry));
+    }
+
+    for (std::size_t i = 0; i < stdlib_roots.size(); ++i)
+    {
+        const fs::path abs_stdlib = fs::absolute(stdlib_roots[i]).lexically_normal();
+        if (!is_relative_inside(abs_module, abs_stdlib))
+        {
+            continue;
+        }
+
+        return format_rel("stdlib" + std::to_string(i) + "/",
+                          abs_module.lexically_relative(abs_stdlib));
+    }
+
+    return std::nullopt;
+}
+
+bool read_dependency_lockfile(const std::string& path, DependencyLockfile& out, std::string& error)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in)
+    {
+        error = "failed to open lockfile";
+        return false;
+    }
+
+    std::string line;
+    if (!std::getline(in, line) || line != kDepsLockHeader)
+    {
+        error = "invalid lockfile header";
+        return false;
+    }
+
+    bool saw_format = false;
+    bool saw_entry_hash = false;
+    std::vector<curlee::bundle::ImportPin> imports;
+    while (std::getline(in, line))
+    {
+        if (line.empty())
+        {
+            continue;
+        }
+
+        const auto eq = line.find('=');
+        if (eq == std::string::npos)
+        {
+            continue;
+        }
+
+        const std::string key = line.substr(0, eq);
+        const std::string value = line.substr(eq + 1);
+        if (key == "format_version")
+        {
+            int parsed = 0;
+            const char* begin = value.data();
+            const char* end = value.data() + value.size();
+            const auto parse_result = std::from_chars(begin, end, parsed);
+            if (parse_result.ec != std::errc{} || parse_result.ptr != end)
+            {
+                error = "invalid lockfile format version";
+                return false;
+            }
+            out.format_version = parsed;
+            saw_format = true;
+            continue;
+        }
+
+        if (key == "entry_hash")
+        {
+            out.entry_hash = value;
+            saw_entry_hash = true;
+            continue;
+        }
+
+        if (key == "imports")
+        {
+            imports.clear();
+            const auto entries = split_nonempty_csv(value);
+            for (const auto& entry : entries)
+            {
+                const auto pos = entry.find(':');
+                if (pos == std::string::npos || pos == 0 || pos + 1 >= entry.size())
+                {
+                    error = "invalid lockfile import pin";
+                    return false;
+                }
+
+                imports.push_back(curlee::bundle::ImportPin{
+                    .path = entry.substr(0, pos),
+                    .hash = entry.substr(pos + 1),
+                });
+            }
+        }
+    }
+
+    if (!saw_format)
+    {
+        error = "missing lockfile format version";
+        return false;
+    }
+
+    if (out.format_version != kDepsLockFormatVersion)
+    {
+        error = "unsupported lockfile format version: " + std::to_string(out.format_version) +
+                " (supported: " + std::to_string(kDepsLockFormatVersion) + ")";
+        return false;
+    }
+
+    if (!saw_entry_hash || out.entry_hash.empty())
+    {
+        error = "missing entry_hash";
+        return false;
+    }
+
+    out.imports = std::move(imports);
+    return true;
+}
+// GCOVR_EXCL_STOP
+
+bool write_dependency_lockfile(const std::string& path, const DependencyLockfile& lock,
+                               std::string& error)
+{
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out)
+    {
+        error = "failed to open lockfile for writing";
+        return false;
+    }
+
+    out << kDepsLockHeader << "\n";
+    out << "format_version=" << kDepsLockFormatVersion << "\n";
+    out << "entry_hash=" << lock.entry_hash << "\n";
+    out << "imports=" << join_import_pins(lock.imports) << "\n";
+    return true;
+}
 
 bool is_v1_forbidden_capability(std::string_view cap)
 {
@@ -235,6 +482,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
     std::unordered_map<std::string, std::size_t> imported_file_by_path;
     std::vector<parser::Program> imported_programs;
     std::unordered_map<std::string, std::size_t> imported_by_path;
+    std::unordered_map<std::string, std::string> dependency_id_by_path;
 
     std::optional<types::TypeInfo> last_type_info;
 
@@ -255,6 +503,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         imported_file_by_path.clear();
         imported_programs.clear();
         imported_by_path.clear();
+        dependency_id_by_path.clear();
 
         std::unordered_set<std::string> visiting;
         std::unordered_set<std::string> visited;
@@ -345,6 +594,34 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                 imported_file_by_path.emplace(key, file_idx);
             }
             const source::SourceFile& stable_file = *imported_files[file_idx];
+
+            if (!dependency_id_by_path.contains(key))
+            {
+                const auto dependency_id =
+                    stable_dependency_id_for_path(stable_file.path, entry_dir, stdlib_roots);
+                if (!dependency_id.has_value())
+                {
+                    const diag::Diagnostic d{ // GCOVR_EXCL_LINE
+                        .severity = diag::Severity::Error,
+                        .message = "cannot generate deterministic dependency pin for import outside "
+                                   "entry/stdlib roots",
+                        .span = std::nullopt,
+                        .notes =
+                            {
+                                diag::Related{.message = "module: " + stable_file.path,
+                                              .span = std::nullopt},
+                                diag::Related{.message =
+                                                  "set --root and --stdlib-root so imports resolve "
+                                                  "inside deterministic roots",
+                                              .span = std::nullopt},
+                            },
+                    };
+                    std::cerr << diag::render(d, stable_file);
+                    return false;
+                }
+
+                dependency_id_by_path.emplace(key, *dependency_id);
+            }
 
             if (visited.contains(key))
             {
@@ -455,7 +732,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             visiting.erase(key);
             visited.insert(key);
             return true;
-        };
+        }; // GCOVR_EXCL_LINE
 
         const auto lexed = lexer::lex(file.contents);
         if (std::holds_alternative<diag::Diagnostic>(lexed))
@@ -724,12 +1001,22 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         }
 
         std::vector<std::string> keys;
-        keys.reserve(imported_file_by_path.size());
-        for (const auto& [k, _] : imported_file_by_path)
+        keys.reserve(dependency_id_by_path.size());
+        for (const auto& [k, _] : dependency_id_by_path)
         {
             keys.push_back(k);
         }
-        std::sort(keys.begin(), keys.end());
+        std::sort(keys.begin(), keys.end(),
+                  [&](const std::string& lhs, const std::string& rhs) -> bool
+                  {
+                      const auto& lhs_id = dependency_id_by_path.at(lhs);
+                      const auto& rhs_id = dependency_id_by_path.at(rhs);
+                      if (lhs_id == rhs_id) // GCOVR_EXCL_LINE
+                      {
+                          return lhs < rhs; // GCOVR_EXCL_LINE
+                      }
+                      return lhs_id < rhs_id;
+                  });
 
         out_import_pins->clear();
         out_import_pins->reserve(keys.size());
@@ -746,7 +1033,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             }
 
             curlee::bundle::ImportPin pin;
-            pin.path = key;
+            pin.path = dependency_id_by_path.at(key);
             pin.hash = curlee::bundle::hash_bytes(bytes);
             out_import_pins->push_back(std::move(pin));
         }
@@ -921,6 +1208,109 @@ int cmd_bundle_build(const std::string& entry_path_arg, const std::string& bundl
     }
 
     std::cout << "curlee bundle build: wrote " << bundle_path << "\n";
+    return kExitOk;
+}
+
+int cmd_collect_dependency_snapshot(const std::string& entry_path_arg,
+                                   const std::vector<std::filesystem::path>& stdlib_roots,
+                                   const std::optional<std::filesystem::path>& input_root,
+                                   std::string& out_entry_hash,
+                                   std::vector<curlee::bundle::ImportPin>& out_import_pins)
+{
+    namespace fs = std::filesystem;
+
+    fs::path entry_path = fs::path(entry_path_arg);
+    if (input_root.has_value() && !entry_path.is_absolute())
+    {
+        entry_path = *input_root / entry_path;
+    }
+
+    std::vector<std::uint8_t> bytecode;
+    const int rc = cmd_read_only("bundle-build", entry_path.string(), empty_caps(), kDefaultFuel,
+                                 stdlib_roots, input_root, &out_import_pins, &bytecode);
+    if (rc != kExitOk)
+    {
+        return rc;
+    }
+
+    auto loaded = source::load_source_file(entry_path.string());
+    if (auto* err = std::get_if<source::LoadError>(&loaded)) // GCOVR_EXCL_LINE
+    {
+        std::cerr << "error: dependency snapshot failed: " << err->message << "\n"; // GCOVR_EXCL_LINE
+        return kExitError; // GCOVR_EXCL_LINE
+    }
+
+    const auto& file = std::get<source::SourceFile>(loaded);
+    out_entry_hash = hash_text(file.contents);
+    return kExitOk;
+}
+
+int cmd_deps_lock(const std::string& entry_path_arg, const std::string& lock_path,
+                 const std::vector<std::filesystem::path>& stdlib_roots,
+                 const std::optional<std::filesystem::path>& input_root)
+{
+    std::string entry_hash;
+    std::vector<curlee::bundle::ImportPin> import_pins;
+    const int rc = cmd_collect_dependency_snapshot(entry_path_arg, stdlib_roots, input_root,
+                                                   entry_hash, import_pins);
+    if (rc != kExitOk)
+    {
+        return rc;
+    }
+
+    DependencyLockfile lock;
+    lock.entry_hash = std::move(entry_hash);
+    lock.imports = std::move(import_pins);
+
+    std::string error;
+    if (!write_dependency_lockfile(lock_path, lock, error))
+    {
+        std::cerr << "error: deps lock failed: " << error << "\n";
+        return kExitError;
+    }
+
+    std::cout << "curlee deps lock: wrote " << lock_path << "\n";
+    return kExitOk;
+}
+
+int cmd_deps_verify(const std::string& entry_path_arg, const std::string& lock_path,
+                   const std::vector<std::filesystem::path>& stdlib_roots,
+                   const std::optional<std::filesystem::path>& input_root)
+{
+    std::string entry_hash;
+    std::vector<curlee::bundle::ImportPin> import_pins;
+    const int rc = cmd_collect_dependency_snapshot(entry_path_arg, stdlib_roots, input_root,
+                                                   entry_hash, import_pins);
+    if (rc != kExitOk)
+    {
+        return rc;
+    }
+
+    DependencyLockfile lock;
+    std::string error;
+    if (!read_dependency_lockfile(lock_path, lock, error))
+    {
+        std::cerr << "error: deps verify failed: " << error << "\n";
+        return kExitError;
+    }
+
+    if (entry_hash != lock.entry_hash)
+    {
+        std::cerr << "error: deps verify failed: entry hash mismatch\n";
+        std::cerr << "  expected: " << lock.entry_hash << "\n";
+        std::cerr << "  actual:   " << entry_hash << "\n";
+        return kExitError;
+    }
+
+    if (!import_pins_equal(import_pins, lock.imports))
+    {
+        std::cerr << "error: deps verify failed: imports mismatch\n";
+        std::cerr << "  expected: " << join_import_pins(lock.imports) << "\n";
+        std::cerr << "  actual:   " << join_import_pins(import_pins) << "\n";
+        return kExitError;
+    }
+
+    std::cout << "curlee deps verify: ok\n";
     return kExitOk;
 }
 
@@ -1239,6 +1629,110 @@ int run(int argc, char** argv)
         std::cerr << "error: unknown bundle subcommand: " << sub << "\n\n";
         print_usage(std::cerr);
         return kExitUsage;
+    }
+
+    if (cmd == "deps")
+    {
+        if (args.empty())
+        {
+            std::cerr << "error: expected curlee deps <lock|verify> ...\n\n";
+            print_usage(std::cerr);
+            return kExitUsage;
+        }
+
+        const std::string_view sub = args[0];
+        if (sub != "lock" && sub != "verify")
+        {
+            std::cerr << "error: unknown deps subcommand: " << sub << "\n\n";
+            print_usage(std::cerr);
+            return kExitUsage;
+        }
+
+        auto stdlib_roots = load_stdlib_roots_from_env();
+        std::optional<std::filesystem::path> root;
+        std::vector<std::string> positional;
+
+        for (std::size_t i = 1; i < args.size();)
+        {
+            const std::string_view a = args[i];
+            if (a == "--root")
+            {
+                if (i + 1 >= args.size())
+                {
+                    std::cerr << "error: expected path after --root\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                root = std::filesystem::path(std::string(args[i + 1]));
+                i += 2;
+                continue;
+            }
+
+            if (a.starts_with("--root="))
+            {
+                const auto root_value = a.substr(std::string_view("--root=").size());
+                if (root_value.empty())
+                {
+                    std::cerr << "error: expected path after --root=\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                root = std::filesystem::path(std::string(root_value));
+                ++i;
+                continue;
+            }
+
+            if (a == "--stdlib-root")
+            {
+                if (i + 1 >= args.size())
+                {
+                    std::cerr << "error: expected path after --stdlib-root\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                stdlib_roots.push_back(std::string(args[i + 1]));
+                i += 2;
+                continue;
+            }
+
+            if (a.starts_with("--stdlib-root="))
+            {
+                const auto root_value = a.substr(std::string_view("--stdlib-root=").size());
+                if (root_value.empty())
+                {
+                    std::cerr << "error: expected path after --stdlib-root=\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                stdlib_roots.push_back(std::string(root_value));
+                ++i;
+                continue;
+            }
+
+            if (a.starts_with('-'))
+            {
+                std::cerr << "error: unknown option: " << a << "\n\n";
+                print_usage(std::cerr);
+                return kExitUsage;
+            }
+
+            positional.push_back(std::string(a));
+            ++i;
+        }
+
+        if (positional.size() != 2)
+        {
+            std::cerr << "error: expected curlee deps " << sub
+                      << " [options] <entry.curlee> <deps.lock>\n\n";
+            print_usage(std::cerr);
+            return kExitUsage;
+        }
+
+        if (sub == "lock")
+        {
+            return cmd_deps_lock(positional[0], positional[1], stdlib_roots, root);
+        }
+        return cmd_deps_verify(positional[0], positional[1], stdlib_roots, root);
     }
 
     if (cmd == "run")
