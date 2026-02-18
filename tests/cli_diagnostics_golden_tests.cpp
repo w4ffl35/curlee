@@ -130,29 +130,13 @@ bool run_stdio_case(const std::string& case_name,
 
 int main(int argc, char** argv)
 {
-    if (argc != 8)
+    if (argc != 2)
     {
-        std::cerr
-            << "usage: curlee_cli_diagnostics_golden_tests <tests/cli_diagnostics-dir> "
-               "<fake-python-runner-error> <fake-python-runner-hang> <fake-python-runner-spam> "
-               "<fake-python-runner-env-check> <fake-python-runner-sandbox-required> "
-               "<fake-bwrap>\n";
+        std::cerr << "usage: curlee_cli_diagnostics_golden_tests <tests/cli_diagnostics-dir>\n";
         return 2;
     }
 
     const fs::path dir = fs::path(argv[1]);
-    const std::string fake_runner_error = argv[2];
-    const std::string fake_runner_hang = argv[3];
-    const std::string fake_runner_spam = argv[4];
-    const std::string fake_runner_env_check = argv[5];
-    const std::string fake_runner_sandbox_required = argv[6];
-    const std::string fake_bwrap = argv[7];
-    (void)fake_runner_error;
-    (void)fake_runner_hang;
-    (void)fake_runner_spam;
-    (void)fake_runner_env_check;
-    (void)fake_runner_sandbox_required;
-    (void)fake_bwrap;
 
     const fs::path rel_missing_file = "tests/fixtures/does_not_exist.cur";
     const fs::path rel_requires_divide = "tests/fixtures/check_requires_divide.curlee";
