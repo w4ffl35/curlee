@@ -1,0 +1,4 @@
+tests/fixtures/check_match_missing_arm.curlee:8:3: error: non-exhaustive match on enum 'Option': missing arm Option::None
+  |
+  |   match (v) {
+  |   ^

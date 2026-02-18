@@ -568,8 +568,8 @@ int main()
 
         curlee::parser::Expr struct_lit;
         struct_lit.span = curlee::source::Span{.start = 0, .end = 0};
-        struct_lit.node = curlee::parser::StructLiteralExpr{.type_name = "T",
-                                                            .fields = std::move(fields)};
+        struct_lit.node =
+            curlee::parser::StructLiteralExpr{.type_name = "T", .fields = std::move(fields)};
 
         curlee::parser::Stmt stmt;
         stmt.span = curlee::source::Span{.start = 0, .end = 0};
@@ -578,6 +578,67 @@ int main()
         curlee::parser::Block body;
         body.span = curlee::source::Span{.start = 0, .end = 0};
         body.stmts.push_back(std::move(stmt));
+
+        curlee::parser::Function fun;
+        fun.span = curlee::source::Span{.start = 0, .end = 0};
+        fun.name = "f";
+        fun.body = std::move(body);
+        program.functions.push_back(std::move(fun));
+
+        curlee::parser::reassign_expr_ids(program);
+    }
+
+    {
+        // assign_expr_ids(): match-arm body may be null in manually-shaped ASTs.
+        curlee::parser::Program program;
+
+        curlee::parser::Expr match_value;
+        match_value.span = curlee::source::Span{.start = 0, .end = 0};
+        match_value.node = curlee::parser::IntExpr{.lexeme = "0"};
+
+        curlee::parser::MatchArm arm_with_null_body;
+        arm_with_null_body.span = curlee::source::Span{.start = 0, .end = 0};
+        arm_with_null_body.pattern = curlee::parser::MatchArmPattern{
+            .span = curlee::source::Span{.start = 0, .end = 0},
+            .enum_name = "E",
+            .variant_name = "A",
+            .payload_name = std::nullopt,
+        };
+        arm_with_null_body.body = nullptr;
+
+        curlee::parser::Expr inner_expr;
+        inner_expr.span = curlee::source::Span{.start = 0, .end = 0};
+        inner_expr.node = curlee::parser::IntExpr{.lexeme = "1"};
+
+        curlee::parser::Stmt inner_stmt;
+        inner_stmt.span = curlee::source::Span{.start = 0, .end = 0};
+        inner_stmt.node = curlee::parser::ExprStmt{.expr = std::move(inner_expr)};
+
+        curlee::parser::Block arm_block;
+        arm_block.span = curlee::source::Span{.start = 0, .end = 0};
+        arm_block.stmts.push_back(std::move(inner_stmt));
+
+        curlee::parser::MatchArm arm_with_body;
+        arm_with_body.span = curlee::source::Span{.start = 0, .end = 0};
+        arm_with_body.pattern = curlee::parser::MatchArmPattern{
+            .span = curlee::source::Span{.start = 0, .end = 0},
+            .enum_name = "E",
+            .variant_name = "B",
+            .payload_name = std::nullopt,
+        };
+        arm_with_body.body = std::make_unique<curlee::parser::Block>(std::move(arm_block));
+
+        curlee::parser::Stmt match_stmt;
+        match_stmt.span = curlee::source::Span{.start = 0, .end = 0};
+        std::vector<curlee::parser::MatchArm> arms;
+        arms.push_back(std::move(arm_with_null_body));
+        arms.push_back(std::move(arm_with_body));
+        match_stmt.node =
+            curlee::parser::MatchStmt{.value = std::move(match_value), .arms = std::move(arms)};
+
+        curlee::parser::Block body;
+        body.span = curlee::source::Span{.start = 0, .end = 0};
+        body.stmts.push_back(std::move(match_stmt));
 
         curlee::parser::Function fun;
         fun.span = curlee::source::Span{.start = 0, .end = 0};

@@ -37,22 +37,22 @@ int main()
     // Cover TokenKind stringification (used in diagnostics and tests).
     {
         constexpr TokenKind all_kinds[] = {
-            TokenKind::Eof,           TokenKind::Identifier,   TokenKind::IntLiteral,
-            TokenKind::StringLiteral, TokenKind::KwFn,         TokenKind::KwLet,
-            TokenKind::KwIf,          TokenKind::KwElse,       TokenKind::KwWhile,
-            TokenKind::KwReturn,      TokenKind::KwTrue,       TokenKind::KwFalse,
-            TokenKind::KwRequires,    TokenKind::KwEnsures,    TokenKind::KwWhere,
-            TokenKind::KwUnsafe,      TokenKind::KwCap,        TokenKind::KwImport,
-            TokenKind::KwAs,          TokenKind::KwStruct,     TokenKind::KwEnum,
-            TokenKind::LParen,        TokenKind::RParen,       TokenKind::LBrace,
-            TokenKind::RBrace,        TokenKind::LBracket,     TokenKind::RBracket,
-            TokenKind::Semicolon,     TokenKind::Comma,        TokenKind::Colon,
-            TokenKind::ColonColon,    TokenKind::Dot,          TokenKind::Arrow,
-            TokenKind::Equal,         TokenKind::EqualEqual,   TokenKind::Bang,
-            TokenKind::BangEqual,     TokenKind::Less,         TokenKind::LessEqual,
-            TokenKind::Greater,       TokenKind::GreaterEqual, TokenKind::Plus,
-            TokenKind::Minus,         TokenKind::Star,         TokenKind::Slash,
-            TokenKind::AndAnd,        TokenKind::OrOr,
+            TokenKind::Eof,           TokenKind::Identifier, TokenKind::IntLiteral,
+            TokenKind::StringLiteral, TokenKind::KwFn,       TokenKind::KwLet,
+            TokenKind::KwIf,          TokenKind::KwElse,     TokenKind::KwWhile,
+            TokenKind::KwReturn,      TokenKind::KwTrue,     TokenKind::KwFalse,
+            TokenKind::KwRequires,    TokenKind::KwEnsures,  TokenKind::KwWhere,
+            TokenKind::KwUnsafe,      TokenKind::KwCap,      TokenKind::KwImport,
+            TokenKind::KwAs,          TokenKind::KwStruct,   TokenKind::KwEnum,
+            TokenKind::KwMatch,       TokenKind::LParen,     TokenKind::RParen,
+            TokenKind::LBrace,        TokenKind::RBrace,     TokenKind::LBracket,
+            TokenKind::RBracket,      TokenKind::Semicolon,  TokenKind::Comma,
+            TokenKind::Colon,         TokenKind::ColonColon, TokenKind::Dot,
+            TokenKind::Arrow,         TokenKind::Equal,      TokenKind::EqualEqual,
+            TokenKind::Bang,          TokenKind::BangEqual,  TokenKind::Less,
+            TokenKind::LessEqual,     TokenKind::Greater,    TokenKind::GreaterEqual,
+            TokenKind::Plus,          TokenKind::Minus,      TokenKind::Star,
+            TokenKind::Slash,         TokenKind::AndAnd,     TokenKind::OrOr,
         };
 
         for (const auto kind : all_kinds)
@@ -67,6 +67,19 @@ int main()
         {
             fail("expected invalid TokenKind to stringify to 'unknown'");
         }
+    }
+
+    {
+        const std::string src = "match";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for match keyword");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::KwMatch, "match");
+        expect_token(toks, 1, TokenKind::Eof, "");
     }
 
     {

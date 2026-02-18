@@ -1,0 +1,14 @@
+enum Option {
+  Some(Int);
+  None;
+}
+
+fn main() -> Int {
+  let v: Option = Option::Some(1);
+  match (v) {
+    Option::Some(x) => {
+      return x;
+    }
+  }
+  return 0;
+}

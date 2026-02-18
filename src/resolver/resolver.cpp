@@ -17,7 +17,24 @@ namespace
 using curlee::diag::Diagnostic;
 using curlee::diag::Related;
 using curlee::diag::Severity;
-using namespace curlee::parser;
+using curlee::parser::BinaryExpr;
+using curlee::parser::BlockStmt;
+using curlee::parser::CallExpr;
+using curlee::parser::Expr;
+using curlee::parser::ExprStmt;
+using curlee::parser::Function;
+using curlee::parser::GroupExpr;
+using curlee::parser::IfStmt;
+using curlee::parser::LetStmt;
+using curlee::parser::MatchStmt;
+using curlee::parser::MemberExpr;
+using curlee::parser::NameExpr;
+using curlee::parser::ReturnStmt;
+using curlee::parser::ScopedNameExpr;
+using curlee::parser::Stmt;
+using curlee::parser::StructLiteralExpr;
+using curlee::parser::UnsafeStmt;
+using curlee::parser::WhileStmt;
 using curlee::source::Span;
 
 static std::string join_path(const std::vector<std::string_view>& parts)
@@ -173,10 +190,9 @@ class Resolver
             {
                 Diagnostic d = std::move(found.error());
                 d.span = imp.span;
-                // Preserve the "import not found: 'foo'" message format if needed,
-                // or just trust module_loader.
-                // The module_loader already returns a diagnostic with "import not found: '...'"
-                // but let's make sure the span is correct.
+                d.notes.push_back(Related{.message = "expected module at " +
+                                                     first_expected.string(), // GCOVR_EXCL_LINE
+                                          .span = std::nullopt});             // GCOVR_EXCL_LINE
                 diagnostics_.push_back(std::move(d));
                 continue;
             }
@@ -284,9 +300,8 @@ class Resolver
             d.severity = Severity::Error;
             d.message = std::string(kind) + ": '" + std::string(name) + "'";
             d.span = span;
-            const Related previous_note{.message = "previous definition is here",
-                                        .span = it->second.span};
-            d.notes.push_back(previous_note); // GCOVR_EXCL_LINE
+            d.notes.push_back(Related{.message = "previous definition is here", // GCOVR_EXCL_LINE
+                                      .span = it->second.span});                // GCOVR_EXCL_LINE
             diagnostics_.push_back(std::move(d));
             return;
         }
@@ -429,6 +444,29 @@ class Resolver
             resolve_stmt(stmt);
         }
         pop_scope();
+    }
+
+    void resolve_stmt_node(const MatchStmt& s, Span)
+    {
+        resolve_expr(s.value);
+
+        for (const auto& arm : s.arms)
+        {
+            push_scope();
+            if (arm.pattern.payload_name.has_value())
+            {
+                declare(*arm.pattern.payload_name, arm.pattern.span,
+                        "duplicate match payload binding");
+            }
+            if (arm.body != nullptr)
+            {
+                for (const auto& stmt : arm.body->stmts)
+                {
+                    resolve_stmt(stmt);
+                }
+            }
+            pop_scope();
+        }
     }
 
     void resolve_expr(const Expr& e)
