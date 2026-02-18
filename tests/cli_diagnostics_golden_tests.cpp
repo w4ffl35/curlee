@@ -912,6 +912,14 @@ int main(int argc, char** argv)
         dir / "run_python_ffi_sandboxed.stdout.golden";
     const fs::path run_python_ffi_sandboxed_err_golden =
         dir / "run_python_ffi_sandboxed.stderr.golden";
+    const fs::path run_graphics_window_init_failed_out_golden =
+        dir / "run_graphics_window_init_failed.stdout.golden";
+    const fs::path run_graphics_window_init_failed_err_golden =
+        dir / "run_graphics_window_init_failed.stderr.golden";
+    const fs::path run_graphics_window_present_failed_out_golden =
+        dir / "run_graphics_window_present_failed.stdout.golden";
+    const fs::path run_graphics_window_present_failed_err_golden =
+        dir / "run_graphics_window_present_failed.stderr.golden";
 
     try
     {
@@ -1152,6 +1160,41 @@ int main(int argc, char** argv)
 
             (void)unsetenv("CURLEE_PYTHON_RUNNER");
             (void)unsetenv("CURLEE_BWRAP");
+        }
+
+        // Graphics backend init failure surfaces deterministic runtime diagnostic.
+        {
+            (void)setenv("CURLEE_GFX_WINDOW_INIT_FAIL", "1", 1);
+
+            const std::string rel_path = "tests/fixtures/run_success.curlee";
+            const std::vector<std::string> argv_storage = {
+                "curlee", "run", "--graphics=window", "--cap", "gfx.window", rel_path};
+            if (!run_run_python_ffi_case(argv_storage, run_graphics_window_init_failed_out_golden,
+                                         run_graphics_window_init_failed_err_golden,
+                                         "run-graphics-window-init-failed", 1))
+            {
+                return 1;
+            }
+
+            (void)unsetenv("CURLEE_GFX_WINDOW_INIT_FAIL");
+        }
+
+        // Graphics backend present failure surfaces deterministic runtime diagnostic.
+        {
+            (void)setenv("CURLEE_GFX_WINDOW_PRESENT_FAIL", "1", 1);
+
+            const std::string rel_path = "tests/fixtures/run_success.curlee";
+            const std::vector<std::string> argv_storage = {
+                "curlee", "run", "--graphics=window", "--cap", "gfx.window", rel_path};
+            if (!run_run_python_ffi_case(argv_storage,
+                                         run_graphics_window_present_failed_out_golden,
+                                         run_graphics_window_present_failed_err_golden,
+                                         "run-graphics-window-present-failed", 1))
+            {
+                return 1;
+            }
+
+            (void)unsetenv("CURLEE_GFX_WINDOW_PRESENT_FAIL");
         }
     }
     catch (const std::exception& e)

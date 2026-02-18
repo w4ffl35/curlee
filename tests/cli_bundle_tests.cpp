@@ -554,6 +554,48 @@ int main()
         fs::remove_all(dir);
     }
 
+    // Bundle mode + graphics backend: runtime capability checks include gfx.window.
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_graphics_requires_cap");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path entry = dir / "main.curlee";
+        const fs::path bundle_path = dir / "ok.bundle";
+
+        {
+            std::ofstream out(entry);
+            out << "fn main() -> Int { return 0; }\n";
+        }
+
+        Bundle bundle;
+        bundle.manifest.capabilities = {};
+        bundle.manifest.imports = {};
+        bundle.bytecode = curlee::vm::encode_chunk(make_return_int_chunk(0));
+
+        const auto write_err = write_bundle(bundle_path.string(), bundle);
+        if (!write_err.message.empty())
+        {
+            fail("expected bundle write to succeed");
+        }
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli({"curlee", "run", "--graphics=window", "--bundle",
+                                bundle_path.string(), entry.string()},
+                               out, err);
+        if (rc == 0)
+        {
+            fail("expected run to fail when gfx.window is not granted for graphics mode");
+        }
+        if (err.find("capability not granted: gfx.window") == std::string::npos)
+        {
+            fail("expected stderr to mention missing gfx.window capability");
+        }
+
+        fs::remove_all(dir);
+    }
+
     // Bundle mode: invalid bundle bytecode should be diagnosed.
     {
         const fs::path dir = temp_path("curlee_cli_bundle_bad_bytecode");

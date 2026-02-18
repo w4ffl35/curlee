@@ -143,6 +143,45 @@ int main(int argc, char** argv)
         }
     };
 
+    auto run_twice_graphics_deterministic = [](const Chunk& chunk, Value expected)
+    {
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("gfx.window");
+
+        VmRunOptions options;
+        options.use_window_graphics_backend = true;
+
+        const auto res1 = vm.run(chunk, caps, options);
+        if (!res1.ok)
+        {
+            fail("expected graphics VM run to succeed");
+        }
+        if (!(res1.value == expected))
+        {
+            fail("unexpected graphics VM result");
+        }
+
+        const auto res2 = vm.run(chunk, caps, options);
+        if (!res2.ok)
+        {
+            fail("expected second graphics VM run to succeed");
+        }
+        if (!(res2.value == expected))
+        {
+            fail("unexpected second graphics VM result");
+        }
+        if (res1.command_stream != res2.command_stream)
+        {
+            fail("expected deterministic graphics command stream across runs");
+        }
+        const std::vector<std::string> expected_stream = {"gfx.window:init", "gfx.window:present"};
+        if (res1.command_stream != expected_stream)
+        {
+            fail("unexpected graphics command stream contents");
+        }
+    };
+
     auto expect_underflow = [](OpCode op, const char* what)
     {
         const curlee::source::Span span{.start = 900, .end = 901};
@@ -232,6 +271,55 @@ int main(int argc, char** argv)
         chunk.emit(OpCode::Return);
 
         run_twice_deterministic(chunk, Value::int_v(42));
+        run_twice_graphics_deterministic(chunk, Value::int_v(42));
+    }
+
+    // Graphics backend requires explicit capability.
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        VmRunOptions options;
+        options.use_window_graphics_backend = true;
+        const auto res = vm.run(chunk, caps, options);
+        if (res.ok || res.error != "missing capability gfx.window")
+        {
+            fail("expected missing gfx.window capability error");
+        }
+    }
+
+    // Graphics backend init/present failures surface deterministic runtime errors.
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(9));
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("gfx.window");
+        VmRunOptions options;
+        options.use_window_graphics_backend = true;
+
+        EnvVarGuard init_fail_guard{"CURLEE_GFX_WINDOW_INIT_FAIL"};
+        init_fail_guard.set("1");
+        const auto init_res = vm.run(chunk, caps, options);
+        init_fail_guard.unset();
+        if (init_res.ok || init_res.error != "graphics backend init failed")
+        {
+            fail("expected graphics backend init failure");
+        }
+
+        EnvVarGuard present_fail_guard{"CURLEE_GFX_WINDOW_PRESENT_FAIL"};
+        present_fail_guard.set("1");
+        const auto present_res = vm.run(chunk, caps, options);
+        present_fail_guard.unset();
+        if (present_res.ok || present_res.error != "graphics backend present failed")
+        {
+            fail("expected graphics backend present failure");
+        }
     }
 
     // Conditional branch via JumpIfFalse.

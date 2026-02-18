@@ -351,6 +351,55 @@ int main()
         expect_contains(err, "error: expected bundle path after --bundle", "stderr");
     }
 
+    // run: missing value after --graphics
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--graphics"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for missing --graphics arg");
+        }
+        expect_contains(err, "error: expected backend name after --graphics", "stderr");
+    }
+
+    // run: empty --graphics=
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--graphics=", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for empty --graphics=");
+        }
+        expect_contains(err, "error: expected backend name after --graphics=", "stderr");
+    }
+
+    // run: unsupported graphics backend
+    {
+        std::string out;
+        std::string err;
+        const int rc =
+            run_cli_capture({"curlee", "run", "--graphics", "metal", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for unsupported --graphics backend");
+        }
+        expect_contains(err, "error: unsupported graphics backend: metal", "stderr");
+    }
+
+    // run: valid --graphics=window is accepted (missing file path still reported).
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--graphics=window"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for missing run file (with --graphics=window)");
+        }
+        expect_contains(err, "error: expected <file.curlee>", "stderr");
+    }
+
     // run: empty --bundle=
     {
         std::string out;

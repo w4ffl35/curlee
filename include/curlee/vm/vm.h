@@ -6,6 +6,7 @@
 #include <curlee/vm/bytecode.h>
 #include <optional>
 #include <string>
+#include <vector>
 
 /**
  * @file vm.h
@@ -22,6 +23,12 @@ struct VmResult
     Value value = Value::unit_v();
     std::string error;
     std::optional<curlee::source::Span> error_span;
+  std::vector<std::string> command_stream;
+};
+
+struct VmRunOptions
+{
+  bool use_window_graphics_backend = false;
 };
 
 /**
@@ -39,9 +46,15 @@ class VM
 
     /** @brief Run with explicit capabilities. */
     [[nodiscard]] VmResult run(const Chunk& chunk, const Capabilities& capabilities);
+    /** @brief Run with explicit capabilities and runtime options. */
+    [[nodiscard]] VmResult run(const Chunk& chunk, const Capabilities& capabilities,
+                   const VmRunOptions& options);
     /** @brief Run with fuel and explicit capabilities. */
     [[nodiscard]] VmResult run(const Chunk& chunk, std::size_t fuel,
                                const Capabilities& capabilities);
+    /** @brief Run with fuel, explicit capabilities, and runtime options. */
+    [[nodiscard]] VmResult run(const Chunk& chunk, std::size_t fuel,
+                   const Capabilities& capabilities, const VmRunOptions& options);
 
   private:
     std::vector<Value> stack_;

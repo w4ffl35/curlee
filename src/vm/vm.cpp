@@ -462,24 +462,53 @@ std::optional<Value> VM::pop()
 
 VmResult VM::run(const Chunk& chunk)
 {
-    return run(chunk, std::numeric_limits<std::size_t>::max(), empty_caps());
+    return run(chunk, std::numeric_limits<std::size_t>::max(), empty_caps(), VmRunOptions{});
 }
 
 VmResult VM::run(const Chunk& chunk, std::size_t fuel)
 {
-    return run(chunk, fuel, empty_caps());
+    return run(chunk, fuel, empty_caps(), VmRunOptions{});
 }
 
 VmResult VM::run(const Chunk& chunk, const Capabilities& capabilities)
 {
-    return run(chunk, std::numeric_limits<std::size_t>::max(), capabilities);
+    return run(chunk, std::numeric_limits<std::size_t>::max(), capabilities, VmRunOptions{});
 }
 
 VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capabilities)
 {
+    return run(chunk, fuel, capabilities, VmRunOptions{});
+}
+
+VmResult VM::run(const Chunk& chunk, const Capabilities& capabilities,
+                 const VmRunOptions& options)
+{
+    return run(chunk, std::numeric_limits<std::size_t>::max(), capabilities, options);
+}
+
+VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capabilities,
+                 const VmRunOptions& options)
+{
     stack_.clear();
     std::vector<Value> locals(chunk.max_locals, Value::unit_v());
     std::vector<std::size_t> call_stack;
+    std::vector<std::string> command_stream;
+
+    if (options.use_window_graphics_backend)
+    {
+        if (!capabilities.contains("gfx.window"))
+        {
+            return err_result("missing capability gfx.window", std::nullopt);
+        }
+        command_stream.push_back("gfx.window:init");
+        if (const auto* fail_init = std::getenv("CURLEE_GFX_WINDOW_INIT_FAIL");
+            fail_init != nullptr && std::string_view(fail_init) == "1")
+        {
+            VmResult init_fail = err_result("graphics backend init failed", std::nullopt);
+            init_fail.command_stream = std::move(command_stream);
+            return init_fail;
+        }
+    }
 
     std::size_t ip = 0;
     while (ip < chunk.code.size())
@@ -744,7 +773,21 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             {
                 return err_result("missing return", span);
             }
-            return ok_result(*result);
+            if (options.use_window_graphics_backend)
+            {
+                command_stream.push_back("gfx.window:present");
+                if (const auto* fail_present = std::getenv("CURLEE_GFX_WINDOW_PRESENT_FAIL");
+                    fail_present != nullptr && std::string_view(fail_present) == "1")
+                {
+                    VmResult present_fail =
+                        err_result("graphics backend present failed", std::nullopt);
+                    present_fail.command_stream = std::move(command_stream);
+                    return present_fail;
+                }
+            }
+            VmResult ok = ok_result(*result);
+            ok.command_stream = std::move(command_stream);
+            return ok;
         }
         case OpCode::Jump:
         {
