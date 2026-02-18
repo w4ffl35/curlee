@@ -1,0 +1,25 @@
+{
+  "policy_version": 1,
+  "semver": {
+    "contract_applies_from_major": 1,
+    "guarantees": {
+      "language_supported_fragment": true,
+      "cli_command_and_exit_code_stability": true,
+      "bundle_format_backward_compatibility_within_major": true
+    },
+    "non_guarantees": [
+      "diagnostic_wording_stability",
+      "internal_vm_bytecode_layout",
+      "experimental_or_future_marked_features"
+    ]
+  },
+  "bundle": {
+    "format_version": 1,
+    "removal_allowed_only_on_major_bump": true
+  },
+  "deprecation": {
+    "minimum_minor_releases_before_removal": 2,
+    "removal_before_next_major_forbidden": true,
+    "required_migration_notes": true
+  }
+}

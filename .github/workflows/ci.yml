@@ -84,6 +84,66 @@ jobs:
           grep -q "dist/SBOM.spdx.json" "$file"
           grep -q "gh attestation verify" "$file"
 
+  compatibility-policy-contract:
+    name: Compatibility policy contract
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify compatibility policy artifact
+        run: |
+          set -euo pipefail
+
+          policy_file=".github/compatibility-policy.json"
+          bundle_header="include/curlee/bundle/bundle.h"
+
+          test -f "$policy_file"
+          test -f "$bundle_header"
+
+          python3 - <<'PY'
+          import json
+          import re
+          import sys
+
+          policy = json.load(open('.github/compatibility-policy.json', encoding='utf-8'))
+          required_top = {'policy_version', 'semver', 'bundle', 'deprecation'}
+          missing_top = required_top - set(policy.keys())
+          if missing_top:
+              print('missing_top_keys', sorted(missing_top))
+              sys.exit(1)
+
+          semver = policy['semver']
+          bundle = policy['bundle']
+          deprecation = policy['deprecation']
+
+          if semver.get('contract_applies_from_major') != 1:
+              print('unexpected contract_applies_from_major', semver.get('contract_applies_from_major'))
+              sys.exit(1)
+
+          if bundle.get('format_version') != 1:
+              print('unexpected bundle format_version', bundle.get('format_version'))
+              sys.exit(1)
+
+          if deprecation.get('minimum_minor_releases_before_removal', 0) < 2:
+              print('minimum_minor_releases_before_removal must be >= 2')
+              sys.exit(1)
+
+          header = open('include/curlee/bundle/bundle.h', encoding='utf-8').read()
+          match = re.search(r'kBundleFormatVersion\s*=\s*(\d+)', header)
+          if not match:
+              print('kBundleFormatVersion constant not found')
+              sys.exit(1)
+
+          header_version = int(match.group(1))
+          if header_version != bundle['format_version']:
+              print('bundle format mismatch', {'policy': bundle['format_version'], 'header': header_version})
+              sys.exit(1)
+
+          print('compatibility_policy_contract=ok')
+          PY
+
   quality-audit:
     name: Quality audit gate
     runs-on: ubuntu-latest
