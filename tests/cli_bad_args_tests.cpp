@@ -377,6 +377,68 @@ int main()
         expect_contains(err, "error: expected non-negative integer for --fuel=", "stderr");
     }
 
+    // run: missing value after --seed
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--seed"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for missing --seed arg");
+        }
+        expect_contains(err, "error: expected integer after --seed", "stderr");
+    }
+
+    // run: invalid --seed value
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--seed", "abc", "x.curlee"}, out,
+                                       err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for invalid --seed value");
+        }
+        expect_contains(err, "error: expected non-negative integer for --seed", "stderr");
+    }
+
+    // run: invalid --seed=
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--seed=abc", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for invalid --seed=");
+        }
+        expect_contains(err, "error: expected non-negative integer for --seed=", "stderr");
+    }
+
+    // run: partially-valid --seed= (covers res.ptr != end parsing failure)
+    {
+        std::string out;
+        std::string err;
+        const int rc =
+            run_cli_capture({"curlee", "run", "--seed=123abc", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for partially-valid --seed= value");
+        }
+        expect_contains(err, "error: expected non-negative integer for --seed=", "stderr");
+    }
+
+    // run: valid --seed= is accepted (run still needs a file argument).
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--seed=42"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for missing run file (with --seed=)");
+        }
+        expect_contains(err, "error: expected <file.curlee>", "stderr");
+    }
+
     // run: missing value after --bundle
     {
         std::string out;

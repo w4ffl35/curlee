@@ -1,7 +1,11 @@
 #include <cerrno>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static void fail(const std::string& msg)
@@ -225,6 +229,1109 @@ static void vm_should_fail_print_missing_capability()
     if (res.ok || res.error != "missing capability io.stdout")
     {
         fail("expected missing capability io.stdout");
+    }
+}
+
+static void vm_should_fail_read_line_missing_capability()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::ReadLine);
+    chunk.emit(OpCode::Return);
+    VM vm;
+    const auto res = vm.run(chunk);
+    if (res.ok || res.error != "missing capability io.stdin")
+    {
+        fail("expected missing capability io.stdin");
+    }
+}
+
+static void vm_read_line_should_return_one_line_without_newline()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::ReadLine);
+    chunk.emit(OpCode::Return);
+
+    std::istringstream in("hello world\nnext line\n");
+    std::streambuf* old_in = std::cin.rdbuf(in.rdbuf());
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.stdin");
+    const auto res = vm.run(chunk, caps);
+
+    std::cin.rdbuf(old_in);
+
+    if (!res.ok || !(res.value == Value::string_v("hello world")))
+    {
+        fail("expected ReadLine to return one line without newline");
+    }
+}
+
+static void vm_read_line_should_fail_when_line_exceeds_limit()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::ReadLine);
+    chunk.emit(OpCode::Return);
+
+    std::string long_line(4097, 'a');
+    long_line.push_back('\n');
+    std::istringstream in(long_line);
+    std::streambuf* old_in = std::cin.rdbuf(in.rdbuf());
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.stdin");
+    const auto res = vm.run(chunk, caps);
+
+    std::cin.rdbuf(old_in);
+
+    if (res.ok || res.error != "stdin line too long")
+    {
+        fail("expected stdin line too long when ReadLine exceeds limit");
+    }
+}
+
+static void vm_read_line_should_return_empty_string_on_eof()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::ReadLine);
+    chunk.emit(OpCode::Return);
+
+    std::istringstream in("");
+    std::streambuf* old_in = std::cin.rdbuf(in.rdbuf());
+    std::cin.clear();
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.stdin");
+    const auto res = vm.run(chunk, caps);
+
+    std::cin.rdbuf(old_in);
+
+    if (!res.ok || !(res.value == Value::string_v("")))
+    {
+        fail("expected ReadLine to return empty string on EOF");
+    }
+}
+
+static void vm_read_line_should_fail_on_stack_underflow()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit(OpCode::ReadLine);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.stdin");
+    const auto res = vm.run(chunk, caps);
+
+    if (res.ok || res.error != "stack underflow")
+    {
+        fail("expected stack underflow when ReadLine has no capability argument value");
+    }
+}
+
+static void vm_should_fail_fs_read_missing_capability()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::string_v("missing.txt"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::FsReadText);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    const auto res = vm.run(chunk);
+    if (res.ok || res.error != "missing capability fs.read")
+    {
+        fail("expected missing capability fs.read");
+    }
+}
+
+static void vm_should_fail_fs_write_missing_capability()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::string_v("out.txt"));
+    chunk.emit_constant(Value::string_v("hello"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::FsWriteText);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    const auto res = vm.run(chunk);
+    if (res.ok || res.error != "missing capability fs.write")
+    {
+        fail("expected missing capability fs.write");
+    }
+}
+
+static void vm_fs_should_reject_invalid_path()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::string_v("../secret.txt"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::FsReadText);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("fs.read");
+    const auto res = vm.run(chunk, caps);
+    if (res.ok || res.error != "invalid fs path")
+    {
+        fail("expected invalid fs path for traversal");
+    }
+}
+
+static void vm_fs_should_reject_empty_and_absolute_paths()
+{
+    using namespace curlee::vm;
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::string_v(""));
+        chunk.emit_constant(Value::unit_v());
+        chunk.emit(OpCode::FsReadText);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("fs.read");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "invalid fs path")
+        {
+            fail("expected invalid fs path for empty path");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::string_v("/tmp/abs.txt"));
+        chunk.emit_constant(Value::unit_v());
+        chunk.emit(OpCode::FsReadText);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("fs.read");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "invalid fs path")
+        {
+            fail("expected invalid fs path for absolute path");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::string_v("."));
+        chunk.emit_constant(Value::unit_v());
+        chunk.emit(OpCode::FsReadText);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("fs.read");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "invalid fs path")
+        {
+            fail("expected invalid fs path for dot path");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::string_v(std::string(513, 'a')));
+        chunk.emit_constant(Value::unit_v());
+        chunk.emit(OpCode::FsReadText);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("fs.read");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "invalid fs path")
+        {
+            fail("expected invalid fs path for oversized path");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::string_v(std::string("a\0b", 3)));
+        chunk.emit_constant(Value::unit_v());
+        chunk.emit(OpCode::FsReadText);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("fs.read");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "invalid fs path")
+        {
+            fail("expected invalid fs path for embedded NUL");
+        }
+    }
+}
+
+static void vm_fs_read_should_fail_on_stack_underflow_and_non_string_path()
+{
+    using namespace curlee::vm;
+
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::FsReadText);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("fs.read");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow when FsReadText has no operands");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::unit_v());
+        chunk.emit(OpCode::FsReadText);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("fs.read");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow when FsReadText is missing path value");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit_constant(Value::unit_v());
+        chunk.emit(OpCode::FsReadText);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("fs.read");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "fs path must be String")
+        {
+            fail("expected fs path must be String for FsReadText");
+        }
+    }
+}
+
+static void vm_fs_read_should_fail_missing_file()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::string_v("does-not-exist.txt"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::FsReadText);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("fs.read");
+    const auto res = vm.run(chunk, caps);
+    if (res.ok || res.error != "fs file not found")
+    {
+        fail("expected fs file not found");
+    }
+}
+
+static void vm_fs_write_should_fail_when_content_exceeds_limit()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    std::string content((1 * 1024 * 1024) + 1, 'x');
+    chunk.emit_constant(Value::string_v("large.txt"));
+    chunk.emit_constant(Value::string_v(content));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::FsWriteText);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("fs.write");
+    const auto res = vm.run(chunk, caps);
+    if (res.ok || res.error != "fs content too large")
+    {
+        fail("expected fs content too large");
+    }
+}
+
+static void vm_fs_read_should_fail_when_file_exceeds_limit()
+{
+    using namespace curlee::vm;
+    namespace fs = std::filesystem;
+
+    const fs::path dir = fs::temp_directory_path() /
+                         ("curlee_vm_fs_large_" + std::to_string(static_cast<long long>(::getpid())));
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    if (!fs::create_directories(dir, ec) || ec)
+    {
+        fail("failed to create temp directory for fs large-file test");
+    }
+
+    const fs::path old_cwd = fs::current_path(ec);
+    if (ec)
+    {
+        fail("failed to read current working directory");
+    }
+
+    fs::current_path(dir, ec);
+    if (ec)
+    {
+        fail("failed to set working directory for fs large-file test");
+    }
+
+    {
+        std::ofstream out("too-large.txt", std::ios::binary | std::ios::trunc);
+        out << std::string((1 * 1024 * 1024) + 1, 'a');
+    }
+
+    Chunk chunk;
+    chunk.emit_constant(Value::string_v("too-large.txt"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::FsReadText);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("fs.read");
+    const auto res = vm.run(chunk, caps);
+
+    fs::current_path(old_cwd, ec);
+    fs::remove_all(dir, ec);
+
+    if (res.ok || res.error != "fs file too large")
+    {
+        fail("expected fs file too large");
+    }
+}
+
+static void vm_fs_read_should_fail_for_directory_path()
+{
+    using namespace curlee::vm;
+    namespace fs = std::filesystem;
+
+    const fs::path dir = fs::temp_directory_path() /
+                         ("curlee_vm_fs_dir_" + std::to_string(static_cast<long long>(::getpid())));
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    if (!fs::create_directories(dir, ec) || ec)
+    {
+        fail("failed to create temp directory for fs directory-read test");
+    }
+
+    const fs::path old_cwd = fs::current_path(ec);
+    if (ec)
+    {
+        fail("failed to read current working directory");
+    }
+
+    fs::current_path(dir, ec);
+    if (ec)
+    {
+        fail("failed to set working directory for fs directory-read test");
+    }
+
+    if (!fs::create_directories("just_a_dir", ec) || ec)
+    {
+        fs::current_path(old_cwd, ec);
+        fs::remove_all(dir, ec);
+        fail("failed to create child directory for fs directory-read test");
+    }
+
+    Chunk chunk;
+    chunk.emit_constant(Value::string_v("just_a_dir"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::FsReadText);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("fs.read");
+    const auto res = vm.run(chunk, caps);
+
+    fs::current_path(old_cwd, ec);
+    fs::remove_all(dir, ec);
+
+    if (res.ok || res.error != "fs read failed")
+    {
+        fail("expected fs read failed when FsReadText targets a directory");
+    }
+}
+
+static void vm_fs_roundtrip_should_succeed()
+{
+    using namespace curlee::vm;
+    namespace fs = std::filesystem;
+
+    const fs::path dir = fs::temp_directory_path() /
+                         ("curlee_vm_fs_roundtrip_" + std::to_string(static_cast<long long>(::getpid())));
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    if (!fs::create_directories(dir, ec) || ec)
+    {
+        fail("failed to create temp directory for fs roundtrip test");
+    }
+
+    const fs::path old_cwd = fs::current_path(ec);
+    if (ec)
+    {
+        fail("failed to read current working directory");
+    }
+
+    fs::current_path(dir, ec);
+    if (ec)
+    {
+        fail("failed to set working directory for fs roundtrip test");
+    }
+
+    Chunk write_chunk;
+    write_chunk.emit_constant(Value::string_v("roundtrip.txt"));
+    write_chunk.emit_constant(Value::string_v("hello fs"));
+    write_chunk.emit_constant(Value::unit_v());
+    write_chunk.emit(OpCode::FsWriteText);
+    write_chunk.emit(OpCode::Return);
+
+    VM writer;
+    VM::Capabilities write_caps;
+    write_caps.insert("fs.write");
+    const auto write_res = writer.run(write_chunk, write_caps);
+    if (!write_res.ok || !(write_res.value == Value::unit_v()))
+    {
+        fs::current_path(old_cwd, ec);
+        fs::remove_all(dir, ec);
+        fail("expected fs write roundtrip step to succeed");
+    }
+
+    Chunk read_chunk;
+    read_chunk.emit_constant(Value::string_v("roundtrip.txt"));
+    read_chunk.emit_constant(Value::unit_v());
+    read_chunk.emit(OpCode::FsReadText);
+    read_chunk.emit(OpCode::Return);
+
+    VM reader;
+    VM::Capabilities read_caps;
+    read_caps.insert("fs.read");
+    const auto read_res = reader.run(read_chunk, read_caps);
+
+    fs::current_path(old_cwd, ec);
+    fs::remove_all(dir, ec);
+
+    if (!read_res.ok || !(read_res.value == Value::string_v("hello fs")))
+    {
+        fail("expected fs roundtrip read to return written content");
+    }
+}
+
+static void vm_fs_write_should_fail_with_access_denied()
+{
+    using namespace curlee::vm;
+    namespace fs = std::filesystem;
+
+    const fs::path dir = fs::temp_directory_path() /
+                         ("curlee_vm_fs_denied_" + std::to_string(static_cast<long long>(::getpid())));
+    const fs::path locked = dir / "locked";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    if (!fs::create_directories(locked, ec) || ec)
+    {
+        fail("failed to create temp directory for fs denied test");
+    }
+
+    const fs::path old_cwd = fs::current_path(ec);
+    if (ec)
+    {
+        fail("failed to read current working directory");
+    }
+
+    fs::current_path(dir, ec);
+    if (ec)
+    {
+        fail("failed to set working directory for fs denied test");
+    }
+
+    if (::chmod("locked", 0555) != 0)
+    {
+        fs::current_path(old_cwd, ec);
+        fs::remove_all(dir, ec);
+        fail("failed to chmod locked directory");
+    }
+
+    Chunk chunk;
+    chunk.emit_constant(Value::string_v("locked/out.txt"));
+    chunk.emit_constant(Value::string_v("x"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::FsWriteText);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("fs.write");
+    const auto res = vm.run(chunk, caps);
+
+    (void)::chmod("locked", 0755);
+    fs::current_path(old_cwd, ec);
+    fs::remove_all(dir, ec);
+
+    if (res.ok || res.error != "fs access denied")
+    {
+        fail("expected fs access denied for write into non-writable directory");
+    }
+}
+
+static void vm_fs_read_should_fail_with_access_denied()
+{
+    using namespace curlee::vm;
+    namespace fs = std::filesystem;
+
+    const fs::path dir = fs::temp_directory_path() /
+                         ("curlee_vm_fs_read_denied_" + std::to_string(static_cast<long long>(::getpid())));
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    if (!fs::create_directories(dir, ec) || ec)
+    {
+        fail("failed to create temp directory for fs read denied test");
+    }
+
+    const fs::path old_cwd = fs::current_path(ec);
+    if (ec)
+    {
+        fail("failed to read current working directory");
+    }
+
+    fs::current_path(dir, ec);
+    if (ec)
+    {
+        fail("failed to set working directory for fs read denied test");
+    }
+
+    {
+        std::ofstream out("locked.txt", std::ios::binary | std::ios::trunc);
+        out << "x";
+    }
+    if (::chmod("locked.txt", 0000) != 0)
+    {
+        fs::current_path(old_cwd, ec);
+        fs::remove_all(dir, ec);
+        fail("failed to chmod file for fs read denied test");
+    }
+
+    Chunk chunk;
+    chunk.emit_constant(Value::string_v("locked.txt"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::FsReadText);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("fs.read");
+    const auto res = vm.run(chunk, caps);
+
+    (void)::chmod("locked.txt", 0644);
+    fs::current_path(old_cwd, ec);
+    fs::remove_all(dir, ec);
+
+    if (res.ok || res.error != "fs access denied")
+    {
+        fail("expected fs access denied for reading non-readable file");
+    }
+}
+
+static void vm_fs_write_should_fail_on_stack_underflow_and_non_string_values()
+{
+    using namespace curlee::vm;
+
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::FsWriteText);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("fs.write");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow when FsWriteText has no operands");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::unit_v());
+        chunk.emit(OpCode::FsWriteText);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("fs.write");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow when FsWriteText is missing content/path");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::string_v("out.txt"));
+        chunk.emit_constant(Value::unit_v());
+        chunk.emit(OpCode::FsWriteText);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("fs.write");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow when FsWriteText is missing path");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit_constant(Value::string_v("x"));
+        chunk.emit_constant(Value::unit_v());
+        chunk.emit(OpCode::FsWriteText);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("fs.write");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "fs path must be String")
+        {
+            fail("expected fs path must be String for FsWriteText");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::string_v("out.txt"));
+        chunk.emit_constant(Value::int_v(7));
+        chunk.emit_constant(Value::unit_v());
+        chunk.emit(OpCode::FsWriteText);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("fs.write");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "fs content must be String")
+        {
+            fail("expected fs content must be String for FsWriteText");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::string_v(".."));
+        chunk.emit_constant(Value::string_v("x"));
+        chunk.emit_constant(Value::unit_v());
+        chunk.emit(OpCode::FsWriteText);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("fs.write");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "invalid fs path")
+        {
+            fail("expected invalid fs path for FsWriteText");
+        }
+    }
+}
+
+static void vm_should_fail_tty_missing_capability()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::TtyClear);
+    chunk.emit(OpCode::Return);
+    VM vm;
+    const auto res = vm.run(chunk);
+    if (res.ok || res.error != "missing capability io.tty")
+    {
+        fail("expected missing capability io.tty");
+    }
+}
+
+static void vm_tty_should_enforce_coordinate_bounds()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::int_v(-1));
+    chunk.emit_constant(Value::int_v(0));
+    chunk.emit_constant(Value::string_v("x"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::TtyWriteAt);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.tty");
+    const auto res = vm.run(chunk, caps);
+    if (res.ok || res.error != "tty coordinates must be >= 0")
+    {
+        fail("expected deterministic tty bounds error");
+    }
+}
+
+static void vm_tty_clear_should_fail_on_stack_underflow()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit(OpCode::TtyClear);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.tty");
+    const auto res = vm.run(chunk, caps);
+
+    if (res.ok || res.error != "stack underflow")
+    {
+        fail("expected stack underflow for TtyClear without argument value");
+    }
+}
+
+static void vm_tty_write_at_should_fail_missing_capability()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::int_v(0));
+    chunk.emit_constant(Value::int_v(0));
+    chunk.emit_constant(Value::string_v("x"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::TtyWriteAt);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    const auto res = vm.run(chunk);
+    if (res.ok || res.error != "missing capability io.tty")
+    {
+        fail("expected missing capability io.tty for TtyWriteAt");
+    }
+}
+
+static void vm_tty_write_at_should_fail_on_stack_underflow()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit(OpCode::TtyWriteAt);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.tty");
+    const auto res = vm.run(chunk, caps);
+
+    if (res.ok || res.error != "stack underflow")
+    {
+        fail("expected stack underflow for TtyWriteAt without arguments");
+    }
+}
+
+static void vm_tty_write_at_should_fail_when_text_missing()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::TtyWriteAt);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.tty");
+    const auto res = vm.run(chunk, caps);
+
+    if (res.ok || res.error != "stack underflow")
+    {
+        fail("expected stack underflow for TtyWriteAt when text is missing");
+    }
+}
+
+static void vm_tty_write_at_should_fail_when_col_missing()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::string_v("x"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::TtyWriteAt);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.tty");
+    const auto res = vm.run(chunk, caps);
+
+    if (res.ok || res.error != "stack underflow")
+    {
+        fail("expected stack underflow for TtyWriteAt when column is missing");
+    }
+}
+
+static void vm_tty_write_at_should_fail_when_row_missing()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::int_v(0));
+    chunk.emit_constant(Value::string_v("x"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::TtyWriteAt);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.tty");
+    const auto res = vm.run(chunk, caps);
+
+    if (res.ok || res.error != "stack underflow")
+    {
+        fail("expected stack underflow for TtyWriteAt when row is missing");
+    }
+}
+
+static void vm_tty_write_at_should_fail_non_int_coordinates()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::bool_v(true));
+    chunk.emit_constant(Value::int_v(0));
+    chunk.emit_constant(Value::string_v("x"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::TtyWriteAt);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.tty");
+    const auto res = vm.run(chunk, caps);
+
+    if (res.ok || res.error != "tty coordinates must be Int")
+    {
+        fail("expected tty coordinates Int-type error");
+    }
+}
+
+static void vm_tty_write_at_should_fail_non_int_column()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::int_v(0));
+    chunk.emit_constant(Value::bool_v(true));
+    chunk.emit_constant(Value::string_v("x"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::TtyWriteAt);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.tty");
+    const auto res = vm.run(chunk, caps);
+
+    if (res.ok || res.error != "tty coordinates must be Int")
+    {
+        fail("expected tty column Int-type error");
+    }
+}
+
+static void vm_tty_write_at_should_fail_non_string_text()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::int_v(0));
+    chunk.emit_constant(Value::int_v(0));
+    chunk.emit_constant(Value::int_v(1));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::TtyWriteAt);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.tty");
+    const auto res = vm.run(chunk, caps);
+
+    if (res.ok || res.error != "tty text must be String")
+    {
+        fail("expected tty text String-type error");
+    }
+}
+
+static void vm_tty_write_at_should_fail_upper_bound()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::int_v(1000));
+    chunk.emit_constant(Value::int_v(0));
+    chunk.emit_constant(Value::string_v("x"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::TtyWriteAt);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.tty");
+    const auto res = vm.run(chunk, caps);
+
+    if (res.ok || res.error != "tty coordinates out of bounds (max 999)")
+    {
+        fail("expected deterministic tty upper-bounds error");
+    }
+}
+
+static void vm_tty_write_at_should_fail_negative_column()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::int_v(0));
+    chunk.emit_constant(Value::int_v(-1));
+    chunk.emit_constant(Value::string_v("x"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::TtyWriteAt);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.tty");
+    const auto res = vm.run(chunk, caps);
+
+    if (res.ok || res.error != "tty coordinates must be >= 0")
+    {
+        fail("expected deterministic tty negative-column error");
+    }
+}
+
+static void vm_tty_write_at_should_fail_column_upper_bound()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::int_v(0));
+    chunk.emit_constant(Value::int_v(1000));
+    chunk.emit_constant(Value::string_v("x"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::TtyWriteAt);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.tty");
+    const auto res = vm.run(chunk, caps);
+
+    if (res.ok || res.error != "tty coordinates out of bounds (max 999)")
+    {
+        fail("expected deterministic tty column upper-bounds error");
+    }
+}
+
+static void vm_tty_flush_should_fail_missing_capability()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::TtyFlush);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    const auto res = vm.run(chunk);
+    if (res.ok || res.error != "missing capability io.tty")
+    {
+        fail("expected missing capability io.tty for TtyFlush");
+    }
+}
+
+static void vm_tty_flush_should_fail_on_stack_underflow()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit(OpCode::TtyFlush);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.tty");
+    const auto res = vm.run(chunk, caps);
+
+    if (res.ok || res.error != "stack underflow")
+    {
+        fail("expected stack underflow for TtyFlush without argument value");
+    }
+}
+
+static void vm_tty_should_flush_in_deterministic_order()
+{
+    using namespace curlee::vm;
+    Chunk chunk;
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::TtyClear);
+    chunk.emit(OpCode::Pop);
+
+    chunk.emit_constant(Value::int_v(0));
+    chunk.emit_constant(Value::int_v(0));
+    chunk.emit_constant(Value::string_v("A"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::TtyWriteAt);
+    chunk.emit(OpCode::Pop);
+
+    chunk.emit_constant(Value::int_v(0));
+    chunk.emit_constant(Value::int_v(1));
+    chunk.emit_constant(Value::string_v("B"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::TtyWriteAt);
+    chunk.emit(OpCode::Pop);
+
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::TtyFlush);
+    chunk.emit(OpCode::Pop);
+    chunk.emit_constant(Value::int_v(0));
+    chunk.emit(OpCode::Return);
+
+    std::ostringstream captured_out;
+    std::streambuf* old_cout = std::cout.rdbuf(captured_out.rdbuf());
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("io.tty");
+    const auto res = vm.run(chunk, caps);
+
+    std::cout.rdbuf(old_cout);
+
+    if (!res.ok || !(res.value == Value::int_v(0)))
+    {
+        fail("expected tty flush program to succeed");
+    }
+
+    const std::string expected = "[tty.clear]\n"
+                                 "[tty.write_at row=0 col=0 text=\"A\"]\n"
+                                 "[tty.write_at row=0 col=1 text=\"B\"]\n";
+    if (captured_out.str() != expected)
+    {
+        fail("expected deterministic tty output ordering");
     }
 }
 
@@ -636,6 +1743,41 @@ int main()
     vm_should_fail_local_index_out_of_range();
     vm_should_fail_add_type_error();
     vm_should_fail_print_missing_capability();
+    vm_should_fail_read_line_missing_capability();
+    vm_read_line_should_return_one_line_without_newline();
+    vm_read_line_should_fail_when_line_exceeds_limit();
+    vm_read_line_should_return_empty_string_on_eof();
+    vm_read_line_should_fail_on_stack_underflow();
+    vm_should_fail_fs_read_missing_capability();
+    vm_should_fail_fs_write_missing_capability();
+    vm_fs_should_reject_invalid_path();
+    vm_fs_should_reject_empty_and_absolute_paths();
+    vm_fs_read_should_fail_on_stack_underflow_and_non_string_path();
+    vm_fs_read_should_fail_missing_file();
+    vm_fs_write_should_fail_when_content_exceeds_limit();
+    vm_fs_read_should_fail_when_file_exceeds_limit();
+    vm_fs_read_should_fail_for_directory_path();
+    vm_fs_roundtrip_should_succeed();
+    vm_fs_write_should_fail_with_access_denied();
+    vm_fs_read_should_fail_with_access_denied();
+    vm_fs_write_should_fail_on_stack_underflow_and_non_string_values();
+    vm_should_fail_tty_missing_capability();
+    vm_tty_should_enforce_coordinate_bounds();
+    vm_tty_clear_should_fail_on_stack_underflow();
+    vm_tty_write_at_should_fail_missing_capability();
+    vm_tty_write_at_should_fail_on_stack_underflow();
+    vm_tty_write_at_should_fail_when_text_missing();
+    vm_tty_write_at_should_fail_when_col_missing();
+    vm_tty_write_at_should_fail_when_row_missing();
+    vm_tty_write_at_should_fail_non_int_coordinates();
+    vm_tty_write_at_should_fail_non_int_column();
+    vm_tty_write_at_should_fail_non_string_text();
+    vm_tty_write_at_should_fail_upper_bound();
+    vm_tty_write_at_should_fail_negative_column();
+    vm_tty_write_at_should_fail_column_upper_bound();
+    vm_tty_flush_should_fail_missing_capability();
+    vm_tty_flush_should_fail_on_stack_underflow();
+    vm_tty_should_flush_in_deterministic_order();
     vm_should_fail_no_return_at_end();
     value_enum_equality_and_to_string();
     vm_enum_ops_success_paths();

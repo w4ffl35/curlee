@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <sys/resource.h>
 #include <unistd.h>
 
@@ -111,6 +112,77 @@ int main(int argc, char** argv)
             fail("unexpected Unit to_string");
         }
 
+        const Value e1 = Value::enum_v("Opt", "Some", Value::int_v(1));
+        const Value e2 = Value::enum_v("Opt", "Some", Value::int_v(1));
+        const Value e3 = Value::enum_v("Opt", "Some", Value::int_v(2));
+        const Value e4 = Value::enum_v("Opt", "None");
+        const Value e5 = Value::enum_v("Opt", "None");
+        if (!(e1 == e2) || (e1 == e3))
+        {
+            fail("unexpected Enum value equality behavior");
+        }
+        if (e1 == e4)
+        {
+            fail("expected Enum values with different payload/variant to differ");
+        }
+        if (!(e4 == e5))
+        {
+            fail("expected Enum no-payload values with same variant to compare equal");
+        }
+        if (e1 == Value::enum_v("Opt", "Some"))
+        {
+            fail("expected Enum payload/null-payload mismatch to compare unequal");
+        }
+        if (to_string(e1) != "Opt::Some(1)")
+        {
+            fail("unexpected Enum payload to_string");
+        }
+        if (to_string(e4) != "Opt::None")
+        {
+            fail("unexpected Enum no-payload to_string");
+        }
+
+        const Value v1 = Value::vec_v(3);
+        const Value v2 = Value::vec_v(3);
+        const Value v3 = Value::vec_v(2);
+        Value v4 = Value::vec_v(3);
+        v4.vec_value->items.push_back(Value::int_v(1));
+        Value v5 = Value::vec_v(3);
+        v5.vec_value->items.push_back(Value::int_v(2));
+        if (!(v1 == v2) || (v1 == v3))
+        {
+            fail("unexpected Vec value equality behavior");
+        }
+        if (v4 == v5)
+        {
+            fail("expected Vec equality to compare item contents");
+        }
+        if (to_string(v1) != "Vec(len=0/3)")
+        {
+            fail("unexpected Vec to_string");
+        }
+
+        Value vec_null;
+        vec_null.kind = ValueKind::Vec;
+        if (to_string(vec_null) != "Vec<?>(null)")
+        {
+            fail("expected null Vec to stringify deterministically");
+        }
+        Value vec_null_2;
+        vec_null_2.kind = ValueKind::Vec;
+        if (!(vec_null == vec_null_2))
+        {
+            fail("expected null Vec values to compare equal");
+        }
+        if (vec_null == v1)
+        {
+            fail("expected null and non-null Vec values to compare unequal");
+        }
+        if (v1 == vec_null)
+        {
+            fail("expected non-null and null Vec values to compare unequal");
+        }
+
         Value unknown;
         unknown.kind = static_cast<ValueKind>(999);
         if (to_string(unknown) != "<unknown>")
@@ -198,6 +270,437 @@ int main(int argc, char** argv)
         chunk.emit(OpCode::Return);
 
         run_twice_deterministic(chunk, Value::string_v("ab"));
+    }
+
+    {
+        const curlee::source::Span span{.start = 910, .end = 920};
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1000), span);
+        chunk.emit_constant(Value::string_v("rng.seeded"), span);
+        chunk.emit(OpCode::RngNextInt, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM::Capabilities caps;
+        caps.insert("rng.seeded");
+
+        VM vm_same_seed_a;
+        const auto a1 = vm_same_seed_a.run(chunk, std::numeric_limits<std::size_t>::max(), caps,
+                                           std::uint64_t{123});
+        if (!a1.ok)
+        {
+            fail("expected rng run with seed to succeed");
+        }
+        if (a1.value.kind != ValueKind::Int)
+        {
+            fail("expected rng result to be Int");
+        }
+        if (!a1.profile.rng_seed.has_value() || *a1.profile.rng_seed != std::uint64_t{123})
+        {
+            fail("expected rng seed to be reported in VM profile");
+        }
+
+        VM vm_same_seed_b;
+        const auto a2 = vm_same_seed_b.run(chunk, std::numeric_limits<std::size_t>::max(), caps,
+                                           std::uint64_t{123});
+        if (!a2.ok)
+        {
+            fail("expected second rng run with same seed to succeed");
+        }
+        if (!(a1.value == a2.value))
+        {
+            fail("expected deterministic rng output for same seed and bytecode");
+        }
+
+        VM vm_different_seed;
+        const auto b1 = vm_different_seed.run(chunk, std::numeric_limits<std::size_t>::max(),
+                                              caps, std::uint64_t{124});
+        if (!b1.ok)
+        {
+            fail("expected rng run with different seed to succeed");
+        }
+        if (b1.value.kind != ValueKind::Int)
+        {
+            fail("expected rng result with different seed to be Int");
+        }
+
+        VM vm_missing_seed;
+        const auto missing_seed =
+            vm_missing_seed.run(chunk, std::numeric_limits<std::size_t>::max(), caps,
+                                std::nullopt);
+        if (missing_seed.ok || missing_seed.error != "missing RNG seed; pass --seed <n>")
+        {
+            fail("expected missing seed diagnostic for rng builtin");
+        }
+        if (!missing_seed.error_span.has_value() || missing_seed.error_span->start != span.start ||
+            missing_seed.error_span->end != span.end)
+        {
+            fail("expected missing seed diagnostic to carry opcode span");
+        }
+
+        VM vm_missing_cap;
+        const VM::Capabilities no_caps;
+        const auto missing_cap = vm_missing_cap.run(chunk, std::numeric_limits<std::size_t>::max(),
+                                                    no_caps, std::uint64_t{123});
+        if (missing_cap.ok || missing_cap.error != "missing capability rng.seeded")
+        {
+            fail("expected missing capability diagnostic for rng builtin");
+        }
+
+        Chunk bad_max_chunk;
+        bad_max_chunk.emit_constant(Value::int_v(0), span);
+        bad_max_chunk.emit_constant(Value::string_v("rng.seeded"), span);
+        bad_max_chunk.emit(OpCode::RngNextInt, span);
+        bad_max_chunk.emit(OpCode::Return, span);
+
+        VM vm_bad_max;
+        const auto bad_max = vm_bad_max.run(bad_max_chunk, std::numeric_limits<std::size_t>::max(),
+                                            caps, std::uint64_t{123});
+        if (bad_max.ok || bad_max.error != "rng max_exclusive must be > 0")
+        {
+            fail("expected rng max_exclusive bound check diagnostic");
+        }
+
+        Chunk non_int_max_chunk;
+        non_int_max_chunk.emit_constant(Value::string_v("not-an-int"), span);
+        non_int_max_chunk.emit_constant(Value::string_v("rng.seeded"), span);
+        non_int_max_chunk.emit(OpCode::RngNextInt, span);
+        non_int_max_chunk.emit(OpCode::Return, span);
+
+        VM vm_non_int_max;
+        const auto non_int_max =
+            vm_non_int_max.run(non_int_max_chunk, std::numeric_limits<std::size_t>::max(), caps,
+                               std::uint64_t{123});
+        if (non_int_max.ok || non_int_max.error != "rng max_exclusive must be Int")
+        {
+            fail("expected rng max_exclusive type diagnostic");
+        }
+
+        Chunk underflow_first_chunk;
+        underflow_first_chunk.emit(OpCode::RngNextInt, span);
+        underflow_first_chunk.emit(OpCode::Return, span);
+
+        VM vm_underflow_first;
+        const auto underflow_first =
+            vm_underflow_first.run(underflow_first_chunk, std::numeric_limits<std::size_t>::max(),
+                                   caps, std::uint64_t{123});
+        if (underflow_first.ok || underflow_first.error != "stack underflow")
+        {
+            fail("expected rng first-pop stack underflow diagnostic");
+        }
+
+        Chunk underflow_second_chunk;
+        underflow_second_chunk.emit_constant(Value::string_v("rng.seeded"), span);
+        underflow_second_chunk.emit(OpCode::RngNextInt, span);
+        underflow_second_chunk.emit(OpCode::Return, span);
+
+        VM vm_underflow_second;
+        const auto underflow_second =
+            vm_underflow_second.run(underflow_second_chunk,
+                                    std::numeric_limits<std::size_t>::max(), caps,
+                                    std::uint64_t{123});
+        if (underflow_second.ok || underflow_second.error != "stack underflow")
+        {
+            fail("expected rng second-pop stack underflow diagnostic");
+        }
+    }
+
+    {
+        const curlee::source::Span span{.start = 930, .end = 940};
+
+        Chunk vec_ok;
+        vec_ok.emit_constant(Value::int_v(3), span);
+        vec_ok.emit(OpCode::VecNew, span);
+        vec_ok.emit_local(OpCode::StoreLocal, 0, span);
+        vec_ok.emit_local(OpCode::LoadLocal, 0, span);
+        vec_ok.emit_constant(Value::int_v(11), span);
+        vec_ok.emit(OpCode::VecPush, span);
+        vec_ok.emit(OpCode::Pop, span);
+        vec_ok.emit_local(OpCode::LoadLocal, 0, span);
+        vec_ok.emit(OpCode::VecLen, span);
+        vec_ok.emit(OpCode::Pop, span);
+        vec_ok.emit_local(OpCode::LoadLocal, 0, span);
+        vec_ok.emit_constant(Value::int_v(0), span);
+        vec_ok.emit(OpCode::VecGet, span);
+        vec_ok.emit(OpCode::Pop, span);
+        vec_ok.emit_local(OpCode::LoadLocal, 0, span);
+        vec_ok.emit_constant(Value::int_v(0), span);
+        vec_ok.emit_constant(Value::int_v(12), span);
+        vec_ok.emit(OpCode::VecSet, span);
+        vec_ok.emit(OpCode::Pop, span);
+        vec_ok.emit_local(OpCode::LoadLocal, 0, span);
+        vec_ok.emit_constant(Value::int_v(0), span);
+        vec_ok.emit(OpCode::VecGet, span);
+        vec_ok.emit(OpCode::Return, span);
+
+        VM vm_vec_ok;
+        const auto vec_ok_res = vm_vec_ok.run(vec_ok);
+        if (!vec_ok_res.ok || !(vec_ok_res.value == Value::int_v(12)))
+        {
+            fail("expected Vec opcode happy-path program to return updated element");
+        }
+
+        auto expect_vec_error = [&](Chunk chunk, std::string_view expected, const char* what)
+        {
+            VM vm;
+            const auto res = vm.run(chunk);
+            if (res.ok || res.error != expected)
+            {
+                fail(std::string("expected ") + what + " diagnostic");
+            }
+            if (!res.error_span.has_value() || res.error_span->start != span.start ||
+                res.error_span->end != span.end)
+            {
+                fail(std::string("expected ") + what + " span mapping");
+            }
+        };
+
+        {
+            Chunk chunk;
+            chunk.emit(OpCode::VecNew, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "stack underflow", "VecNew underflow");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::bool_v(true), span);
+            chunk.emit(OpCode::VecNew, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec max_len must be Int", "VecNew max_len type");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(-1), span);
+            chunk.emit(OpCode::VecNew, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec max_len must be >= 0", "VecNew negative max_len");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(1000001), span);
+            chunk.emit(OpCode::VecNew, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec max_len too large", "VecNew max_len too large");
+        }
+
+        {
+            Chunk chunk;
+            chunk.emit(OpCode::VecLen, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "stack underflow", "VecLen underflow");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(1), span);
+            chunk.emit(OpCode::VecLen, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec value must be Vec", "VecLen non-vec");
+        }
+        {
+            Chunk chunk;
+            Value null_vec;
+            null_vec.kind = ValueKind::Vec;
+            chunk.emit_constant(std::move(null_vec), span);
+            chunk.emit(OpCode::VecLen, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec value must be Vec", "VecLen null vec storage");
+        }
+
+        {
+            Chunk chunk;
+            chunk.emit(OpCode::VecPush, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "stack underflow", "VecPush underflow");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(2), span);
+            chunk.emit(OpCode::VecPush, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "stack underflow", "VecPush missing vec operand");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(1), span);
+            chunk.emit_constant(Value::int_v(2), span);
+            chunk.emit(OpCode::VecPush, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec value must be Vec", "VecPush vec operand type");
+        }
+        {
+            Chunk chunk;
+            Value null_vec;
+            null_vec.kind = ValueKind::Vec;
+            chunk.emit_constant(std::move(null_vec), span);
+            chunk.emit_constant(Value::int_v(2), span);
+            chunk.emit(OpCode::VecPush, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec value must be Vec", "VecPush null vec storage");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(1), span);
+            chunk.emit(OpCode::VecNew, span);
+            chunk.emit_constant(Value::bool_v(true), span);
+            chunk.emit(OpCode::VecPush, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec element must be Int", "VecPush element type");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(1), span);
+            chunk.emit(OpCode::VecNew, span);
+            chunk.emit_local(OpCode::StoreLocal, 0, span);
+            chunk.emit_local(OpCode::LoadLocal, 0, span);
+            chunk.emit_constant(Value::int_v(1), span);
+            chunk.emit(OpCode::VecPush, span);
+            chunk.emit(OpCode::Pop, span);
+            chunk.emit_local(OpCode::LoadLocal, 0, span);
+            chunk.emit_constant(Value::int_v(2), span);
+            chunk.emit(OpCode::VecPush, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec capacity exceeded", "VecPush capacity");
+        }
+
+        {
+            Chunk chunk;
+            chunk.emit(OpCode::VecGet, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "stack underflow", "VecGet underflow");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(0), span);
+            chunk.emit(OpCode::VecGet, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "stack underflow", "VecGet missing vec operand");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(1), span);
+            chunk.emit_constant(Value::int_v(0), span);
+            chunk.emit(OpCode::VecGet, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec value must be Vec", "VecGet vec operand type");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(1), span);
+            chunk.emit(OpCode::VecNew, span);
+            chunk.emit_constant(Value::bool_v(true), span);
+            chunk.emit(OpCode::VecGet, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec index must be Int", "VecGet index type");
+        }
+        {
+            Chunk chunk;
+            Value null_vec;
+            null_vec.kind = ValueKind::Vec;
+            chunk.emit_constant(std::move(null_vec), span);
+            chunk.emit_constant(Value::int_v(0), span);
+            chunk.emit(OpCode::VecGet, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec value must be Vec", "VecGet null vec storage");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(1), span);
+            chunk.emit(OpCode::VecNew, span);
+            chunk.emit_constant(Value::int_v(-1), span);
+            chunk.emit(OpCode::VecGet, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec index out of bounds", "VecGet negative index");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(1), span);
+            chunk.emit(OpCode::VecNew, span);
+            chunk.emit_constant(Value::int_v(1), span);
+            chunk.emit(OpCode::VecGet, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec index out of bounds", "VecGet index bounds");
+        }
+
+        {
+            Chunk chunk;
+            chunk.emit(OpCode::VecSet, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "stack underflow", "VecSet underflow");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(3), span);
+            chunk.emit(OpCode::VecSet, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "stack underflow", "VecSet missing index+vec operands");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(0), span);
+            chunk.emit_constant(Value::int_v(3), span);
+            chunk.emit(OpCode::VecSet, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "stack underflow", "VecSet missing vec operand");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(1), span);
+            chunk.emit_constant(Value::int_v(0), span);
+            chunk.emit_constant(Value::int_v(3), span);
+            chunk.emit(OpCode::VecSet, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec value must be Vec", "VecSet vec operand type");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(1), span);
+            chunk.emit(OpCode::VecNew, span);
+            chunk.emit_constant(Value::bool_v(true), span);
+            chunk.emit_constant(Value::int_v(3), span);
+            chunk.emit(OpCode::VecSet, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec index must be Int", "VecSet index type");
+        }
+        {
+            Chunk chunk;
+            Value null_vec;
+            null_vec.kind = ValueKind::Vec;
+            chunk.emit_constant(std::move(null_vec), span);
+            chunk.emit_constant(Value::int_v(0), span);
+            chunk.emit_constant(Value::int_v(3), span);
+            chunk.emit(OpCode::VecSet, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec value must be Vec", "VecSet null vec storage");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(1), span);
+            chunk.emit(OpCode::VecNew, span);
+            chunk.emit_constant(Value::int_v(0), span);
+            chunk.emit_constant(Value::bool_v(true), span);
+            chunk.emit(OpCode::VecSet, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec element must be Int", "VecSet element type");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(1), span);
+            chunk.emit(OpCode::VecNew, span);
+            chunk.emit_constant(Value::int_v(-1), span);
+            chunk.emit_constant(Value::int_v(3), span);
+            chunk.emit(OpCode::VecSet, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec index out of bounds", "VecSet negative index");
+        }
+        {
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(1), span);
+            chunk.emit(OpCode::VecNew, span);
+            chunk.emit_constant(Value::int_v(2), span);
+            chunk.emit_constant(Value::int_v(3), span);
+            chunk.emit(OpCode::VecSet, span);
+            chunk.emit(OpCode::Return, span);
+            expect_vec_error(std::move(chunk), "vec index out of bounds", "VecSet index bounds");
+        }
     }
 
     // Stack underflow paths for common ops.

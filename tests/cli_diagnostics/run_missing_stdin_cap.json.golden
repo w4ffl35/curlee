@@ -1,0 +1,1 @@
+{"kind":"diagnostic","severity":"error","message":"capability not granted: io.stdin","file":"tests/fixtures/run_read_line.curlee","span":{"start":131,"end":149},"notes":[{"message":"grant it with: curlee run --cap io.stdin <file.curlee>","span":null}]}

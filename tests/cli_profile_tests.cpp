@@ -88,6 +88,8 @@ int main()
         find_repo_relative(fs::path("tests") / "fixtures" / "run_infinite_loop.curlee");
     const fs::path type_error =
         find_repo_relative(fs::path("tests") / "fixtures" / "check_type_error.curlee");
+    const fs::path rng_seeded =
+        find_repo_relative(fs::path("tests") / "fixtures" / "run_rng_seeded.curlee");
 
     // diag-format parsing and option-gating behavior.
     {
@@ -200,6 +202,7 @@ int main()
         expect_contains(out, "curlee run: result", "stdout");
         expect_contains(out, "curlee profile: steps=", "stdout");
         expect_contains(out, "fuel_used=", "stdout");
+        expect_contains(out, "rng_seed=none", "stdout");
         expect_contains(out, "ok=true", "stdout");
     }
 
@@ -217,7 +220,68 @@ int main()
         expect_contains(out, "\"kind\":\"profile\"", "stdout");
         expect_contains(out, "\"steps\":", "stdout");
         expect_contains(out, "\"fuel_used\":", "stdout");
+        expect_contains(out, "\"rng_seed\":null", "stdout");
         expect_contains(out, "\"ok\":true", "stdout");
+    }
+
+    // Seeded RNG run: deterministic result + profile seed metadata.
+    {
+        std::string out_a;
+        std::string err_a;
+        std::string out_b;
+        std::string err_b;
+
+        const int rc_a = run_cli_capture({"curlee", "run", "--cap", "rng.seeded", "--seed",
+                                          "123", "--profile-format", "json",
+                                          rng_seeded.string()},
+                                         out_a, err_a);
+        if (rc_a != 0)
+        {
+            fail("expected seeded rng run to succeed; stderr=" + err_a);
+        }
+
+        const int rc_b = run_cli_capture({"curlee", "run", "--cap", "rng.seeded", "--seed",
+                                          "123", "--profile-format", "json",
+                                          rng_seeded.string()},
+                                         out_b, err_b);
+        if (rc_b != 0)
+        {
+            fail("expected repeated seeded rng run to succeed; stderr=" + err_b);
+        }
+
+        if (out_a != out_b)
+        {
+            fail("expected deterministic run/profile output for same seed and program");
+        }
+        expect_contains(out_a, "\"rng_seed\":123", "stdout");
+    }
+
+    // Missing seed produces deterministic diagnostic when rng capability is granted.
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--cap", "rng.seeded",
+                                        rng_seeded.string()},
+                                       out, err);
+        if (rc == 0)
+        {
+            fail("expected rng run without --seed to fail");
+        }
+        expect_contains(err, "missing RNG seed; pass --seed <n>", "stderr");
+    }
+
+    // Missing rng capability is diagnosed before execution.
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", "--seed", "123",
+                                        rng_seeded.string()},
+                                       out, err);
+        if (rc == 0)
+        {
+            fail("expected rng run without capability to fail");
+        }
+        expect_contains(err, "capability not granted: rng.seeded", "stderr");
     }
 
     // Profile text output via explicit --profile-format text.
@@ -319,6 +383,61 @@ int main()
         expect_contains(err, "out of fuel", "stderr");
         expect_contains(err, "curlee profile: steps=", "stderr");
         expect_contains(err, "ok=false", "stderr");
+
+        fs::remove_all(dir);
+    }
+
+    // Bundle run forwards --seed into VM RNG state.
+    {
+        const fs::path dir = fs::temp_directory_path() / "curlee_cli_profile_bundle_rng";
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path entry = dir / "main_rng.curlee";
+        const fs::path bundle = dir / "main_rng.bundle";
+        write_all(entry,
+                  R"(fn main(rng: cap rng.seeded) -> Int {
+  return __rng_next_int(1000, rng);
+}
+)");
+
+        std::string out;
+        std::string err;
+        int rc = run_cli_capture({"curlee", "bundle", "build", "--cap", "rng.seeded",
+                                  entry.string(), bundle.string()},
+                                 out, err);
+        if (rc != 0)
+        {
+            fail("expected rng bundle build to succeed; stderr=" + err);
+        }
+
+        std::string out_a;
+        std::string err_a;
+        std::string out_b;
+        std::string err_b;
+        rc = run_cli_capture({"curlee", "run", "--cap", "rng.seeded", "--seed", "55",
+                              "--profile-format", "json", "--bundle", bundle.string(),
+                              entry.string()},
+                             out_a, err_a);
+        if (rc != 0)
+        {
+            fail("expected seeded rng bundle run to succeed; stderr=" + err_a);
+        }
+
+        rc = run_cli_capture({"curlee", "run", "--cap", "rng.seeded", "--seed", "55",
+                              "--profile-format", "json", "--bundle", bundle.string(),
+                              entry.string()},
+                             out_b, err_b);
+        if (rc != 0)
+        {
+            fail("expected repeated seeded rng bundle run to succeed; stderr=" + err_b);
+        }
+
+        if (out_a != out_b)
+        {
+            fail("expected deterministic bundle run output for same seed");
+        }
+        expect_contains(out_a, "\"rng_seed\":55", "stdout");
 
         fs::remove_all(dir);
     }

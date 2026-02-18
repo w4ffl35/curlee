@@ -110,6 +110,61 @@ fn main() -> Unit {
     }
 
     {
+        const std::string src = R"(fn main(input: cap io.stdin) -> String {
+  return __read_line(input);
+})";
+
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_read_line_builtin.curlee");
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for __read_line builtin call");
+        }
+    }
+
+    {
+        const std::string src = R"(fn main(screen: cap io.tty) -> Unit {
+  __tty_clear(screen);
+  __tty_write_at(0, 0, "x", screen);
+  __tty_flush(screen);
+  return 0;
+})";
+
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_tty_builtins.curlee");
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for __tty_* builtin calls");
+        }
+    }
+
+    {
+        const std::string src = R"(fn main(rng: cap rng.seeded) -> Int {
+  return __rng_next_int(10, rng);
+})";
+
+        const auto res =
+            resolve_with_source(src, "tests/fixtures/resolve_rng_builtin.curlee");
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for __rng_next_int builtin call");
+        }
+    }
+
+    {
+        const std::string src = R"(fn main(r: cap fs.read, w: cap fs.write) -> Unit {
+  let text: String = __fs_read_text("in.txt", r);
+  __fs_write_text("out.txt", text, w);
+  return;
+})";
+
+        const auto res =
+            resolve_with_source(src, "tests/fixtures/resolve_fs_builtins.curlee");
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for __fs_* builtin calls");
+        }
+    }
+
+    {
         const std::string src = R"(fn main() -> Unit {
   foo(1);
   return 0;

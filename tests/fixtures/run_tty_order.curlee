@@ -1,0 +1,7 @@
+fn main(screen: cap io.tty) -> Int {
+  __tty_clear(screen);
+  __tty_write_at(0, 0, "A", screen);
+  __tty_write_at(0, 1, "B", screen);
+  __tty_flush(screen);
+  return 0;
+}

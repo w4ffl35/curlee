@@ -1,0 +1,5 @@
+tests/fixtures/run_missing_tty_cap.curlee:2:3: error: capability not granted: io.tty
+  |
+  |   __tty_clear(tty);
+  |   ^^^^^^^^^^^^^^^^
+note: grant it with: curlee run --cap io.tty <file.curlee>

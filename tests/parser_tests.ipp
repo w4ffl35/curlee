@@ -142,6 +142,33 @@ fn main() -> Unit {
         expect_parse_error_contains(src, "whitespace is not allowed in qualified capability names");
     }
 
+    // Generic type arguments: success and parser diagnostics.
+    {
+        const std::string src =
+            R"(fn main(v: Vec<Int>) -> Int { return __vec_len_int(v); })";
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on Vec<Int> program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on Vec<Int> program");
+        }
+    }
+
+    {
+        const std::string src = R"(fn main(v: Vec<>) -> Unit { return; })";
+        expect_parse_error_contains(src, "expected type name after '<'");
+    }
+
+    {
+        const std::string src = R"(fn main(v: Vec<Int) -> Unit { return; })";
+        expect_parse_error_contains(src, "expected '>' after type argument");
+    }
+
     // Struct literal: allow trailing comma.
     {
         const std::string src = R"(struct Point { x: Int; y: Int; }

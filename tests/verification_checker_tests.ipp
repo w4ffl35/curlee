@@ -210,19 +210,14 @@ int main()
     }
 
     {
-        // Signature filtering: verification only supports Int/Bool.
+        // Signature handling: non-scalar signatures are allowed and treated as uninterpreted.
         const std::string source = "fn bad_param(x: String) -> Int { return 0; }\n"
                                    "fn main() -> Int { return 0; }\n";
 
         const auto verified = verify_program(source, "unsupported signature type test");
-        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
         {
-            fail("expected verification to fail for unsupported signature type test");
-        }
-        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
-        if (!has_message_substr(diags, "verification does not support type"))
-        {
-            fail("expected unsupported type diagnostic for signature");
+            fail("expected verification success for non-scalar signature without predicates");
         }
     }
 
@@ -541,8 +536,8 @@ int main()
     }
 
     {
-        // Expression lowering: MemberExpr is not supported by the solver-side expression
-        // language, even if the program type-checks.
+        // MemberExpr lowering: struct field access in call arguments is supported when
+        // the field can be lowered into the scalar verification fragment.
         const std::string source = "struct S { x: Int; }\n"
                                    "fn f(x: Int) -> Int [ requires x > 0; ] { return x; }\n"
                                    "fn main() -> Int {\n"
@@ -551,20 +546,15 @@ int main()
                                    "  return 0;\n"
                                    "}\n";
 
-        const auto verified = verify_program(source, "member expr unsupported in call arg test");
-        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        const auto verified = verify_program(source, "member expr supported in call arg test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
         {
-            fail("expected verification to fail for member expr unsupported in call arg test");
-        }
-        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
-        if (!has_message_substr(diags, "unsupported expression in verification"))
-        {
-            fail("expected unsupported expression diagnostic for member expr call arg");
+            fail("expected verification to succeed for member expr call arg");
         }
     }
 
     {
-        // Expression lowering: MemberExpr in return position should surface an error.
+        // MemberExpr lowering in return position participates in ensures checking.
         const std::string source = "struct S { x: Int; }\n"
                                    "fn bad() -> Int [ ensures result > 0; ] {\n"
                                    "  let s: S = S{ x: 0 };\n"
@@ -572,15 +562,87 @@ int main()
                                    "}\n"
                                    "fn main() -> Int { return bad(); }\n";
 
-        const auto verified = verify_program(source, "member expr unsupported in return test");
+        const auto verified = verify_program(source, "member expr return ensures test");
         if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
         {
-            fail("expected verification to fail for member expr unsupported in return test");
+            fail("expected verification to fail for member expr ensures violation");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "ensures clause not satisfied"))
+        {
+            fail("expected ensures failure diagnostic for member expr return");
+        }
+    }
+
+    {
+        // Struct field lowering supports nested struct members and Bool fields.
+        // MVP fact propagation from struct literals is scalar-field only at the bound level,
+        // so nested `o.n.y` remains unconstrained here and the call-site requires check fails.
+        const std::string source =
+            "struct Inner { y: Int; }\n"
+            "struct Outer { x: Int; b: Bool; c: cap io.stdout; n: Inner; }\n"
+            "fn take_pos(v: Int) -> Int [ requires v > 0; ] { return v; }\n"
+            "fn main(out: cap io.stdout) -> Int {\n"
+            "  let o: Outer = Outer{ x: 1, b: true, c: out, n: Inner{ y: 2 } };\n"
+            "  if (o.b) {\n"
+            "    take_pos(o.n.y);\n"
+            "    return o.x;\n"
+            "  }\n"
+            "  return 0;\n"
+            "}\n";
+
+        const auto verified = verify_program(source, "nested struct member lowering test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for nested struct member lowering test");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "requires clause not satisfied"))
+        {
+            fail("expected requires failure diagnostic for nested struct member lowering test");
+        }
+    }
+
+    {
+        // MemberExpr lowering only supports in-scope bindings as the root base.
+        const std::string source = "struct S { x: Int; }\n"
+                                   "fn f(x: Int) -> Int [ requires x > 0; ] { return x; }\n"
+                                   "fn main() -> Int {\n"
+                                   "  f((S{ x: 1 }).x);\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "non-binding member root test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for non-binding member root test");
         }
         const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
         if (!has_message_substr(diags, "unsupported expression in verification"))
         {
-            fail("expected unsupported expression diagnostic for member expr return");
+            fail("expected unsupported expression diagnostic for non-binding member root");
+        }
+    }
+
+    {
+        // Struct parameters are accepted in signatures; field refs lower in return expressions.
+        const std::string source = "struct S { x: Int; }\n"
+                                   "fn bad(s: S) -> Int [ ensures result > 0; ] {\n"
+                                   "  return s.x;\n"
+                                   "}\n"
+                                   "fn main() -> Int {\n"
+                                   "  return bad(S{ x: 0 });\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "struct parameter member lowering test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for unconstrained struct parameter field");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "ensures clause not satisfied"))
+        {
+            fail("expected ensures failure diagnostic for struct parameter field return");
         }
     }
 

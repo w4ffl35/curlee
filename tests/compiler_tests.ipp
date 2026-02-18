@@ -4,7 +4,9 @@
 #include <curlee/parser/parser.h>
 #include <curlee/vm/vm.h>
 #include <iostream>
+#include <limits>
 #include <memory>
+#include <sstream>
 #include <vector>
 
 static void fail(const std::string& msg)
@@ -93,6 +95,18 @@ static std::vector<curlee::vm::OpCode> decode_ops(const curlee::vm::Chunk& chunk
         case OpCode::Return:
         case OpCode::Ret:
         case OpCode::Print:
+        case OpCode::ReadLine:
+        case OpCode::FsReadText:
+        case OpCode::FsWriteText:
+        case OpCode::TtyClear:
+        case OpCode::TtyWriteAt:
+        case OpCode::TtyFlush:
+        case OpCode::RngNextInt:
+        case OpCode::VecNew:
+        case OpCode::VecLen:
+        case OpCode::VecPush:
+        case OpCode::VecGet:
+        case OpCode::VecSet:
         case OpCode::PythonCall:
             break;
         }
@@ -608,6 +622,410 @@ int main()
         }
     }
 
+    // Emitter should reject declaring builtin __read_line.
+    {
+        const std::string source =
+            "fn __read_line(in: cap io.stdin) -> String { return \"\"; } fn main() -> Int { "
+            "return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for builtin __read_line case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for builtin __read_line case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for builtin __read_line case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("cannot declare builtin function '__read_line'") ==
+                                 std::string::npos)
+        {
+            fail("expected builtin __read_line diagnostic");
+        }
+    }
+
+    // Emitter should reject declaring builtin __tty_clear.
+    {
+        const std::string source =
+            "fn __tty_clear(tty: cap io.tty) -> Unit { return 0; } fn main() -> Int { "
+            "return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for builtin __tty_clear case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for builtin __tty_clear case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for builtin __tty_clear case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("cannot declare builtin function '__tty_clear'") ==
+                                 std::string::npos)
+        {
+            fail("expected builtin __tty_clear diagnostic");
+        }
+    }
+
+    // Emitter should reject declaring builtin __fs_read_text.
+    {
+        const std::string source =
+            "fn __fs_read_text(path: String, r: cap fs.read) -> String { return path; } fn "
+            "main() -> Int { return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for builtin __fs_read_text case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for builtin __fs_read_text case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for builtin __fs_read_text case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("cannot declare builtin function '__fs_read_text'") ==
+                std::string::npos)
+        {
+            fail("expected builtin __fs_read_text diagnostic");
+        }
+    }
+
+    // Emitter should reject declaring builtin __fs_write_text.
+    {
+        const std::string source =
+            "fn __fs_write_text(path: String, content: String, w: cap fs.write) -> Unit { "
+            "return; } fn main() -> Int { return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for builtin __fs_write_text case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for builtin __fs_write_text case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for builtin __fs_write_text case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("cannot declare builtin function '__fs_write_text'") ==
+                std::string::npos)
+        {
+            fail("expected builtin __fs_write_text diagnostic");
+        }
+    }
+
+    // Emitter should reject declaring builtin __tty_write_at.
+    {
+        const std::string source =
+            "fn __tty_write_at(row: Int, col: Int, text: String, tty: cap io.tty) -> Unit { "
+            "return 0; } fn main() -> Int { return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for builtin __tty_write_at case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for builtin __tty_write_at case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for builtin __tty_write_at case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("cannot declare builtin function '__tty_write_at'") ==
+                std::string::npos)
+        {
+            fail("expected builtin __tty_write_at diagnostic");
+        }
+    }
+
+    // Emitter should reject declaring builtin __tty_flush.
+    {
+        const std::string source =
+            "fn __tty_flush(tty: cap io.tty) -> Unit { return 0; } fn main() -> Int { return 0; "
+            "}";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for builtin __tty_flush case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for builtin __tty_flush case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for builtin __tty_flush case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("cannot declare builtin function '__tty_flush'") ==
+                                 std::string::npos)
+        {
+            fail("expected builtin __tty_flush diagnostic");
+        }
+    }
+
+    // Emitter should reject declaring builtin __rng_next_int.
+    {
+        const std::string source =
+            "fn __rng_next_int(max_exclusive: Int, rng: cap rng.seeded) -> Int { return 0; } "
+            "fn main() -> Int { return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for builtin __rng_next_int case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for builtin __rng_next_int case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for builtin __rng_next_int case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("cannot declare builtin function '__rng_next_int'") ==
+                std::string::npos)
+        {
+            fail("expected builtin __rng_next_int diagnostic");
+        }
+    }
+
+    // Emitter should reject declaring builtin __vec_new_int.
+    {
+        const std::string source =
+            "fn __vec_new_int(max_len: Int) -> Vec { return __vec_new_int(max_len); } "
+            "fn main() -> Int { return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for builtin __vec_new_int case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for builtin __vec_new_int case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for builtin __vec_new_int case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("cannot declare builtin function '__vec_new_int'") ==
+                std::string::npos)
+        {
+            fail("expected builtin __vec_new_int diagnostic");
+        }
+    }
+
+    // Emitter should reject declaring builtin __vec_len_int.
+    {
+        const std::string source =
+            "fn __vec_len_int(v: Vec) -> Int { return 0; } fn main() -> Int { return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for builtin __vec_len_int case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for builtin __vec_len_int case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for builtin __vec_len_int case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("cannot declare builtin function '__vec_len_int'") ==
+                std::string::npos)
+        {
+            fail("expected builtin __vec_len_int diagnostic");
+        }
+    }
+
+    // Emitter should reject declaring builtin __vec_push_int.
+    {
+        const std::string source =
+            "fn __vec_push_int(v: Vec, x: Int) -> Unit { return; } fn main() -> Int { return 0; "
+            "}";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for builtin __vec_push_int case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for builtin __vec_push_int case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for builtin __vec_push_int case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("cannot declare builtin function '__vec_push_int'") ==
+                std::string::npos)
+        {
+            fail("expected builtin __vec_push_int diagnostic");
+        }
+    }
+
+    // Emitter should reject declaring builtin __vec_get_int.
+    {
+        const std::string source =
+            "fn __vec_get_int(v: Vec, i: Int) -> Int { return 0; } fn main() -> Int { return 0; "
+            "}";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for builtin __vec_get_int case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for builtin __vec_get_int case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for builtin __vec_get_int case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("cannot declare builtin function '__vec_get_int'") ==
+                std::string::npos)
+        {
+            fail("expected builtin __vec_get_int diagnostic");
+        }
+    }
+
+    // Emitter should reject declaring builtin __vec_set_int.
+    {
+        const std::string source =
+            "fn __vec_set_int(v: Vec, i: Int, x: Int) -> Unit { return; } "
+            "fn main() -> Int { return 0; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for builtin __vec_set_int case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for builtin __vec_set_int case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for builtin __vec_set_int case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("cannot declare builtin function '__vec_set_int'") ==
+                std::string::npos)
+        {
+            fail("expected builtin __vec_set_int diagnostic");
+        }
+    }
+
     // Emitter should report missing entry point.
     {
         const std::string source = "fn foo() -> Int { return 0; }";
@@ -837,6 +1255,1054 @@ int main()
             diags[0].message.find("print expects exactly 1 argument") == std::string::npos)
         {
             fail("expected print argcount diagnostic");
+        }
+    }
+
+    // Builtin __read_line should enforce argument count.
+    {
+        const std::string source = "fn main() -> String { return __read_line(); }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for __read_line argcount case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for __read_line argcount case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for __read_line argcount case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("__read_line expects exactly 1 argument") == std::string::npos)
+        {
+            fail("expected __read_line argcount diagnostic");
+        }
+    }
+
+    // Builtin __read_line should report argument expression errors.
+    {
+        const std::string source = "fn main() -> String { return __read_line(nope); }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for __read_line bad-arg case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for __read_line bad-arg case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for __read_line bad-arg case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+        {
+            fail("expected unknown-name diagnostic for __read_line argument");
+        }
+    }
+
+    {
+        const std::string source =
+            "fn main(in: cap io.stdin) -> String { return __read_line(in); }";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto ops = decode_ops(chunk);
+        if (!contains_op(ops, curlee::vm::OpCode::ReadLine))
+        {
+            fail("expected __read_line(...) to emit ReadLine opcode");
+        }
+
+        std::istringstream in("hello from stdin\n");
+        std::streambuf* old_in = std::cin.rdbuf(in.rdbuf());
+        std::cin.clear();
+
+        curlee::vm::VM::Capabilities caps;
+        caps.insert("io.stdin");
+        const auto res = run_chunk_with_caps(chunk, caps);
+
+        std::cin.rdbuf(old_in);
+
+        if (!res.ok)
+        {
+            fail("expected __read_line(...) run to succeed; error=" + res.error);
+        }
+        if (!(res.value == curlee::vm::Value::string_v("hello from stdin")))
+        {
+            fail("expected __read_line(...) to return 'hello from stdin', got=" +
+                 curlee::vm::to_string(res.value));
+        }
+    }
+
+    // Builtin __fs_read_text should enforce argument count.
+    {
+        const std::string source =
+            "fn main(r: cap fs.read) -> String { return __fs_read_text(r); }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for __fs_read_text argcount case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for __fs_read_text argcount case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for __fs_read_text argcount case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("__fs_read_text expects exactly 2 arguments") ==
+                std::string::npos)
+        {
+            fail("expected __fs_read_text argcount diagnostic");
+        }
+    }
+
+    // Builtin __fs_write_text should enforce argument count.
+    {
+        const std::string source =
+            "fn main(w: cap fs.write) -> Unit { __fs_write_text(\"a.txt\", w); return; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for __fs_write_text argcount case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for __fs_write_text argcount case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for __fs_write_text argcount case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("__fs_write_text expects exactly 3 arguments") ==
+                std::string::npos)
+        {
+            fail("expected __fs_write_text argcount diagnostic");
+        }
+    }
+
+    // Builtin __fs_read_text should report argument expression errors.
+    {
+        const std::string source =
+            "fn main(r: cap fs.read) -> String { return __fs_read_text(nope, r); }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for __fs_read_text bad-arg case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for __fs_read_text bad-arg case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for __fs_read_text bad-arg case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+        {
+            fail("expected unknown-name diagnostic for __fs_read_text argument");
+        }
+    }
+
+    {
+        const std::string source =
+            "fn main() -> String { return __fs_read_text(\"in.txt\", nope); }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for __fs_read_text bad-cap case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for __fs_read_text bad-cap case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for __fs_read_text bad-cap case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+        {
+            fail("expected unknown-name diagnostic for __fs_read_text capability argument");
+        }
+    }
+
+    {
+        const std::string source =
+            "fn main(w: cap fs.write) -> Unit { __fs_write_text(nope, \"x\", w); return; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for __fs_write_text first-arg error case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for __fs_write_text first-arg error case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for __fs_write_text first-arg error case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+        {
+            fail("expected unknown-name diagnostic for __fs_write_text first argument");
+        }
+    }
+
+    {
+        const std::string source =
+            "fn main(w: cap fs.write) -> Unit { __fs_write_text(\"a.txt\", nope, w); "
+            "return; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for __fs_write_text second-arg error case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for __fs_write_text second-arg error case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for __fs_write_text second-arg error case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+        {
+            fail("expected unknown-name diagnostic for __fs_write_text second argument");
+        }
+    }
+
+    {
+        const std::string source =
+            "fn main() -> Unit { __fs_write_text(\"a.txt\", \"x\", nope); return; }";
+
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for __fs_write_text third-arg error case");
+        }
+
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for __fs_write_text third-arg error case");
+        }
+
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for __fs_write_text third-arg error case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+        {
+            fail("expected unknown-name diagnostic for __fs_write_text third argument");
+        }
+    }
+
+    {
+        const std::string source =
+            "fn main(r: cap fs.read, w: cap fs.write) -> Unit { let text: String = "
+            "__fs_read_text(\"in.txt\", r); __fs_write_text(\"out.txt\", text, w); return; }";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto ops = decode_ops(chunk);
+        if (!contains_op(ops, curlee::vm::OpCode::FsReadText) ||
+            !contains_op(ops, curlee::vm::OpCode::FsWriteText))
+        {
+            fail("expected __fs_* builtins to emit fs opcodes");
+        }
+    }
+
+    // Builtin __tty_clear should enforce argument count.
+    {
+        const std::string source = "fn main() -> Unit { __tty_clear(); return; }";
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for __tty_clear argcount case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for __tty_clear argcount case");
+        }
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for __tty_clear argcount case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("__tty_clear expects exactly 1 argument") == std::string::npos)
+        {
+            fail("expected __tty_clear argcount diagnostic");
+        }
+    }
+
+    // Builtin __tty_write_at should enforce argument count.
+    {
+        const std::string source =
+            "fn main(tty: cap io.tty) -> Unit { __tty_write_at(0, 0, \"x\"); return; }";
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for __tty_write_at argcount case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for __tty_write_at argcount case");
+        }
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for __tty_write_at argcount case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("__tty_write_at expects exactly 4 arguments") ==
+                                 std::string::npos)
+        {
+            fail("expected __tty_write_at argcount diagnostic");
+        }
+    }
+
+    // Builtin __tty_flush should enforce argument count.
+    {
+        const std::string source = "fn main() -> Unit { __tty_flush(); return; }";
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for __tty_flush argcount case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for __tty_flush argcount case");
+        }
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for __tty_flush argcount case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find("__tty_flush expects exactly 1 argument") == std::string::npos)
+        {
+            fail("expected __tty_flush argcount diagnostic");
+        }
+    }
+
+    // Builtin __tty_write_at should report argument expression errors.
+    {
+        const std::string source =
+            "fn main(tty: cap io.tty) -> Unit { __tty_write_at(nope, 0, \"x\", tty); return; }";
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for __tty_write_at bad-arg case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for __tty_write_at bad-arg case");
+        }
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for __tty_write_at bad-arg case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+        {
+            fail("expected unknown-name diagnostic for __tty_write_at argument");
+        }
+    }
+
+    // Builtin __tty_clear should report argument expression errors.
+    {
+        const std::string source = "fn main() -> Unit { __tty_clear(nope); return; }";
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for __tty_clear bad-arg case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for __tty_clear bad-arg case");
+        }
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for __tty_clear bad-arg case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+        {
+            fail("expected unknown-name diagnostic for __tty_clear argument");
+        }
+    }
+
+    // Builtin __tty_flush should report argument expression errors.
+    {
+        const std::string source = "fn main() -> Unit { __tty_flush(nope); return; }";
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for __tty_flush bad-arg case");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for __tty_flush bad-arg case");
+        }
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected emission to fail for __tty_flush bad-arg case");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+        {
+            fail("expected unknown-name diagnostic for __tty_flush argument");
+        }
+    }
+
+    // Builtin __rng_next_int should report arity and argument expression errors.
+    {
+        {
+            const std::string source =
+                "fn main(rng: cap rng.seeded) -> Int { return __rng_next_int(10, rng, rng); }";
+            const auto lexed = curlee::lexer::lex(source);
+            if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+            {
+                fail("expected lexing to succeed for __rng_next_int arity case");
+            }
+            const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            const auto parsed = curlee::parser::parse(tokens);
+            if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+            {
+                fail("expected parsing to succeed for __rng_next_int arity case");
+            }
+            const auto& program = std::get<curlee::parser::Program>(parsed);
+            const auto emitted = curlee::compiler::emit_bytecode(program);
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for __rng_next_int arity case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("__rng_next_int expects exactly 2 arguments") ==
+                    std::string::npos)
+            {
+                fail("expected __rng_next_int arity diagnostic");
+            }
+        }
+
+        {
+            const std::string source =
+                "fn main(rng: cap rng.seeded) -> Int { return __rng_next_int(nope, rng); }";
+            const auto lexed = curlee::lexer::lex(source);
+            if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+            {
+                fail("expected lexing to succeed for __rng_next_int first-arg error case");
+            }
+            const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            const auto parsed = curlee::parser::parse(tokens);
+            if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+            {
+                fail("expected parsing to succeed for __rng_next_int first-arg error case");
+            }
+            const auto& program = std::get<curlee::parser::Program>(parsed);
+            const auto emitted = curlee::compiler::emit_bytecode(program);
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for __rng_next_int first-arg error case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+            {
+                fail("expected unknown-name diagnostic for __rng_next_int first argument");
+            }
+        }
+
+        {
+            const std::string source =
+                "fn main() -> Int { return __rng_next_int(10, nope); }";
+            const auto lexed = curlee::lexer::lex(source);
+            if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+            {
+                fail("expected lexing to succeed for __rng_next_int second-arg error case");
+            }
+            const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            const auto parsed = curlee::parser::parse(tokens);
+            if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+            {
+                fail("expected parsing to succeed for __rng_next_int second-arg error case");
+            }
+            const auto& program = std::get<curlee::parser::Program>(parsed);
+            const auto emitted = curlee::compiler::emit_bytecode(program);
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for __rng_next_int second-arg error case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+            {
+                fail("expected unknown-name diagnostic for __rng_next_int second argument");
+            }
+        }
+    }
+
+    {
+        const std::string source =
+            "fn main(tty: cap io.tty) -> Int { __tty_clear(tty); __tty_write_at(1, 2, \"x\", "
+            "tty); __tty_flush(tty); return 0; }";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto ops = decode_ops(chunk);
+        if (!contains_op(ops, curlee::vm::OpCode::TtyClear) ||
+            !contains_op(ops, curlee::vm::OpCode::TtyWriteAt) ||
+            !contains_op(ops, curlee::vm::OpCode::TtyFlush))
+        {
+            fail("expected __tty_* builtins to emit tty opcodes");
+        }
+
+        curlee::vm::VM::Capabilities caps;
+        caps.insert("io.tty");
+        const auto res = run_chunk_with_caps(chunk, caps);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(0)))
+        {
+            fail("expected __tty_* program to run with io.tty capability");
+        }
+    }
+
+    {
+        const std::string source =
+            "fn main(rng: cap rng.seeded) -> Int { return __rng_next_int(100, rng); }";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto ops = decode_ops(chunk);
+        if (!contains_op(ops, curlee::vm::OpCode::RngNextInt))
+        {
+            fail("expected __rng_next_int to emit RngNextInt opcode");
+        }
+
+        curlee::vm::VM::Capabilities caps;
+        caps.insert("rng.seeded");
+        curlee::vm::VM vm_a;
+        const auto a = vm_a.run(chunk, std::numeric_limits<std::size_t>::max(), caps,
+                                std::uint64_t{42});
+        if (!a.ok || a.value.kind != curlee::vm::ValueKind::Int)
+        {
+            fail("expected __rng_next_int program to run with rng.seeded capability and seed");
+        }
+
+        curlee::vm::VM vm_b;
+        const auto b = vm_b.run(chunk, std::numeric_limits<std::size_t>::max(), caps,
+                                std::uint64_t{42});
+        if (!b.ok || !(a.value == b.value))
+        {
+            fail("expected deterministic __rng_next_int result for same seed");
+        }
+    }
+
+    // Builtin __vec_* should report arity and argument expression errors, and emit vec opcodes.
+    {
+        {
+            const std::string source =
+                "fn main() -> Unit { __vec_new_int(1, 2); return; }";
+            const auto lexed = curlee::lexer::lex(source);
+            if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+            {
+                fail("expected lexing to succeed for __vec_new_int arity case");
+            }
+            const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            const auto parsed = curlee::parser::parse(tokens);
+            if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+            {
+                fail("expected parsing to succeed for __vec_new_int arity case");
+            }
+            const auto& program = std::get<curlee::parser::Program>(parsed);
+            const auto emitted = curlee::compiler::emit_bytecode(program);
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for __vec_new_int arity case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("__vec_new_int expects exactly 1 argument") ==
+                    std::string::npos)
+            {
+                fail("expected __vec_new_int arity diagnostic");
+            }
+        }
+
+        {
+            const std::string source =
+                "fn main() -> Int { return __vec_len_int(__vec_new_int(nope)); }";
+            const auto lexed = curlee::lexer::lex(source);
+            if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+            {
+                fail("expected lexing to succeed for __vec_new_int arg error case");
+            }
+            const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            const auto parsed = curlee::parser::parse(tokens);
+            if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+            {
+                fail("expected parsing to succeed for __vec_new_int arg error case");
+            }
+            const auto& program = std::get<curlee::parser::Program>(parsed);
+            const auto emitted = curlee::compiler::emit_bytecode(program);
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for __vec_new_int arg error case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+            {
+                fail("expected unknown-name diagnostic for __vec_new_int argument");
+            }
+        }
+
+        {
+            const std::string source =
+                "fn main() -> Unit { __vec_push_int(nope, 1); return; }";
+            const auto lexed = curlee::lexer::lex(source);
+            if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+            {
+                fail("expected lexing to succeed for __vec_push_int vec arg error case");
+            }
+            const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            const auto parsed = curlee::parser::parse(tokens);
+            if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+            {
+                fail("expected parsing to succeed for __vec_push_int vec arg error case");
+            }
+            const auto& program = std::get<curlee::parser::Program>(parsed);
+            const auto emitted = curlee::compiler::emit_bytecode(program);
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for __vec_push_int vec arg error case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+            {
+                fail("expected unknown-name diagnostic for __vec_push_int vec argument");
+            }
+        }
+
+        {
+            const std::string source =
+                "fn main() -> Unit { let v: Vec = __vec_new_int(2); __vec_push_int(v, nope); "
+                "return; }";
+            const auto lexed = curlee::lexer::lex(source);
+            if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+            {
+                fail("expected lexing to succeed for __vec_push_int value arg error case");
+            }
+            const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            const auto parsed = curlee::parser::parse(tokens);
+            if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+            {
+                fail("expected parsing to succeed for __vec_push_int value arg error case");
+            }
+            const auto& program = std::get<curlee::parser::Program>(parsed);
+            const auto emitted = curlee::compiler::emit_bytecode(program);
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for __vec_push_int value arg error case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+            {
+                fail("expected unknown-name diagnostic for __vec_push_int value argument");
+            }
+        }
+
+        {
+            const std::string source =
+                "fn main() -> Unit { let v: Vec = __vec_new_int(2); __vec_set_int(v, nope, 1); "
+                "return; }";
+            const auto lexed = curlee::lexer::lex(source);
+            if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+            {
+                fail("expected lexing to succeed for __vec_set_int index arg error case");
+            }
+            const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            const auto parsed = curlee::parser::parse(tokens);
+            if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+            {
+                fail("expected parsing to succeed for __vec_set_int index arg error case");
+            }
+            const auto& program = std::get<curlee::parser::Program>(parsed);
+            const auto emitted = curlee::compiler::emit_bytecode(program);
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for __vec_set_int index arg error case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+            {
+                fail("expected unknown-name diagnostic for __vec_set_int index argument");
+            }
+        }
+
+        {
+            const std::string source =
+                "fn main() -> Unit { let v: Vec = __vec_new_int(2); __vec_set_int(v, 0, nope); "
+                "return; }";
+            const auto lexed = curlee::lexer::lex(source);
+            if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+            {
+                fail("expected lexing to succeed for __vec_set_int value arg error case");
+            }
+            const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            const auto parsed = curlee::parser::parse(tokens);
+            if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+            {
+                fail("expected parsing to succeed for __vec_set_int value arg error case");
+            }
+            const auto& program = std::get<curlee::parser::Program>(parsed);
+            const auto emitted = curlee::compiler::emit_bytecode(program);
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for __vec_set_int value arg error case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+            {
+                fail("expected unknown-name diagnostic for __vec_set_int value argument");
+            }
+        }
+
+        {
+            const std::string source =
+                "fn main() -> Int { return __vec_len_int(); }";
+            const auto lexed = curlee::lexer::lex(source);
+            if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+            {
+                fail("expected lexing to succeed for __vec_len_int arity case");
+            }
+            const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            const auto parsed = curlee::parser::parse(tokens);
+            if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+            {
+                fail("expected parsing to succeed for __vec_len_int arity case");
+            }
+            const auto& program = std::get<curlee::parser::Program>(parsed);
+            const auto emitted = curlee::compiler::emit_bytecode(program);
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for __vec_len_int arity case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("__vec_len_int expects exactly 1 argument") ==
+                    std::string::npos)
+            {
+                fail("expected __vec_len_int arity diagnostic");
+            }
+        }
+
+        {
+            const std::string source =
+                "fn main() -> Int { return __vec_len_int(nope); }";
+            const auto lexed = curlee::lexer::lex(source);
+            if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+            {
+                fail("expected lexing to succeed for __vec_len_int arg error case");
+            }
+            const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            const auto parsed = curlee::parser::parse(tokens);
+            if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+            {
+                fail("expected parsing to succeed for __vec_len_int arg error case");
+            }
+            const auto& program = std::get<curlee::parser::Program>(parsed);
+            const auto emitted = curlee::compiler::emit_bytecode(program);
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for __vec_len_int arg error case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+            {
+                fail("expected unknown-name diagnostic for __vec_len_int argument");
+            }
+        }
+
+        {
+            const std::string source =
+                "fn main() -> Unit { __vec_push_int(__vec_new_int(2)); return; }";
+            const auto lexed = curlee::lexer::lex(source);
+            if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+            {
+                fail("expected lexing to succeed for __vec_push_int arity case");
+            }
+            const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            const auto parsed = curlee::parser::parse(tokens);
+            if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+            {
+                fail("expected parsing to succeed for __vec_push_int arity case");
+            }
+            const auto& program = std::get<curlee::parser::Program>(parsed);
+            const auto emitted = curlee::compiler::emit_bytecode(program);
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for __vec_push_int arity case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("__vec_push_int expects exactly 2 arguments") ==
+                    std::string::npos)
+            {
+                fail("expected __vec_push_int arity diagnostic");
+            }
+        }
+
+        {
+            const std::string source =
+                "fn main() -> Int { return __vec_get_int(); }";
+            const auto lexed = curlee::lexer::lex(source);
+            if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+            {
+                fail("expected lexing to succeed for __vec_get_int arity case");
+            }
+            const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            const auto parsed = curlee::parser::parse(tokens);
+            if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+            {
+                fail("expected parsing to succeed for __vec_get_int arity case");
+            }
+            const auto& program = std::get<curlee::parser::Program>(parsed);
+            const auto emitted = curlee::compiler::emit_bytecode(program);
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for __vec_get_int arity case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("__vec_get_int expects exactly 2 arguments") ==
+                    std::string::npos)
+            {
+                fail("expected __vec_get_int arity diagnostic");
+            }
+        }
+
+        {
+            const std::string source =
+                "fn main() -> Int { return __vec_get_int(nope, 0); }";
+            const auto lexed = curlee::lexer::lex(source);
+            if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+            {
+                fail("expected lexing to succeed for __vec_get_int first-arg error case");
+            }
+            const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            const auto parsed = curlee::parser::parse(tokens);
+            if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+            {
+                fail("expected parsing to succeed for __vec_get_int first-arg error case");
+            }
+            const auto& program = std::get<curlee::parser::Program>(parsed);
+            const auto emitted = curlee::compiler::emit_bytecode(program);
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for __vec_get_int first-arg error case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+            {
+                fail("expected unknown-name diagnostic for __vec_get_int first argument");
+            }
+        }
+
+        {
+            const std::string source =
+                "fn main() -> Int { let v: Vec = __vec_new_int(2); return __vec_get_int(v, nope); }";
+            const auto lexed = curlee::lexer::lex(source);
+            if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+            {
+                fail("expected lexing to succeed for __vec_get_int second-arg error case");
+            }
+            const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            const auto parsed = curlee::parser::parse(tokens);
+            if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+            {
+                fail("expected parsing to succeed for __vec_get_int second-arg error case");
+            }
+            const auto& program = std::get<curlee::parser::Program>(parsed);
+            const auto emitted = curlee::compiler::emit_bytecode(program);
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for __vec_get_int second-arg error case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+            {
+                fail("expected unknown-name diagnostic for __vec_get_int second argument");
+            }
+        }
+
+        {
+            const std::string source =
+                "fn main() -> Unit { __vec_set_int(); return; }";
+            const auto lexed = curlee::lexer::lex(source);
+            if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+            {
+                fail("expected lexing to succeed for __vec_set_int arity case");
+            }
+            const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            const auto parsed = curlee::parser::parse(tokens);
+            if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+            {
+                fail("expected parsing to succeed for __vec_set_int arity case");
+            }
+            const auto& program = std::get<curlee::parser::Program>(parsed);
+            const auto emitted = curlee::compiler::emit_bytecode(program);
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for __vec_set_int arity case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("__vec_set_int expects exactly 3 arguments") ==
+                    std::string::npos)
+            {
+                fail("expected __vec_set_int arity diagnostic");
+            }
+        }
+
+        {
+            const std::string source =
+                "fn main() -> Unit { __vec_set_int(nope, 0, 1); return; }";
+            const auto lexed = curlee::lexer::lex(source);
+            if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+            {
+                fail("expected lexing to succeed for __vec_set_int first-arg error case");
+            }
+            const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+            const auto parsed = curlee::parser::parse(tokens);
+            if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+            {
+                fail("expected parsing to succeed for __vec_set_int first-arg error case");
+            }
+            const auto& program = std::get<curlee::parser::Program>(parsed);
+            const auto emitted = curlee::compiler::emit_bytecode(program);
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for __vec_set_int first-arg error case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() || diags[0].message.find("unknown name 'nope'") == std::string::npos)
+            {
+                fail("expected unknown-name diagnostic for __vec_set_int first argument");
+            }
+        }
+    }
+
+    {
+        const std::string source =
+            "fn main() -> Int { let v: Vec = __vec_new_int(3); __vec_push_int(v, 7); "
+            "__vec_set_int(v, 0, 9); return __vec_get_int(v, 0) + __vec_len_int(v); }";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto ops = decode_ops(chunk);
+        if (!contains_op(ops, curlee::vm::OpCode::VecNew) ||
+            !contains_op(ops, curlee::vm::OpCode::VecLen) ||
+            !contains_op(ops, curlee::vm::OpCode::VecPush) ||
+            !contains_op(ops, curlee::vm::OpCode::VecGet) ||
+            !contains_op(ops, curlee::vm::OpCode::VecSet))
+        {
+            fail("expected __vec_* builtins to emit vec opcodes");
+        }
+
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(10)))
+        {
+            fail("expected __vec_* program to run and produce correct Int result");
         }
     }
 

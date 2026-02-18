@@ -285,6 +285,39 @@ fn main() -> Int {
         fs::remove_all(dir);
     }
 
+    // bundle build: interactive stdin opcode is accepted (non-Python call scanner path).
+    {
+        const fs::path dir = temp_path("curlee_cli_bundle_build_stdin_opcode");
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+
+        const fs::path entry = dir / "main.curlee";
+        const fs::path out_bundle = dir / "stdin.bundle";
+
+        write_all(entry,
+                  R"(fn main(input: cap io.stdin) -> Int {
+  __read_line(input);
+  return 0;
+}
+)");
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli({"curlee", "bundle", "build", "--cap", "io.stdin",
+                                entry.string(), out_bundle.string()},
+                               out, err);
+        if (rc != 0)
+        {
+            fail("expected bundle build to succeed for stdin opcode program; stderr: " + err);
+        }
+        if (!err.empty())
+        {
+            fail("expected empty stderr for stdin opcode bundle build");
+        }
+
+        fs::remove_all(dir);
+    }
+
     // bundle build: v1-forbidden capabilities are rejected.
     {
         const fs::path dir = temp_path("curlee_cli_bundle_build_forbidden_cap");

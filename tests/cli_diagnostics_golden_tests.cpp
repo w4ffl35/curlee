@@ -6,6 +6,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -18,6 +19,32 @@ struct CapturedRun
     int rc = 0;
     std::string out;
     std::string err;
+};
+
+struct EnvVarGuard
+{
+    std::string key;
+    bool had_old = false;
+    std::string old_value;
+
+    explicit EnvVarGuard(std::string key_in) : key(std::move(key_in))
+    {
+        if (const char* old = std::getenv(key.c_str()); old != nullptr)
+        {
+            had_old = true;
+            old_value = old;
+        }
+    }
+
+    ~EnvVarGuard()
+    {
+        if (had_old)
+        {
+            ::setenv(key.c_str(), old_value.c_str(), 1);
+            return;
+        }
+        ::unsetenv(key.c_str());
+    }
 };
 
 std::string slurp(const fs::path& path)
@@ -55,6 +82,18 @@ CapturedRun run_cli(std::vector<std::string> argv_storage)
     std::cerr.rdbuf(old_cerr);
     run.out = captured_out.str();
     run.err = captured_err.str();
+    return run;
+}
+
+CapturedRun run_cli_with_stdin(std::vector<std::string> argv_storage, const std::string& stdin_text)
+{
+    std::istringstream input(stdin_text);
+    std::streambuf* old_cin = std::cin.rdbuf(input.rdbuf());
+    std::cin.clear();
+
+    const auto run = run_cli(std::move(argv_storage));
+
+    std::cin.rdbuf(old_cin);
     return run;
 }
 
@@ -126,6 +165,45 @@ bool run_stdio_case(const std::string& case_name,
     return check_text_equal("stdout", out_golden_path, run.out, expected_out);
 }
 
+bool run_stdio_case_with_stdin(const std::string& case_name,
+                               std::vector<std::string> argv_storage,
+                               std::string stdin_text,
+                               const fs::path& out_golden_path,
+                               const fs::path& err_golden_path,
+                               bool expect_zero)
+{
+    const CapturedRun run = run_cli_with_stdin(std::move(argv_storage), stdin_text);
+    if (!check_exit_code(case_name, run.rc, expect_zero))
+    {
+        return false;
+    }
+
+    const std::string expected_out = slurp(out_golden_path);
+    const std::string expected_err = slurp(err_golden_path);
+
+    if (!check_text_equal("stderr", err_golden_path, run.err, expected_err))
+    {
+        return false;
+    }
+    return check_text_equal("stdout", out_golden_path, run.out, expected_out);
+}
+
+bool run_stderr_case_with_stdin(const std::string& case_name,
+                                std::vector<std::string> argv_storage,
+                                std::string stdin_text,
+                                const fs::path& err_golden_path,
+                                bool expect_zero)
+{
+    const CapturedRun run = run_cli_with_stdin(std::move(argv_storage), stdin_text);
+    if (!check_exit_code(case_name, run.rc, expect_zero))
+    {
+        return false;
+    }
+
+    const std::string expected_err = slurp(err_golden_path);
+    return check_text_equal("stderr", err_golden_path, run.err, expected_err);
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -137,6 +215,11 @@ int main(int argc, char** argv)
     }
 
     const fs::path dir = fs::path(argv[1]);
+    const fs::path repo_root = fs::path(__FILE__).parent_path().parent_path();
+    const fs::path stdlib_v1_root = repo_root / "stdlib" / "v1";
+
+    EnvVarGuard stdlib_root_guard("CURLEE_STDLIB_ROOT");
+    ::setenv("CURLEE_STDLIB_ROOT", stdlib_v1_root.string().c_str(), 1);
 
     const fs::path rel_missing_file = "tests/fixtures/does_not_exist.cur";
     const fs::path rel_requires_divide = "tests/fixtures/check_requires_divide.curlee";
@@ -152,6 +235,13 @@ int main(int argc, char** argv)
     const fs::path rel_ensures_fail = "tests/fixtures/check_ensures_fail.curlee";
     const fs::path rel_run_success = "tests/fixtures/run_success.curlee";
     const fs::path rel_run_missing_stdout_cap = "tests/fixtures/r.curlee";
+    const fs::path rel_run_missing_tty_cap = "tests/fixtures/run_missing_tty_cap.curlee";
+    const fs::path rel_run_tty_order = "tests/fixtures/run_tty_order.curlee";
+    const fs::path rel_run_read_line = "tests/fixtures/run_read_line.curlee";
+    const fs::path rel_run_read_line_over_limit = "tests/fixtures/run_read_line_over_limit.curlee";
+    const fs::path rel_run_vec_success = "tests/fixtures/run_vec_success.curlee";
+    const fs::path rel_run_vec_capacity_error = "tests/fixtures/run_vec_capacity_error.curlee";
+    const fs::path rel_run_vec_index_error = "tests/fixtures/run_vec_index_error.curlee";
 
     try
     {
@@ -267,6 +357,32 @@ int main(int argc, char** argv)
             return 1;
         }
 
+        if (!run_stderr_case("run-missing-tty-cap",
+                             {"curlee", "run", rel_run_missing_tty_cap.string()},
+                             dir / "run_missing_tty_cap.golden",
+                             false))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("run-missing-stdin-cap-json",
+                             {"curlee", "run", "--diag-format", "json",
+                              rel_run_read_line.string()},
+                             dir / "run_missing_stdin_cap.json.golden",
+                             false))
+        {
+            return 1;
+        }
+
+        if (!run_stdio_case("run-tty-order",
+                            {"curlee", "run", "--cap", "io.tty", rel_run_tty_order.string()},
+                            dir / "run_tty_order.stdout.golden",
+                            dir / "run_tty_order.stderr.golden",
+                            true))
+        {
+            return 1;
+        }
+
         if (!run_stdio_case("run-with-stdout-cap",
                             {"curlee", "run", "--cap", "io.stdout",
                              rel_run_missing_stdout_cap.string()},
@@ -291,6 +407,82 @@ int main(int argc, char** argv)
                             dir / "run_success.stdout.golden",
                             dir / "run_success.stderr.golden",
                             true))
+        {
+            return 1;
+        }
+
+        if (!run_stdio_case_with_stdin("run-read-line-success",
+                                       {"curlee", "run", "--cap", "io.stdin",
+                                        rel_run_read_line.string()},
+                                       "hello from stdin\n",
+                                       dir / "run_read_line.stdout.golden",
+                                       dir / "run_read_line.stderr.golden",
+                                       true))
+        {
+            return 1;
+        }
+
+        if (!run_stdio_case_with_stdin("run-read-line-eof",
+                                       {"curlee", "run", "--cap", "io.stdin",
+                                        rel_run_read_line.string()},
+                                       "",
+                                       dir / "run_read_line_eof.stdout.golden",
+                                       dir / "run_read_line_eof.stderr.golden",
+                                       true))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case_with_stdin("run-read-line-over-limit-json",
+                                        {"curlee", "run", "--cap", "io.stdin",
+                                         "--diag-format", "json",
+                                         rel_run_read_line_over_limit.string()},
+                                        std::string(4097, 'a') + "\n",
+                                        dir / "run_read_line_over_limit.json.golden",
+                                        false))
+        {
+            return 1;
+        }
+
+        if (!run_stdio_case("run-vec-success",
+                            {"curlee", "run", rel_run_vec_success.string()},
+                            dir / "run_vec_success.stdout.golden",
+                            dir / "run_vec_success.stderr.golden",
+                            true))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("run-vec-capacity-error",
+                             {"curlee", "run", rel_run_vec_capacity_error.string()},
+                             dir / "run_vec_capacity_error.golden",
+                             false))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("run-vec-index-error",
+                             {"curlee", "run", rel_run_vec_index_error.string()},
+                             dir / "run_vec_index_error.golden",
+                             false))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("run-vec-capacity-error-json",
+                             {"curlee", "run", "--diag-format", "json",
+                              rel_run_vec_capacity_error.string()},
+                             dir / "run_vec_capacity_error.json.golden",
+                             false))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("run-vec-index-error-json",
+                             {"curlee", "run", "--diag-format", "json",
+                              rel_run_vec_index_error.string()},
+                             dir / "run_vec_index_error.json.golden",
+                             false))
         {
             return 1;
         }

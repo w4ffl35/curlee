@@ -289,7 +289,7 @@ int main()
     }
 
     {
-        // collect_signatures: supported_type failure for return type should hit the continue.
+        // collect_signatures: Unit return type is allowed as uninterpreted.
         curlee::parser::Program p;
         curlee::parser::Function f;
         f.name = "bad_ret";
@@ -299,10 +299,78 @@ int main()
 
         const std::size_t before = v.functions_.size();
         v.collect_signatures(p);
+        if (v.functions_.size() != before + 1)
+        {
+            fail("expected collect_signatures to retain Unit return type");
+        }
+    }
+
+    {
+        // collect_signatures: unknown return type should skip signature.
+        curlee::parser::Program p;
+        curlee::parser::Function f;
+        f.name = "bad_unknown_ret";
+        f.return_type = curlee::parser::TypeName{.span = curlee::source::Span{.start = 2, .end = 3},
+                                                 .name = "NoSuchType"};
+        p.functions.push_back(std::move(f));
+
+        const std::size_t before = v.functions_.size();
+        v.collect_signatures(p);
         if (v.functions_.size() != before)
         {
-            fail("expected collect_signatures to skip functions with unsupported return type");
+            fail("expected collect_signatures to skip functions with unknown return type");
         }
+    }
+
+    {
+        // collect_signatures: unknown parameter type should skip insertion.
+        curlee::parser::Program p;
+        curlee::parser::Function f;
+        f.name = "bad_unknown_param";
+        f.return_type = curlee::parser::TypeName{.span = curlee::source::Span{.start = 4, .end = 5},
+                                                 .name = "Int"};
+        curlee::parser::Function::Param param;
+        param.name = "x";
+        param.type = curlee::parser::TypeName{.span = curlee::source::Span{.start = 5, .end = 6},
+                                              .name = "NoSuchParamType"};
+        f.params.push_back(std::move(param));
+        p.functions.push_back(std::move(f));
+
+        const std::size_t before = v.functions_.size();
+        v.collect_signatures(p);
+        if (v.functions_.size() != before)
+        {
+            fail("expected collect_signatures to skip functions with unknown parameter type");
+        }
+    }
+
+    {
+        // collect_signatures: fully supported function should be inserted.
+        curlee::parser::Program p;
+        curlee::parser::Function f;
+        f.name = "good_sig";
+        f.return_type = curlee::parser::TypeName{.span = curlee::source::Span{.start = 7, .end = 8},
+                                                 .name = "Int"};
+        curlee::parser::Function::Param param;
+        param.name = "x";
+        param.type =
+            curlee::parser::TypeName{.span = curlee::source::Span{.start = 8, .end = 9}, .name = "Int"};
+        f.params.push_back(std::move(param));
+        p.functions.push_back(std::move(f));
+
+        const std::size_t before = v.functions_.size();
+        v.collect_signatures(p);
+        if (v.functions_.size() != before + 1)
+        {
+            fail("expected collect_signatures to insert supported function");
+        }
+    }
+
+    {
+        // check_function: should early-return when signature is absent.
+        curlee::parser::Function f;
+        f.name = "missing_sig";
+        v.check_function(f);
     }
 
     {

@@ -223,6 +223,49 @@ int main()
         expect_empty(ok.err, "stderr");
     }
 
+    // check: stdlib FS signatures require explicit fs capability values.
+    {
+        const fs::path root =
+            fs::temp_directory_path() / "curlee_cli_tests" /
+            ("check_stdlib_fs_cap_" + std::to_string(pid));
+        const fs::path entry = root / "main.curlee";
+        const fs::path entry_ok = root / "main_ok.curlee";
+
+        std::error_code ec;
+        fs::remove_all(root, ec);
+
+        write_text(entry,
+                   "import std.fs as fs;\n\n"
+                   "fn main() -> String {\n"
+                   "  return fs.read_text(\"x.txt\", 7);\n"
+                   "}\n");
+
+        write_text(entry_ok,
+                   "import std.fs as fs;\n\n"
+                   "fn main(r: cap fs.read, w: cap fs.write) -> Unit {\n"
+                   "  fs.write_text(\"y.txt\", fs.read_text(\"x.txt\", r), w);\n"
+                   "  return;\n"
+                   "}\n");
+
+        ::setenv("CURLEE_STDLIB_ROOT", stdlib_v1_root.string().c_str(), 1);
+        const RunResult missing_cap = run_check(entry);
+        const RunResult ok = run_check(entry_ok);
+        ::unsetenv("CURLEE_STDLIB_ROOT");
+
+        if (missing_cap.rc != 1)
+        {
+            die("expected check to fail for invalid stdlib fs capability argument type");
+        }
+        expect_contains(missing_cap.err, "argument type mismatch for call to 'read_text'");
+
+        if (ok.rc != 0)
+        {
+            die("expected check to succeed when stdlib fs capability values are provided");
+        }
+        expect_empty(ok.out, "stdout");
+        expect_empty(ok.err, "stderr");
+    }
+
     // check: unsafe rules are enforced for stdlib module implementations.
     {
         const fs::path root =
