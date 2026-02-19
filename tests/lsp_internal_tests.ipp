@@ -822,6 +822,12 @@ int main()
             uri + "\"},\"position\":{\"line\":0,\"character\":" +
             std::to_string(foo_call) + "}}}";
 
+        const std::string rename_on_foo =
+            std::string("{\"jsonrpc\":\"2.0\",\"id\":16,\"method\":\"textDocument/"
+                        "rename\",\"params\":{\"textDocument\":{\"uri\":\"") +
+            uri + "\"},\"position\":{\"line\":0,\"character\":" +
+            std::to_string(foo_call) + "},\"newName\":\"foo_renamed\"}}";
+
         const std::string shutdown =
             "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{}}";
         const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
@@ -851,6 +857,7 @@ int main()
         in_data += lsp_frame(definition_no_id);
         in_data += lsp_frame(definition_no_use);
         in_data += lsp_frame(completion_at_foo);
+        in_data += lsp_frame(rename_on_foo);
         in_data += lsp_frame(shutdown);
         in_data += lsp_frame(exit);
 
@@ -913,6 +920,10 @@ int main()
         {
             fail("expected completion response for id=15");
         }
+        if (out_str.find("\"id\":16") == std::string::npos)
+        {
+            fail("expected rename response for id=16");
+        }
         if (out_str.find("Content-Length:") == std::string::npos)
         {
             fail("expected framed LSP output");
@@ -929,6 +940,7 @@ int main()
             bool saw_hover_10_null = false;
             bool saw_hover_12_type = false;
             bool saw_completion_15_with_foo = false;
+            bool saw_rename_16_with_edits = false;
 
             while (read_lsp_message(framed, payload))
             {
@@ -1051,6 +1063,47 @@ int main()
                     }
                     saw_completion_15_with_foo = true;
                 }
+                else if (*id == 16)
+                {
+                    const auto result = json_get_object(root, "result");
+                    if (!result.has_value())
+                    {
+                        fail("expected rename id=16 to return object result");
+                    }
+
+                    const auto changes = json_get_object(*result->as_object(), "changes");
+                    if (!changes.has_value())
+                    {
+                        fail("expected rename id=16 to include changes object");
+                    }
+
+                    const auto edits = json_get_array(*changes->as_object(), uri);
+                    if (!edits.has_value() || edits->as_array()->empty())
+                    {
+                        fail("expected rename id=16 to include edits for document uri");
+                    }
+
+                    bool found_new_text = false;
+                    for (const auto& edit : *edits->as_array())
+                    {
+                        if (!edit.is_object())
+                        {
+                            continue;
+                        }
+                        const auto new_text = json_get_string(*edit.as_object(), "newText");
+                        if (new_text.has_value() && *new_text == "foo_renamed")
+                        {
+                            found_new_text = true;
+                            break;
+                        }
+                    }
+                    if (!found_new_text)
+                    {
+                        fail("expected rename id=16 edits to contain foo_renamed newText");
+                    }
+
+                    saw_rename_16_with_edits = true;
+                }
             }
 
             if (!saw_definition_5)
@@ -1076,6 +1129,10 @@ int main()
             if (!saw_completion_15_with_foo)
             {
                 fail("expected to observe completion response for id=15 with foo");
+            }
+            if (!saw_rename_16_with_edits)
+            {
+                fail("expected to observe rename response for id=16 with edits");
             }
         }
     }

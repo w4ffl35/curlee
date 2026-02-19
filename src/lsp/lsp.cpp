@@ -1311,6 +1311,93 @@ Json completion_result_for(const Analysis& analysis, std::size_t offset)
     return Json{result};
 }
 
+std::optional<curlee::resolver::SymbolId> rename_target_symbol(const Analysis& analysis,
+                                                               const std::string& doc_text,
+                                                               std::size_t offset)
+{
+    for (const auto& use : analysis.resolution.uses)
+    {
+        if (span_contains(use.span, offset))
+        {
+            return use.target;
+        }
+    }
+
+    for (const auto& sym : analysis.resolution.symbols)
+    {
+        const auto ident_span = identifier_span_in_definition(sym, doc_text).value_or(sym.span);
+        if (span_contains(ident_span, offset))
+        {
+            return sym.id;
+        }
+    }
+
+    return std::nullopt;
+}
+
+Json rename_result_for(const Analysis& analysis, const std::string& uri, const std::string& doc_text,
+                       const curlee::source::LineMap& map, std::size_t offset,
+                       const std::string& new_name)
+{
+    const auto target_symbol = rename_target_symbol(analysis, doc_text, offset);
+    if (!target_symbol.has_value())
+    {
+        return Json{std::nullptr_t{}};
+    }
+
+    Json::Array edits;
+    std::unordered_set<std::size_t> seen_starts;
+
+    for (const auto& use : analysis.resolution.uses)
+    {
+        if (use.target != *target_symbol)
+        {
+            continue;
+        }
+        if (!seen_starts.insert(use.span.start).second)
+        {
+            continue;
+        }
+
+        Json::Object edit;
+        edit["range"] = lsp_range_json(to_lsp_range(use.span, map));
+        edit["newText"] = Json{new_name};
+        edits.push_back(Json{edit});
+    }
+
+    for (const auto& sym : analysis.resolution.symbols)
+    {
+        if (sym.id != *target_symbol)
+        {
+            continue;
+        }
+
+        const auto ident_span = identifier_span_in_definition(sym, doc_text).value_or(sym.span);
+        if (!seen_starts.insert(ident_span.start).second)
+        {
+            continue;
+        }
+
+        Json::Object edit;
+        edit["range"] = lsp_range_json(to_lsp_range(ident_span, map));
+        edit["newText"] = Json{new_name};
+        edits.push_back(Json{edit});
+        break;
+    }
+
+    if (edits.empty())
+    {
+        return Json{std::nullptr_t{}};
+    }
+
+    Json::Object changes;
+    changes[uri] = Json{edits};
+
+    Json::Object result;
+    result["changes"] = Json{changes};
+    return Json{result};
+}
+
 std::string diagnostics_to_json(const std::vector<curlee::diag::Diagnostic>& diags,
                                 const curlee::source::LineMap& map)
 {
@@ -1367,6 +1454,7 @@ int main()
             capabilities["textDocumentSync"] = Json{1.0};
             capabilities["definitionProvider"] = Json{true};
             capabilities["hoverProvider"] = Json{true};
+            capabilities["renameProvider"] = Json{true};
             Json::Object completion_provider;
             completion_provider["resolveProvider"] = Json{false};
             capabilities["completionProvider"] = Json{completion_provider};
@@ -1473,7 +1561,7 @@ int main()
         }
 
         if (*method == "textDocument/definition" || *method == "textDocument/hover" ||
-            *method == "textDocument/completion")
+            *method == "textDocument/completion" || *method == "textDocument/rename")
         {
             const auto params = json_get_object(root, "params");
             if (!params.has_value())
@@ -1520,6 +1608,26 @@ int main()
             const auto analysis = analyze(file);
             if (!analysis.has_value())
             {
+                continue;
+            }
+
+            if (*method == "textDocument/rename")
+            {
+                const auto new_name = json_get_string(*params->as_object(), "newName");
+                if (!new_name.has_value())
+                {
+                    continue;
+                }
+
+                Json::Object response;
+                response["jsonrpc"] = Json{std::string("2.0")};
+                if (id_it != root.end())
+                {
+                    response["id"] = id_it->second;
+                }
+                response["result"] =
+                    rename_result_for(*analysis, *uri, doc.text, map, *offset_opt, *new_name);
+                write_lsp_message(json_serialize(Json{response}));
                 continue;
             }
 
