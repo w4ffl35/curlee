@@ -32,6 +32,7 @@ using curlee::parser::MatchStmt;
 using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
+using curlee::parser::ScopedNameExpr;
 using curlee::parser::Stmt;
 using curlee::parser::UnsafeStmt;
 using curlee::parser::WhileStmt;
@@ -207,6 +208,13 @@ struct ScopeState
     std::size_t facts_size = 0;
 };
 
+struct MatchValueInfo
+{
+    std::string_view enum_name;
+    std::string_view variant_name;
+    const Expr* payload = nullptr;
+};
+
 class Verifier
 {
   public:
@@ -239,6 +247,9 @@ class Verifier
     std::vector<z3::expr> facts_;
     std::vector<ScopeState> scopes_;
     std::unordered_map<std::string_view, FunctionSig> functions_;
+    std::unordered_map<std::string_view,
+                       std::unordered_map<std::string_view, std::optional<TypeKind>>>
+        enum_payload_kinds_;
 
     void push_scope()
     {
@@ -264,6 +275,48 @@ class Verifier
             facts_.erase(facts_.begin() + static_cast<std::ptrdiff_t>(state.facts_size),
                          facts_.end());
         }
+    }
+
+    void bind_var(std::string_view name, const ExprValue& value)
+    {
+        if (value.kind == TypeKind::Int)
+        {
+            lower_ctx_.bool_vars.erase(name);
+            lower_ctx_.int_vars.insert_or_assign(name, value.expr);
+            return;
+        }
+
+        if (value.kind == TypeKind::Bool)
+        {
+            lower_ctx_.int_vars.erase(name);
+            lower_ctx_.bool_vars.insert_or_assign(name, value.expr);
+        }
+    }
+
+    [[nodiscard]] static std::optional<MatchValueInfo> match_value_info(const Expr& value)
+    {
+        if (const auto* scoped = std::get_if<ScopedNameExpr>(&value.node); scoped != nullptr)
+        {
+            return MatchValueInfo{.enum_name = scoped->lhs,
+                                  .variant_name = scoped->rhs,
+                                  .payload = nullptr};
+        }
+
+        const auto* call = std::get_if<CallExpr>(&value.node);
+        if (call == nullptr || call->callee == nullptr)
+        {
+            return std::nullopt;
+        }
+
+        const auto* callee_scoped = std::get_if<ScopedNameExpr>(&call->callee->node);
+        if (callee_scoped == nullptr || call->args.size() != 1)
+        {
+            return std::nullopt;
+        }
+
+        return MatchValueInfo{.enum_name = callee_scoped->lhs,
+                              .variant_name = callee_scoped->rhs,
+                              .payload = &call->args[0]};
     }
 
     std::optional<TypeKind> supported_type(const curlee::parser::TypeName& name)
@@ -295,6 +348,26 @@ class Verifier
 
     void collect_signatures(const curlee::parser::Program& program)
     {
+        enum_payload_kinds_.clear();
+        for (const auto& e : program.enums)
+        {
+            auto& variants = enum_payload_kinds_[e.name];
+            for (const auto& variant : e.variants)
+            {
+                std::optional<TypeKind> payload_kind;
+                if (variant.payload.has_value())
+                {
+                    const auto core_t = curlee::types::core_type_from_name(variant.payload->name);
+                    if (core_t.has_value() &&
+                        (core_t->kind == TypeKind::Int || core_t->kind == TypeKind::Bool))
+                    {
+                        payload_kind = core_t->kind;
+                    }
+                }
+                variants.insert_or_assign(variant.name, payload_kind);
+            }
+        }
+
         for (const auto& f : program.functions)
         {
             if (!f.return_type.has_value())
@@ -995,9 +1068,56 @@ class Verifier
     {
         check_expr_for_calls(s.value);
 
+        const auto scrutinee = match_value_info(s.value);
+
         for (const auto& arm : s.arms)
         {
+            if (scrutinee.has_value())
+            {
+                if (arm.pattern.enum_name != scrutinee->enum_name ||
+                    arm.pattern.variant_name != scrutinee->variant_name)
+                {
+                    continue;
+                }
+            }
+
             push_scope();
+
+            if (arm.pattern.payload_name.has_value())
+            {
+                bool bound_payload = false;
+                if (scrutinee.has_value() && scrutinee->payload != nullptr)
+                {
+                    auto lowered_payload = lower_expr(*scrutinee->payload);
+                    if (std::holds_alternative<ExprValue>(lowered_payload))
+                    {
+                        const auto payload_value = std::get<ExprValue>(std::move(lowered_payload));
+                        if (payload_value.kind == TypeKind::Int || payload_value.kind == TypeKind::Bool)
+                        {
+                            bind_var(*arm.pattern.payload_name, payload_value);
+                            bound_payload = true;
+                        }
+                    }
+                    else
+                    {
+                        diags_.push_back(std::get<Diagnostic>(std::move(lowered_payload)));
+                    }
+                }
+
+                if (!bound_payload)
+                {
+                    auto enum_it = enum_payload_kinds_.find(arm.pattern.enum_name);
+                    if (enum_it != enum_payload_kinds_.end())
+                    {
+                        auto variant_it = enum_it->second.find(arm.pattern.variant_name);
+                        if (variant_it != enum_it->second.end() && variant_it->second.has_value())
+                        {
+                            declare_var(*arm.pattern.payload_name, *variant_it->second);
+                        }
+                    }
+                }
+            }
+
             if (arm.body != nullptr)
             {
                 for (const auto& stmt : arm.body->stmts)

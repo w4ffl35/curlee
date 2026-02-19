@@ -890,6 +890,50 @@ int main()
         }
     }
 
+    {
+        // Match path sensitivity: when scrutinee variant is syntactically known,
+        // verifier checks only the reachable arm.
+        const std::string source = "enum E { A(Int); B; }\n"
+                                   "fn req_pos(x: Int) -> Int [ requires x > 0; ] { return x; }\n"
+                                   "fn main() -> Int {\n"
+                                   "  match (E::A(1)) {\n"
+                                   "    E::A(v) => { req_pos(v); return 0; }\n"
+                                   "    E::B => { req_pos(0); return 0; }\n"
+                                   "  }\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "match variant path-sensitivity test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification success for match variant path-sensitivity test");
+        }
+    }
+
+    {
+        // Match payload reasoning: payload binder should be constrained by matched payload.
+        const std::string source = "enum E { A(Int); B; }\n"
+                                   "fn req_pos(x: Int) -> Int [ requires x > 0; ] { return x; }\n"
+                                   "fn main() -> Int {\n"
+                                   "  match (E::A(0)) {\n"
+                                   "    E::A(v) => { req_pos(v); return 0; }\n"
+                                   "    E::B => { return 0; }\n"
+                                   "  }\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "match payload binder fact test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification failure for match payload binder fact test");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "requires clause not satisfied"))
+        {
+            fail("expected requires failure from payload-bound call argument");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }
