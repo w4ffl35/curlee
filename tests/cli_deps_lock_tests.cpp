@@ -101,7 +101,7 @@ int main()
 
     {
         const std::vector<std::pair<std::vector<std::string>, std::string>> bad_argvs = {
-            {{"curlee", "deps"}, "expected curlee deps <lock|verify>"},
+            {{"curlee", "deps"}, "expected curlee deps <lock|verify|update>"},
             {{"curlee", "deps", "nope"}, "unknown deps subcommand"},
             {{"curlee", "deps", "lock", "--root"}, "expected path after --root"},
             {{"curlee", "deps", "lock", "--root="}, "expected path after --root="},
@@ -256,6 +256,36 @@ fn main() -> Int {
         if (err.find("deps verify failed: imports mismatch") == std::string::npos)
         {
             fail("expected deps verify mismatch diagnostic");
+        }
+
+        out.clear();
+        err.clear();
+        const int update_rc =
+            run_cli({"curlee", "deps", "update", "--root", dir.string(), "main.curlee",
+                     lock_path.string()},
+                    out, err);
+        if (update_rc != 0)
+        {
+            fail("expected deps update to succeed after dependency drift; stderr: " + err);
+        }
+        if (out.find("curlee deps update: wrote ") == std::string::npos)
+        {
+            fail("expected deps update stdout to mention output path");
+        }
+        if (!err.empty())
+        {
+            fail("expected deps update stderr to be empty");
+        }
+
+        out.clear();
+        err.clear();
+        const int verify_after_update_rc =
+            run_cli({"curlee", "deps", "verify", "--root", dir.string(), "main.curlee",
+                     lock_path.string()},
+                    out, err);
+        if (verify_after_update_rc != 0)
+        {
+            fail("expected deps verify to succeed after deps update; stderr: " + err);
         }
     }
 

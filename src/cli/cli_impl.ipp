@@ -104,6 +104,7 @@ void print_usage(std::ostream& out)
     out << "  curlee bundle info <file.bundle>\n";
     out << "  curlee deps lock [--root <dir>] [--stdlib-root <dir>] <entry.curlee> <deps.lock>\n";
     out << "  curlee deps verify [--root <dir>] [--stdlib-root <dir>] <entry.curlee> <deps.lock>\n";
+    out << "  curlee deps update [--root <dir>] [--stdlib-root <dir>] <entry.curlee> <deps.lock>\n";
 }
 
 // GCOVR_EXCL_START
@@ -1520,6 +1521,35 @@ int cmd_deps_lock(const std::string& entry_path_arg, const std::string& lock_pat
     return kExitOk;
 }
 
+int cmd_deps_update(const std::string& entry_path_arg, const std::string& lock_path,
+                   const std::vector<std::filesystem::path>& stdlib_roots,
+                   const std::optional<std::filesystem::path>& input_root,
+                   DiagOutputFormat diag_format)
+{
+    std::string entry_hash;
+    std::vector<curlee::bundle::ImportPin> import_pins;
+    const int rc = cmd_collect_dependency_snapshot(entry_path_arg, stdlib_roots, input_root,
+                                                   entry_hash, import_pins, diag_format);
+    if (rc != kExitOk)
+    {
+        return rc;
+    }
+
+    DependencyLockfile lock;
+    lock.entry_hash = std::move(entry_hash);
+    lock.imports = std::move(import_pins);
+
+    std::string error;
+    if (!write_dependency_lockfile(lock_path, lock, error))
+    {
+        std::cerr << "error: deps update failed: " << error << "\n";
+        return kExitError;
+    }
+
+    std::cout << "curlee deps update: wrote " << lock_path << "\n";
+    return kExitOk;
+}
+
 int cmd_deps_verify(const std::string& entry_path_arg, const std::string& lock_path,
                    const std::vector<std::filesystem::path>& stdlib_roots,
                    const std::optional<std::filesystem::path>& input_root,
@@ -1972,13 +2002,13 @@ int run(int argc, char** argv)
     {
         if (args.empty())
         {
-            std::cerr << "error: expected curlee deps <lock|verify> ...\n\n";
+            std::cerr << "error: expected curlee deps <lock|verify|update> ...\n\n";
             print_usage(std::cerr);
             return kExitUsage;
         }
 
         const std::string_view sub = args[0];
-        if (sub != "lock" && sub != "verify")
+        if (sub != "lock" && sub != "verify" && sub != "update")
         {
             std::cerr << "error: unknown deps subcommand: " << sub << "\n\n";
             print_usage(std::cerr);
@@ -2068,6 +2098,11 @@ int run(int argc, char** argv)
         if (sub == "lock")
         {
             return cmd_deps_lock(positional[0], positional[1], stdlib_roots, root, diag_format);
+        }
+        if (sub == "update")
+        {
+            return cmd_deps_update(positional[0], positional[1], stdlib_roots, root,
+                                   diag_format);
         }
         return cmd_deps_verify(positional[0], positional[1], stdlib_roots, root, diag_format);
     }
