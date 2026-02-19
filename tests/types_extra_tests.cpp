@@ -1676,6 +1676,11 @@ fn main(v: E) -> Unit {
 
         expect_diag(run_tc("fn main() -> Unit { let x: Int = 1; result_is_ok(x); return; }"),
                 "result_is_ok expects a Result value");
+
+        expect_ok(run_tc("fn plus_one(x: Int) -> Int { return x + 1; } fn main() -> Int { let n: Int = 41; return n.plus_one(); }"));
+
+        expect_diag(run_tc("fn negate(x: Bool) -> Bool { return !x; } fn main() -> Unit { let n: Int = 1; n.negate(); return; }"),
+            "argument type mismatch for call to 'negate'");
     }
 
     std::cout << "OK\n";

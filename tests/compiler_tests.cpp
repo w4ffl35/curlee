@@ -315,6 +315,18 @@ fn main() -> Int {
     }
 
     {
+        const std::string source =
+            "fn plus_one(x: Int) -> Int { return x + 1; } fn main() -> Int { let n: Int = 41; return n.plus_one(); }";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(42)))
+        {
+            fail("expected method-call sugar to lower as receiver-first call");
+        }
+    }
+
+    {
         const std::string source = "fn add(x: Int, y: Int) -> Int { return x + y; } fn main() -> "
                                    "Int { return add(1, 2); }";
 

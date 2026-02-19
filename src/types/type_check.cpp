@@ -1315,6 +1315,7 @@ class Checker
         }
 
         std::string_view callee_name;
+        const Expr* method_receiver = nullptr;
         if (const auto* callee_direct = std::get_if<NameExpr>(&e.callee->node);
             callee_direct != nullptr)
         {
@@ -1353,8 +1354,18 @@ class Checker
 
             if (!qualifier_ok)
             {
-                error_at(span, "unknown module qualifier in call: '" + join_path(qualifier) + "'");
-                return std::nullopt;
+                // Method-call sugar: `value.method(args...)` resolves to
+                // `method(value, args...)` when `value` is a known local/parameter.
+                if (qualifier.size() == 1 && lookup_var(qualifier.front()).has_value())
+                {
+                    method_receiver = callee_member->base.get();
+                }
+                else
+                {
+                    error_at(span,
+                             "unknown module qualifier in call: '" + join_path(qualifier) + "'");
+                    return std::nullopt;
+                }
             }
 
             callee_name = member;
@@ -1924,8 +1935,9 @@ class Checker
         }
 
         const auto& sig = it->second;
+        const std::size_t effective_arg_count = e.args.size() + (method_receiver != nullptr ? 1 : 0);
         // Builtin placeholder signatures may not match; only user functions are checked here.
-        if (e.args.size() != sig.params.size())
+        if (effective_arg_count != sig.params.size())
         {
             error_at(span,
                      "wrong number of arguments for call to '" + std::string(callee_name) + "'");
@@ -1934,9 +1946,19 @@ class Checker
 
         std::unordered_map<std::string_view, Type> inferred_type_args;
 
-        for (std::size_t i = 0; i < e.args.size(); ++i)
+        for (std::size_t i = 0; i < effective_arg_count; ++i)
         {
-            const auto arg_t = check_expr(e.args[i]);
+            std::optional<Type> arg_t;
+            if (method_receiver != nullptr && i == 0)
+            {
+                arg_t = check_expr(*method_receiver);
+            }
+            else
+            {
+                const std::size_t arg_index = (method_receiver != nullptr) ? (i - 1) : i;
+                arg_t = check_expr(e.args[arg_index]);
+            }
+
             if (!arg_t.has_value())
             {
                 continue;

@@ -1252,6 +1252,7 @@ class Emitter
         }
 
         std::string_view callee_fn_name;
+        const Expr* method_receiver = nullptr;
         if (const auto* callee_member = std::get_if<MemberExpr>(&expr.callee->node);
             callee_member != nullptr)
         {
@@ -1302,9 +1303,18 @@ class Emitter
 
             if (!qualifier_ok)
             {
-                diags_.push_back(error_at(span, "unknown module qualifier in runnable call: '" +
-                                                    join_path(qualifier) + "'"));
-                return;
+                // Method-call sugar: `value.method(args...)` lowers to
+                // `method(value, args...)` when `value` is a known local/parameter.
+                if (qualifier.size() == 1 && locals_.contains(qualifier.front()))
+                {
+                    method_receiver = callee_member->base.get();
+                }
+                else
+                {
+                    diags_.push_back(error_at(span, "unknown module qualifier in runnable call: '" +
+                                                        join_path(qualifier) + "'"));
+                    return;
+                }
             }
 
             callee_fn_name = member;
@@ -1330,12 +1340,23 @@ class Emitter
         }
 
         const auto* callee_decl = fn_it->second;
-        if (expr.args.size() != callee_decl->params.size())
+        const std::size_t effective_arg_count = expr.args.size() +
+                                                (method_receiver != nullptr ? 1 : 0);
+        if (effective_arg_count != callee_decl->params.size())
         {
             diags_.push_back(
                 error_at(span, "call to '" + std::string(callee_fn_name) + "' expects " +
                                    std::to_string(callee_decl->params.size()) + " argument(s)"));
             return;
+        }
+
+        if (method_receiver != nullptr)
+        {
+            emit_expr(*method_receiver);
+            if (!diags_.empty())
+            {
+                return;
+            }
         }
 
         for (const auto& arg : expr.args)
