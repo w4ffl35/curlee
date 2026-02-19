@@ -243,6 +243,29 @@ int main()
         expect_contains(out, "curlee run: result 0", "stdout");
     }
 
+    // run: emitter diagnostics should be surfaced as run errors.
+    {
+        const fs::path src_path = temp_path("curlee_run_emitter_diag.curlee");
+        {
+            std::ofstream out(src_path, std::ios::binary | std::ios::trunc);
+            if (!out)
+            {
+                fail("failed to open emitter diagnostic fixture for writing");
+            }
+            out << "fn f(x: String) -> Int { return 1; }\n"
+                   "fn main() -> Int { return 0; }\n";
+        }
+
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "run", src_path.string()}, out, err);
+        if (rc != 1)
+        {
+            fail("expected error exit code when emitter returns diagnostics");
+        }
+        expect_contains(err, "parameter type not supported in runnable code", "stderr");
+    }
+
     // run: unsupported backend via split form (--graphics <backend>)
     {
         std::string out;

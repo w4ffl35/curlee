@@ -47,6 +47,19 @@ static std::string join_path(const std::vector<std::string_view>& parts)
     return out;
 } // GCOVR_EXCL_LINE
 
+static bool is_reserved_builtin_name(std::string_view name)
+{
+    static const std::unordered_set<std::string_view> reserved = {
+        "print",           "__read_line",      "__tty_clear",      "__fs_read_text",
+        "__fs_write_text", "__tty_write_at",   "__tty_flush",      "__rng_next_int",
+        "__vec_new_int",   "__vec_len_int",    "__vec_push_int",   "__vec_get_int",
+        "__vec_set_int",   "__vec_new_bool",   "__vec_len_bool",   "__vec_push_bool",
+        "__vec_get_bool",  "__vec_set_bool",   "__set_new_int",    "__set_has_int",
+        "__set_insert_int",
+    };
+    return reserved.contains(name);
+}
+
 static bool collect_member_chain(const Expr& expr, std::vector<std::string_view>& out)
 {
     if (const auto* name = std::get_if<NameExpr>(&expr.node))
@@ -195,17 +208,81 @@ class Checker
             vec_set_int_sig.params.push_back(Type{.kind = TypeKind::Int});
             vec_set_int_sig.params.push_back(Type{.kind = TypeKind::Int});
             functions_.emplace("__vec_set_int", vec_set_int_sig);
+
+            FunctionType vec_new_bool_sig;
+            vec_new_bool_sig.result = Type{.kind = TypeKind::Vec,
+                                           .name = "Vec",
+                                           .element_kind = TypeKind::Bool,
+                                           .element_name = "Bool"};
+            vec_new_bool_sig.params.push_back(Type{.kind = TypeKind::Int});
+            functions_.emplace("__vec_new_bool", vec_new_bool_sig);
+
+            FunctionType vec_len_bool_sig;
+            vec_len_bool_sig.result = Type{.kind = TypeKind::Int};
+            vec_len_bool_sig.params.push_back(Type{.kind = TypeKind::Vec,
+                                                   .name = "Vec",
+                                                   .element_kind = TypeKind::Bool,
+                                                   .element_name = "Bool"});
+            functions_.emplace("__vec_len_bool", vec_len_bool_sig);
+
+            FunctionType vec_push_bool_sig;
+            vec_push_bool_sig.result = Type{.kind = TypeKind::Unit};
+            vec_push_bool_sig.params.push_back(Type{.kind = TypeKind::Vec,
+                                                    .name = "Vec",
+                                                    .element_kind = TypeKind::Bool,
+                                                    .element_name = "Bool"});
+            vec_push_bool_sig.params.push_back(Type{.kind = TypeKind::Bool});
+            functions_.emplace("__vec_push_bool", vec_push_bool_sig);
+
+            FunctionType vec_get_bool_sig;
+            vec_get_bool_sig.result = Type{.kind = TypeKind::Bool};
+            vec_get_bool_sig.params.push_back(Type{.kind = TypeKind::Vec,
+                                                   .name = "Vec",
+                                                   .element_kind = TypeKind::Bool,
+                                                   .element_name = "Bool"});
+            vec_get_bool_sig.params.push_back(Type{.kind = TypeKind::Int});
+            functions_.emplace("__vec_get_bool", vec_get_bool_sig);
+
+            FunctionType vec_set_bool_sig;
+            vec_set_bool_sig.result = Type{.kind = TypeKind::Unit};
+            vec_set_bool_sig.params.push_back(Type{.kind = TypeKind::Vec,
+                                                   .name = "Vec",
+                                                   .element_kind = TypeKind::Bool,
+                                                   .element_name = "Bool"});
+            vec_set_bool_sig.params.push_back(Type{.kind = TypeKind::Int});
+            vec_set_bool_sig.params.push_back(Type{.kind = TypeKind::Bool});
+            functions_.emplace("__vec_set_bool", vec_set_bool_sig);
+
+            FunctionType set_new_int_sig;
+            set_new_int_sig.result = Type{.kind = TypeKind::Set,
+                                          .name = "Set",
+                                          .element_kind = TypeKind::Int,
+                                          .element_name = "Int"};
+            functions_.emplace("__set_new_int", set_new_int_sig);
+
+            FunctionType set_has_int_sig;
+            set_has_int_sig.result = Type{.kind = TypeKind::Bool};
+            set_has_int_sig.params.push_back(Type{.kind = TypeKind::Set,
+                                                  .name = "Set",
+                                                  .element_kind = TypeKind::Int,
+                                                  .element_name = "Int"});
+            set_has_int_sig.params.push_back(Type{.kind = TypeKind::Int});
+            functions_.emplace("__set_has_int", set_has_int_sig);
+
+            FunctionType set_insert_int_sig;
+            set_insert_int_sig.result = Type{.kind = TypeKind::Unit};
+            set_insert_int_sig.params.push_back(Type{.kind = TypeKind::Set,
+                                                     .name = "Set",
+                                                     .element_kind = TypeKind::Int,
+                                                     .element_name = "Int"});
+            set_insert_int_sig.params.push_back(Type{.kind = TypeKind::Int});
+            functions_.emplace("__set_insert_int", set_insert_int_sig);
         }
 
         // Collect function signatures first.
         for (const auto& f : program.functions)
         {
-            if (f.name == "print" || f.name == "__read_line" || f.name == "__tty_clear" ||
-                f.name == "__fs_read_text" || f.name == "__fs_write_text" ||
-                f.name == "__tty_write_at" || f.name == "__tty_flush" ||
-                f.name == "__rng_next_int" || f.name == "__vec_new_int" ||
-                f.name == "__vec_len_int" || f.name == "__vec_push_int" ||
-                f.name == "__vec_get_int" || f.name == "__vec_set_int")
+            if (is_reserved_builtin_name(f.name))
             {
                 error_at(f.span, "cannot declare builtin function '" + std::string(f.name) +
                                      "'");
@@ -1419,6 +1496,184 @@ class Checker
                 value_t->kind != TypeKind::Int)
             {
                 error_at(span, "__vec_set_int expects (Vec<Int>, Int, Int) arguments");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "__vec_new_bool")
+        {
+            if (e.args.size() != 1)
+            {
+                error_at(span, "__vec_new_bool expects exactly 1 argument");
+                return std::nullopt;
+            }
+
+            const auto max_t = check_expr(e.args[0]);
+            if (!max_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (max_t->kind != TypeKind::Int)
+            {
+                error_at(span, "__vec_new_bool expects argument of type Int");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Vec,
+                        .name = "Vec",
+                        .element_kind = TypeKind::Bool,
+                        .element_name = "Bool"};
+        }
+
+        if (callee_name == "__vec_len_bool")
+        {
+            if (e.args.size() != 1)
+            {
+                error_at(span, "__vec_len_bool expects exactly 1 argument");
+                return std::nullopt;
+            }
+
+            const auto vec_t = check_expr(e.args[0]);
+            if (!vec_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (vec_t->kind != TypeKind::Vec)
+            {
+                error_at(span, "__vec_len_bool expects argument of type Vec<Bool>");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Int};
+        }
+
+        if (callee_name == "__vec_push_bool")
+        {
+            if (e.args.size() != 2)
+            {
+                error_at(span, "__vec_push_bool expects exactly 2 arguments");
+                return std::nullopt;
+            }
+
+            const auto vec_t = check_expr(e.args[0]);
+            const auto value_t = check_expr(e.args[1]);
+            if (!vec_t.has_value() || !value_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (vec_t->kind != TypeKind::Vec || value_t->kind != TypeKind::Bool)
+            {
+                error_at(span, "__vec_push_bool expects (Vec<Bool>, Bool) arguments");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "__vec_get_bool")
+        {
+            if (e.args.size() != 2)
+            {
+                error_at(span, "__vec_get_bool expects exactly 2 arguments");
+                return std::nullopt;
+            }
+
+            const auto vec_t = check_expr(e.args[0]);
+            const auto index_t = check_expr(e.args[1]);
+            if (!vec_t.has_value() || !index_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (vec_t->kind != TypeKind::Vec || index_t->kind != TypeKind::Int)
+            {
+                error_at(span, "__vec_get_bool expects (Vec<Bool>, Int) arguments");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Bool};
+        }
+
+        if (callee_name == "__vec_set_bool")
+        {
+            if (e.args.size() != 3)
+            {
+                error_at(span, "__vec_set_bool expects exactly 3 arguments");
+                return std::nullopt;
+            }
+
+            const auto vec_t = check_expr(e.args[0]);
+            const auto index_t = check_expr(e.args[1]);
+            const auto value_t = check_expr(e.args[2]);
+            if (!vec_t.has_value() || !index_t.has_value() || !value_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (vec_t->kind != TypeKind::Vec || index_t->kind != TypeKind::Int ||
+                value_t->kind != TypeKind::Bool)
+            {
+                error_at(span, "__vec_set_bool expects (Vec<Bool>, Int, Bool) arguments");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "__set_new_int")
+        {
+            if (e.args.size() != 0)
+            {
+                error_at(span, "__set_new_int expects exactly 0 arguments");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Set,
+                        .name = "Set",
+                        .element_kind = TypeKind::Int,
+                        .element_name = "Int"};
+        }
+
+        if (callee_name == "__set_has_int")
+        {
+            if (e.args.size() != 2)
+            {
+                error_at(span, "__set_has_int expects exactly 2 arguments");
+                return std::nullopt;
+            }
+
+            const auto set_t = check_expr(e.args[0]);
+            const auto value_t = check_expr(e.args[1]);
+            if (!set_t.has_value() || !value_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (set_t->kind != TypeKind::Set || value_t->kind != TypeKind::Int)
+            {
+                error_at(span, "__set_has_int expects (Set<Int>, Int) arguments");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Bool};
+        }
+
+        if (callee_name == "__set_insert_int")
+        {
+            if (e.args.size() != 2)
+            {
+                error_at(span, "__set_insert_int expects exactly 2 arguments");
+                return std::nullopt;
+            }
+
+            const auto set_t = check_expr(e.args[0]);
+            const auto value_t = check_expr(e.args[1]);
+            if (!set_t.has_value() || !value_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (set_t->kind != TypeKind::Set || value_t->kind != TypeKind::Int)
+            {
+                error_at(span, "__set_insert_int expects (Set<Int>, Int) arguments");
                 return std::nullopt;
             }
 

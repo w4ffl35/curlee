@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace curlee::resolver
@@ -150,14 +151,15 @@ class Resolver
 
     static bool is_builtin_call_name(std::string_view name)
     {
-         return name == "print" || name == "__read_line" || name == "__tty_clear" ||
-             name == "__fs_read_text" || name == "__fs_write_text" ||
-             name == "__tty_write_at" || name == "__tty_flush" ||
-             name == "__rng_next_int" || name == "__vec_new_int" ||
-             name == "__vec_len_int" || name == "__vec_push_int" ||
-             name == "__vec_get_int" || name == "__vec_set_int" ||
-             name == "variant_is" ||
-             name == "variant_unwrap";
+        static const std::unordered_set<std::string_view> builtins = {
+            "print",           "__read_line",      "__tty_clear",      "__fs_read_text",
+            "__fs_write_text", "__tty_write_at",   "__tty_flush",      "__rng_next_int",
+            "__vec_new_int",   "__vec_len_int",    "__vec_push_int",   "__vec_get_int",
+            "__vec_set_int",   "__vec_new_bool",   "__vec_len_bool",   "__vec_push_bool",
+            "__vec_get_bool",  "__vec_set_bool",   "__set_new_int",    "__set_has_int",
+            "__set_insert_int", "variant_is", "variant_unwrap",
+        }; // GCOVR_EXCL_LINE
+        return builtins.contains(name);
     }
 
     void resolve_imports(const curlee::parser::Program& program)
@@ -190,9 +192,6 @@ class Resolver
             {
                 Diagnostic d = std::move(found.error());
                 d.span = imp.span;
-                d.notes.push_back(Related{.message = "expected module at " +
-                                                     first_expected.string(), // GCOVR_EXCL_LINE
-                                          .span = std::nullopt});             // GCOVR_EXCL_LINE
                 diagnostics_.push_back(std::move(d));
                 continue;
             }

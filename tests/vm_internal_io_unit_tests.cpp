@@ -131,6 +131,120 @@ static void read_into_should_set_eof_on_bad_fd()
     }
 }
 
+static void vm_internal_helpers_should_cover_path_and_escape_branches()
+{
+    // Path helper success/false branches.
+    if (!is_valid_fs_path("ok/file.txt"))
+    {
+        fail("expected simple relative fs path to be valid");
+    }
+    if (is_valid_fs_path(".."))
+    {
+        fail("expected parent path to be invalid");
+    }
+    if (is_valid_fs_path("a/./b"))
+    {
+        fail("expected dot path component to be invalid");
+    }
+
+    // Status error-code branches should conservatively allow (helper returns true).
+    const std::filesystem::path too_long(std::string(8192, 'a'));
+    if (!has_owner_read_permission(too_long))
+    {
+        fail("expected read permission helper to allow on status error");
+    }
+    if (!has_owner_write_permission(too_long))
+    {
+        fail("expected write permission helper to allow on status error");
+    }
+
+    // Escape helper should quote backslashes and quotes only.
+    const std::string escaped = escape_tty_text("a\\\"b");
+    if (escaped != "a\\\\\\\"b")
+    {
+        fail("expected deterministic tty text escaping");
+    }
+}
+
+static void vm_seeded_run_wrapper_should_fill_profile_fields()
+{
+    using namespace curlee::vm;
+
+    // Success path: profile uses the provided fuel as remaining when no out-of-fuel error.
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk, 7, VM::Capabilities{}, std::uint64_t{123});
+        if (!res.ok)
+        {
+            fail("expected seeded wrapper run to succeed");
+        }
+        if (res.profile.fuel_limit != 7 || res.profile.fuel_used != 0 ||
+            res.profile.fuel_remaining != 7 || !res.profile.rng_seed.has_value() ||
+            *res.profile.rng_seed != std::uint64_t{123})
+        {
+            fail("expected seeded wrapper profile fields on success");
+        }
+    }
+
+    // Out-of-fuel path: profile should report all fuel consumed.
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk, 0, VM::Capabilities{}, std::uint64_t{9});
+        if (res.ok || res.error != "out of fuel")
+        {
+            fail("expected seeded wrapper out-of-fuel error");
+        }
+        if (res.profile.fuel_limit != 0 || res.profile.fuel_used != 0 ||
+            res.profile.fuel_remaining != 0 || !res.profile.rng_seed.has_value() ||
+            *res.profile.rng_seed != std::uint64_t{9})
+        {
+            fail("expected seeded wrapper profile fields on out-of-fuel");
+        }
+    }
+}
+
+static void vm_value_inline_helpers_should_cover_remaining_branches()
+{
+    using namespace curlee::vm;
+
+    Value a = Value::struct_v("S", {{"x", Value::int_v(1)}});
+    Value b = Value::struct_v("S", {{"x", Value::int_v(1)}});
+    a.struct_fields[0].second.reset();
+    if (a == b)
+    {
+        fail("expected struct null/non-null field values to compare unequal");
+    }
+
+    Value c = Value::struct_v("S", {{"x", Value::int_v(1)}});
+    Value d = Value::struct_v("S", {{"x", Value::int_v(1)}});
+    c.struct_fields[0].second.reset();
+    d.struct_fields[0].second.reset();
+    if (!(c == d))
+    {
+        fail("expected struct null/null field values to compare equal");
+    }
+
+    const std::string vec_bool = to_string(Value::vec_v(2, VecElementKind::Bool));
+    if (vec_bool.find("Vec<Bool>") == std::string::npos)
+    {
+        fail("expected Vec<Bool> formatting in Value::to_string");
+    }
+
+    const std::string vec_int = to_string(Value::vec_v(2, VecElementKind::Int));
+    if (vec_int.find("Vec<Int>") == std::string::npos)
+    {
+        fail("expected Vec<Int> formatting in Value::to_string");
+    }
+}
+
 static void vm_should_fail_out_of_fuel()
 {
     using namespace curlee::vm;
@@ -745,6 +859,269 @@ static void vm_fs_roundtrip_should_succeed()
     }
 }
 
+static void vm_fs_read_empty_file_should_succeed()
+{
+    using namespace curlee::vm;
+    namespace fs = std::filesystem;
+
+    const fs::path dir = fs::temp_directory_path() /
+                         ("curlee_vm_fs_empty_" + std::to_string(static_cast<long long>(::getpid())));
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    if (!fs::create_directories(dir, ec) || ec)
+    {
+        fail("failed to create temp directory for fs empty-file test");
+    }
+
+    const fs::path old_cwd = fs::current_path(ec);
+    if (ec)
+    {
+        fail("failed to read current working directory");
+    }
+
+    fs::current_path(dir, ec);
+    if (ec)
+    {
+        fail("failed to set working directory for fs empty-file test");
+    }
+
+    {
+        std::ofstream out("empty.txt", std::ios::binary | std::ios::trunc);
+    }
+
+    Chunk chunk;
+    chunk.emit_constant(Value::string_v("empty.txt"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::FsReadText);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("fs.read");
+    const auto res = vm.run(chunk, caps);
+
+    fs::current_path(old_cwd, ec);
+    fs::remove_all(dir, ec);
+
+    if (!res.ok || !(res.value == Value::string_v("")))
+    {
+        fail("expected empty string when FsReadText reads empty file");
+    }
+}
+
+static void vm_fs_read_should_fail_when_ifstream_open_is_denied()
+{
+    using namespace curlee::vm;
+    namespace fs = std::filesystem;
+
+    const fs::path dir = fs::temp_directory_path() /
+                         ("curlee_vm_fs_open_denied_" +
+                          std::to_string(static_cast<long long>(::getpid())));
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    if (!fs::create_directories(dir, ec) || ec)
+    {
+        fail("failed to create temp directory for fs open-denied test");
+    }
+
+    const fs::path old_cwd = fs::current_path(ec);
+    if (ec)
+    {
+        fail("failed to read current working directory");
+    }
+
+    fs::current_path(dir, ec);
+    if (ec)
+    {
+        fail("failed to set working directory for fs open-denied test");
+    }
+
+    fs::create_symlink("/proc/kmsg", "kmsg.txt", ec);
+    if (ec)
+    {
+        fs::current_path(old_cwd, ec);
+        fs::remove_all(dir, ec);
+        fail("failed to create /proc/kmsg symlink for fs open-denied test");
+    }
+
+    Chunk chunk;
+    chunk.emit_constant(Value::string_v("kmsg.txt"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::FsReadText);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("fs.read");
+    const auto res = vm.run(chunk, caps);
+
+    fs::current_path(old_cwd, ec);
+    fs::remove_all(dir, ec);
+
+    if (res.ok || res.error != "fs access denied")
+    {
+        fail("expected fs access denied when ifstream open fails for FsReadText");
+    }
+}
+
+static void vm_fs_write_should_fail_when_stream_write_reports_error()
+{
+    using namespace curlee::vm;
+    namespace fs = std::filesystem;
+
+    const fs::path dir = fs::temp_directory_path() /
+                         ("curlee_vm_fs_write_stream_err_" +
+                          std::to_string(static_cast<long long>(::getpid())));
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    if (!fs::create_directories(dir, ec) || ec)
+    {
+        fail("failed to create temp directory for fs stream-write-error test");
+    }
+
+    const fs::path old_cwd = fs::current_path(ec);
+    if (ec)
+    {
+        fail("failed to read current working directory");
+    }
+
+    fs::current_path(dir, ec);
+    if (ec)
+    {
+        fail("failed to set working directory for fs stream-write-error test");
+    }
+
+    fs::create_symlink("/dev/full", "full.txt", ec);
+    if (ec)
+    {
+        fs::current_path(old_cwd, ec);
+        fs::remove_all(dir, ec);
+        fail("failed to create /dev/full symlink for fs stream-write-error test");
+    }
+
+    Chunk chunk;
+    chunk.emit_constant(Value::string_v("full.txt"));
+    chunk.emit_constant(Value::string_v(std::string(1 * 1024 * 1024, 'x')));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::FsWriteText);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("fs.write");
+    const auto res = vm.run(chunk, caps);
+
+    fs::current_path(old_cwd, ec);
+    fs::remove_all(dir, ec);
+
+    if (res.ok || res.error != "fs write failed")
+    {
+        fail("expected fs write failed when stream write reports error");
+    }
+}
+
+static void vm_fs_write_should_succeed_with_existing_writable_parent()
+{
+    using namespace curlee::vm;
+    namespace fs = std::filesystem;
+
+    const fs::path dir = fs::temp_directory_path() /
+                         ("curlee_vm_fs_parent_ok_" +
+                          std::to_string(static_cast<long long>(::getpid())));
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    if (!fs::create_directories(dir / "sub", ec) || ec)
+    {
+        fail("failed to create temp directory for writable-parent test");
+    }
+
+    const fs::path old_cwd = fs::current_path(ec);
+    if (ec)
+    {
+        fail("failed to read current working directory");
+    }
+
+    fs::current_path(dir, ec);
+    if (ec)
+    {
+        fail("failed to set working directory for writable-parent test");
+    }
+
+    Chunk chunk;
+    chunk.emit_constant(Value::string_v("sub/out.txt"));
+    chunk.emit_constant(Value::string_v("ok"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::FsWriteText);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("fs.write");
+    const auto res = vm.run(chunk, caps);
+
+    fs::current_path(old_cwd, ec);
+    fs::remove_all(dir, ec);
+
+    if (!res.ok || !(res.value == Value::unit_v()))
+    {
+        fail("expected FsWriteText success with existing writable parent");
+    }
+}
+
+static void vm_fs_read_should_fail_for_fifo_file_size_error()
+{
+    using namespace curlee::vm;
+    namespace fs = std::filesystem;
+
+    const fs::path dir = fs::temp_directory_path() /
+                         ("curlee_vm_fs_fifo_" +
+                          std::to_string(static_cast<long long>(::getpid())));
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    if (!fs::create_directories(dir, ec) || ec)
+    {
+        fail("failed to create temp directory for fifo fs-read test");
+    }
+
+    const fs::path old_cwd = fs::current_path(ec);
+    if (ec)
+    {
+        fail("failed to read current working directory");
+    }
+
+    fs::current_path(dir, ec);
+    if (ec)
+    {
+        fail("failed to set working directory for fifo fs-read test");
+    }
+
+    if (::mkfifo("fifo.txt", 0644) != 0)
+    {
+        fs::current_path(old_cwd, ec);
+        fs::remove_all(dir, ec);
+        fail("failed to create fifo for fs-read test");
+    }
+
+    Chunk chunk;
+    chunk.emit_constant(Value::string_v("fifo.txt"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::FsReadText);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("fs.read");
+    const auto res = vm.run(chunk, caps);
+
+    fs::current_path(old_cwd, ec);
+    fs::remove_all(dir, ec);
+
+    if (res.ok || res.error != "fs read failed")
+    {
+        fail("expected fs read failed when file_size() errors on FIFO");
+    }
+}
+
 static void vm_fs_write_should_fail_with_access_denied()
 {
     using namespace curlee::vm;
@@ -859,6 +1236,68 @@ static void vm_fs_read_should_fail_with_access_denied()
     }
 }
 
+static void vm_fs_read_should_fail_when_exists_sets_error_code()
+{
+    using namespace curlee::vm;
+    namespace fs = std::filesystem;
+
+    const fs::path dir = fs::temp_directory_path() /
+                         ("curlee_vm_fs_exists_ec_" +
+                          std::to_string(static_cast<long long>(::getpid())));
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    if (!fs::create_directories(dir, ec) || ec)
+    {
+        fail("failed to create temp directory for fs exists-ec test");
+    }
+
+    const fs::path old_cwd = fs::current_path(ec);
+    if (ec)
+    {
+        fail("failed to read current working directory");
+    }
+
+    fs::current_path(dir, ec);
+    if (ec)
+    {
+        fail("failed to set working directory for fs exists-ec test");
+    }
+
+    if (!fs::create_directories("locked", ec) || ec)
+    {
+        fs::current_path(old_cwd, ec);
+        fs::remove_all(dir, ec);
+        fail("failed to create locked directory for fs exists-ec test");
+    }
+
+    if (::chmod("locked", 0000) != 0)
+    {
+        fs::current_path(old_cwd, ec);
+        fs::remove_all(dir, ec);
+        fail("failed to chmod locked directory for fs exists-ec test");
+    }
+
+    Chunk chunk;
+    chunk.emit_constant(Value::string_v("locked/nope.txt"));
+    chunk.emit_constant(Value::unit_v());
+    chunk.emit(OpCode::FsReadText);
+    chunk.emit(OpCode::Return);
+
+    VM vm;
+    VM::Capabilities caps;
+    caps.insert("fs.read");
+    const auto res = vm.run(chunk, caps);
+
+    (void)::chmod("locked", 0755);
+    fs::current_path(old_cwd, ec);
+    fs::remove_all(dir, ec);
+
+    if (res.ok || res.error != "fs read failed")
+    {
+        fail("expected fs read failed when exists() reports error");
+    }
+}
+
 static void vm_fs_write_should_fail_on_stack_underflow_and_non_string_values()
 {
     using namespace curlee::vm;
@@ -962,6 +1401,24 @@ static void vm_fs_write_should_fail_on_stack_underflow_and_non_string_values()
         if (res.ok || res.error != "invalid fs path")
         {
             fail("expected invalid fs path for FsWriteText");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::string_v("missing_parent/out.txt"));
+        chunk.emit_constant(Value::string_v("x"));
+        chunk.emit_constant(Value::unit_v());
+        chunk.emit(OpCode::FsWriteText);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("fs.write");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "fs access denied")
+        {
+            fail("expected fs access denied for FsWriteText when parent directory is missing");
         }
     }
 }
@@ -1464,6 +1921,36 @@ static void vm_enum_ops_error_paths()
 
     {
         Chunk chunk;
+        const auto non_string_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::int_v(1)));
+        const auto some_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Some")));
+        chunk.emit(OpCode::MakeEnum);
+        chunk.emit_u16(non_string_idx);
+        chunk.emit_u16(some_idx);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum constructor enum name")
+        {
+            fail("expected invalid enum constructor enum-name for non-string constant kind");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        const auto non_string_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::int_v(2)));
+        chunk.emit(OpCode::MakeEnum);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(non_string_idx);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum constructor variant name")
+        {
+            fail("expected invalid enum constructor variant-name for non-string constant kind");
+        }
+    }
+
+    {
+        Chunk chunk;
         const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
         const auto some_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Some")));
         chunk.emit(OpCode::MakeEnum);
@@ -1496,6 +1983,37 @@ static void vm_enum_ops_error_paths()
 
     {
         Chunk chunk;
+        chunk.emit(OpCode::MakeEnum);
+        chunk.emit_u16(99);
+        chunk.emit_u16(0);
+        chunk.code.push_back(0);
+        chunk.spans.push_back({});
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum constructor enum name")
+        {
+            fail("expected invalid enum constructor enum-name for out-of-range constant index");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        chunk.emit(OpCode::MakeEnum);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(99);
+        chunk.code.push_back(0);
+        chunk.spans.push_back({});
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum constructor variant name")
+        {
+            fail("expected invalid enum constructor variant-name for out-of-range constant index");
+        }
+    }
+
+    {
+        Chunk chunk;
         chunk.emit(OpCode::EnumIs);
         VM vm;
         const auto res = vm.run(chunk);
@@ -1515,6 +2033,37 @@ static void vm_enum_ops_error_paths()
         if (res.ok || res.error != "invalid enum-is variant name")
         {
             fail("expected invalid enum-is variant-name error");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::EnumIs);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(99);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum-is variant name")
+        {
+            fail("expected invalid enum-is variant-name for out-of-range constant index");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        const auto non_string_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::int_v(3)));
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::EnumIs);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(non_string_idx);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum-is variant name")
+        {
+            fail("expected invalid enum-is variant-name for non-string constant kind");
         }
     }
 
@@ -1726,6 +2275,565 @@ static void vm_enum_ops_error_paths()
             fail("expected stack underflow for enum-unwrap");
         }
     }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::enum_v("Other", "Some", Value::int_v(1)));
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        const auto some_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Some")));
+        chunk.emit(OpCode::EnumUnwrap);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(some_idx);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "enum unwrap variant mismatch")
+        {
+            fail("expected enum unwrap mismatch on enum-name mismatch constant value");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::enum_v("Maybe", "Some", Value::int_v(1)));
+        chunk.emit(OpCode::EnumUnwrap);
+        chunk.emit_u16(99);
+        chunk.emit_u16(0);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum-unwrap enum name")
+        {
+            fail("expected invalid enum-unwrap enum-name for out-of-range constant index");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::enum_v("Maybe", "Some", Value::int_v(1)));
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        chunk.emit(OpCode::EnumUnwrap);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(99);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum-unwrap variant name")
+        {
+            fail("expected invalid enum-unwrap variant-name for out-of-range constant index");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto non_string_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::int_v(4)));
+        const auto some_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Some")));
+        chunk.emit_constant(Value::enum_v("Maybe", "Some", Value::int_v(1)));
+        chunk.emit(OpCode::EnumUnwrap);
+        chunk.emit_u16(non_string_idx);
+        chunk.emit_u16(some_idx);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum-unwrap enum name")
+        {
+            fail("expected invalid enum-unwrap enum-name for non-string constant kind");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto maybe_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Maybe")));
+        const auto non_string_idx = static_cast<std::uint16_t>(chunk.add_constant(Value::int_v(5)));
+        chunk.emit_constant(Value::enum_v("Maybe", "Some", Value::int_v(1)));
+        chunk.emit(OpCode::EnumUnwrap);
+        chunk.emit_u16(maybe_idx);
+        chunk.emit_u16(non_string_idx);
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid enum-unwrap variant name")
+        {
+            fail("expected invalid enum-unwrap variant-name for non-string constant kind");
+        }
+    }
+
+}
+
+static void vm_rng_and_vec_error_paths()
+{
+    using namespace curlee::vm;
+
+    // RngNextInt: missing capability.
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(10));
+        chunk.emit_constant(Value::unit_v());
+        chunk.emit(OpCode::RngNextInt);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "missing capability rng.seeded")
+        {
+            fail("expected missing capability rng.seeded");
+        }
+    }
+
+    // RngNextInt: stack underflow for missing capability token.
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::RngNextInt);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("rng.seeded");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow for RngNextInt missing capability token");
+        }
+    }
+
+    // RngNextInt: stack underflow for missing max argument.
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::unit_v());
+        chunk.emit(OpCode::RngNextInt);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("rng.seeded");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow for RngNextInt missing max");
+        }
+    }
+
+    // RngNextInt: type and bounds checks.
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::string_v("bad"));
+        chunk.emit_constant(Value::unit_v());
+        chunk.emit(OpCode::RngNextInt);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("rng.seeded");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "rng max must be Int")
+        {
+            fail("expected rng max must be Int");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::unit_v());
+        chunk.emit(OpCode::RngNextInt);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        VM::Capabilities caps;
+        caps.insert("rng.seeded");
+        const auto res = vm.run(chunk, caps);
+        if (res.ok || res.error != "rng max must be > 0")
+        {
+            fail("expected rng max must be > 0");
+        }
+    }
+
+    // VecNew: underflow, type, and bound checks.
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::VecNew);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow for VecNew");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecNew);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec max length must be Int")
+        {
+            fail("expected vec max length must be Int");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(-1));
+        chunk.emit(OpCode::VecNew);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec max length must be >= 0")
+        {
+            fail("expected vec max length must be >= 0");
+        }
+    }
+
+    // VecLen: underflow and type checks.
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::VecLen);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow for VecLen");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecLen);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected vec value must be Vec for VecLen");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::vec_v(2));
+        chunk.emit(OpCode::VecLen);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (!res.ok || !(res.value == Value::int_v(0)))
+        {
+            fail("expected VecLen success on empty vec");
+        }
+    }
+
+    // VecPush: underflow, type checks, and capacity checks.
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::VecPush);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow for VecPush");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecPush);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow for VecPush when vec operand is missing");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::VecPush);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected vec value must be Vec for VecPush");
+        }
+    }
+
+    {
+        Chunk chunk;
+        Value malformed_vec;
+        malformed_vec.kind = ValueKind::Vec;
+        malformed_vec.vec_value = nullptr;
+        chunk.emit_constant(std::move(malformed_vec));
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::VecPush);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected vec value must be Vec for VecPush null internal vector");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::vec_v(0));
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecPush);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec capacity exceeded")
+        {
+            fail("expected vec capacity exceeded");
+        }
+    }
+
+    // VecGet: underflow, type checks, and bounds checks.
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::VecGet);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow for VecGet");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::VecGet);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow for VecGet when vec operand is missing");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::VecGet);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected vec value must be Vec for VecGet");
+        }
+    }
+
+    {
+        Chunk chunk;
+        Value malformed_vec;
+        malformed_vec.kind = ValueKind::Vec;
+        malformed_vec.vec_value = nullptr;
+        chunk.emit_constant(std::move(malformed_vec));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::VecGet);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected vec value must be Vec for VecGet null internal vector");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::vec_v(1));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::VecGet);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec index out of bounds")
+        {
+            fail("expected vec index out of bounds for VecGet");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::vec_v(1));
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecGet);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec index out of bounds")
+        {
+            fail("expected vec index out of bounds for VecGet non-int index");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::vec_v(1));
+        chunk.emit_constant(Value::int_v(-1));
+        chunk.emit(OpCode::VecGet);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec index out of bounds")
+        {
+            fail("expected vec index out of bounds for VecGet negative index");
+        }
+    }
+
+    // VecSet: underflow, type checks, and bounds checks.
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::VecSet);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow for VecSet");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(9));
+        chunk.emit(OpCode::VecSet);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow for VecSet when vec operand is missing");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(9));
+        chunk.emit(OpCode::VecSet);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow for VecSet when index operand is missing");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(9));
+        chunk.emit(OpCode::VecSet);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected vec value must be Vec for VecSet");
+        }
+    }
+
+    {
+        Chunk chunk;
+        Value malformed_vec;
+        malformed_vec.kind = ValueKind::Vec;
+        malformed_vec.vec_value = nullptr;
+        chunk.emit_constant(std::move(malformed_vec));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(9));
+        chunk.emit(OpCode::VecSet);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected vec value must be Vec for VecSet null internal vector");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::vec_v(1));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(9));
+        chunk.emit(OpCode::VecSet);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec index out of bounds")
+        {
+            fail("expected vec index out of bounds for VecSet");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::vec_v(1));
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit_constant(Value::int_v(9));
+        chunk.emit(OpCode::VecSet);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec index out of bounds")
+        {
+            fail("expected vec index out of bounds for VecSet non-int index");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::vec_v(1));
+        chunk.emit_constant(Value::int_v(-1));
+        chunk.emit_constant(Value::int_v(9));
+        chunk.emit(OpCode::VecSet);
+        chunk.emit(OpCode::Return);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec index out of bounds")
+        {
+            fail("expected vec index out of bounds for VecSet negative index");
+        }
+    }
 }
 
 int main()
@@ -1735,6 +2843,9 @@ int main()
     read_into_should_partial_append_and_hit_limit();
     read_into_should_return_eagain_without_eof();
     read_into_should_set_eof_on_bad_fd();
+    vm_internal_helpers_should_cover_path_and_escape_branches();
+    vm_seeded_run_wrapper_should_fill_profile_fields();
+    vm_value_inline_helpers_should_cover_remaining_branches();
 
     vm_should_fail_out_of_fuel();
     vm_should_fail_truncated_constant_without_span();
@@ -1758,8 +2869,14 @@ int main()
     vm_fs_read_should_fail_when_file_exceeds_limit();
     vm_fs_read_should_fail_for_directory_path();
     vm_fs_roundtrip_should_succeed();
+    vm_fs_read_empty_file_should_succeed();
+    vm_fs_read_should_fail_when_ifstream_open_is_denied();
+    vm_fs_write_should_fail_when_stream_write_reports_error();
+    vm_fs_write_should_succeed_with_existing_writable_parent();
+    vm_fs_read_should_fail_for_fifo_file_size_error();
     vm_fs_write_should_fail_with_access_denied();
     vm_fs_read_should_fail_with_access_denied();
+    vm_fs_read_should_fail_when_exists_sets_error_code();
     vm_fs_write_should_fail_on_stack_underflow_and_non_string_values();
     vm_should_fail_tty_missing_capability();
     vm_tty_should_enforce_coordinate_bounds();
@@ -1782,6 +2899,7 @@ int main()
     value_enum_equality_and_to_string();
     vm_enum_ops_success_paths();
     vm_enum_ops_error_paths();
+    vm_rng_and_vec_error_paths();
 
     std::cout << "OK\n";
     return 0;

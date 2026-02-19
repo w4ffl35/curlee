@@ -283,7 +283,7 @@ class Verifier
             return std::nullopt;
         }
 
-        if (t->kind == TypeKind::Int || t->kind == TypeKind::Bool)
+        if (t->kind == TypeKind::Int || t->kind == TypeKind::Bool || t->kind == TypeKind::Unit)
         {
             return t->kind;
         }

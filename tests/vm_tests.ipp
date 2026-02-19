@@ -90,6 +90,17 @@ int main(int argc, char** argv)
             fail("unexpected Unit value equality behavior");
         }
 
+        const Value p1 = Value::struct_v(
+            "Point", {{"x", Value::int_v(1)}, {"y", Value::int_v(2)}});
+        const Value p2 = Value::struct_v(
+            "Point", {{"x", Value::int_v(1)}, {"y", Value::int_v(2)}});
+        const Value p3 = Value::struct_v(
+            "Point", {{"x", Value::int_v(1)}, {"y", Value::int_v(3)}});
+        if (!(p1 == p2) || (p1 == p3))
+        {
+            fail("unexpected Struct value equality behavior");
+        }
+
         if (i1 == b1 || i1 == s1 || i1 == u1)
         {
             fail("expected different Value kinds to compare unequal");
@@ -110,6 +121,10 @@ int main(int argc, char** argv)
         if (to_string(Value::unit_v()) != "()")
         {
             fail("unexpected Unit to_string");
+        }
+        if (to_string(Value::struct_v("Point", {{"x", Value::int_v(1)}})) != "Point{x: 1}")
+        {
+            fail("unexpected Struct to_string");
         }
 
         const Value e1 = Value::enum_v("Opt", "Some", Value::int_v(1));
@@ -270,6 +285,82 @@ int main(int argc, char** argv)
         chunk.emit(OpCode::Return);
 
         run_twice_deterministic(chunk, Value::string_v("ab"));
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(10));
+        chunk.emit_constant(Value::int_v(20));
+
+        const auto struct_name = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Point")));
+        const auto field_x = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("x")));
+        const auto field_y = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("y")));
+
+        chunk.emit(OpCode::MakeStruct);
+        chunk.emit_u16(struct_name);
+        chunk.emit_u16(2);
+        chunk.emit_u16(field_x);
+        chunk.emit_u16(field_y);
+        chunk.emit(OpCode::GetField);
+        chunk.emit_u16(field_x);
+        chunk.emit(OpCode::Return);
+
+        run_twice_deterministic(chunk, Value::int_v(10));
+    }
+
+    {
+        Chunk chunk;
+        const auto field_x = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("x")));
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::GetField);
+        chunk.emit_u16(field_x);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "member access expects Struct")
+        {
+            fail("expected member access expects Struct runtime error");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto struct_name = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Point")));
+        const auto field_x = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("x")));
+        const auto field_y = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("y")));
+
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::MakeStruct);
+        chunk.emit_u16(struct_name);
+        chunk.emit_u16(1);
+        chunk.emit_u16(field_x);
+        chunk.emit(OpCode::GetField);
+        chunk.emit_u16(field_y);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "unknown struct field")
+        {
+            fail("expected unknown struct field runtime error");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto field_x = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("x")));
+
+        auto malformed = Value::struct_v("Point", {{"x", Value::int_v(1)}});
+        malformed.struct_fields[0].second.reset();
+        chunk.emit_constant(std::move(malformed));
+        chunk.emit(OpCode::GetField);
+        chunk.emit_u16(field_x);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid struct field value")
+        {
+            fail("expected invalid struct field value runtime guard");
+        }
     }
 
     {

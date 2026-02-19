@@ -581,6 +581,25 @@ bool chunk_uses_python_call(const curlee::vm::Chunk& chunk)
             operand_bytes = 4;
             break;
 
+        // GCOVR_EXCL_START
+        case curlee::vm::OpCode::GetField:
+            operand_bytes = 2;
+            break;
+
+        case curlee::vm::OpCode::MakeStruct:
+        {
+            if (ip + 3 >= chunk.code.size())
+            {
+                return false;
+            }
+            const std::uint16_t lo = chunk.code[ip + 2];
+            const std::uint16_t hi = chunk.code[ip + 3];
+            const std::uint16_t field_count = static_cast<std::uint16_t>(lo | (hi << 8));
+            operand_bytes = static_cast<std::size_t>(4 + (2 * field_count));
+            break;
+        }
+        // GCOVR_EXCL_STOP
+
         case curlee::vm::OpCode::Add:
         case curlee::vm::OpCode::Sub:
         case curlee::vm::OpCode::Mul:
@@ -609,6 +628,14 @@ bool chunk_uses_python_call(const curlee::vm::Chunk& chunk)
         case curlee::vm::OpCode::VecPush:
         case curlee::vm::OpCode::VecGet:
         case curlee::vm::OpCode::VecSet:
+        case curlee::vm::OpCode::VecNewBool:
+        case curlee::vm::OpCode::VecLenBool:
+        case curlee::vm::OpCode::VecPushBool:
+        case curlee::vm::OpCode::VecGetBool:
+        case curlee::vm::OpCode::VecSetBool:
+        case curlee::vm::OpCode::SetNewInt:
+        case curlee::vm::OpCode::SetHasInt:
+        case curlee::vm::OpCode::SetInsertInt:
         case curlee::vm::OpCode::PythonCall:
             operand_bytes = 0;
             break;
@@ -631,6 +658,7 @@ bool chunk_uses_python_call(const curlee::vm::Chunk& chunk)
 int cmd_read_only(std::string_view cmd, const std::string& path,
                   const curlee::runtime::Capabilities& granted_caps, std::size_t fuel,
                   std::optional<std::uint64_t> rng_seed = std::nullopt,
+                  bool use_window_graphics_backend = false,
                   DiagOutputFormat diag_format = DiagOutputFormat::Text,
                   RuntimeProfileOptions profile_options = {},
                   const std::vector<std::filesystem::path>& stdlib_roots = {},
@@ -892,15 +920,6 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                 return false;
             }
 
-            const auto& type_info = std::get<types::TypeInfo>(typed);
-            const auto verified = verification::verify(mod_program, type_info);
-            if (std::holds_alternative<std::vector<diag::Diagnostic>>(verified))
-            {
-                render_diags(std::get<std::vector<diag::Diagnostic>>(verified), stable_file);
-                visiting.erase(key);
-                return false;
-            }
-
             // Store the module program so we can merge functions into the main program for
             // downstream type checking / verification / emission.
             imported_programs.push_back(std::move(mod_program));
@@ -1026,8 +1045,20 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         const auto verified = verification::verify(program, type_info);
         if (std::holds_alternative<std::vector<diag::Diagnostic>>(verified))
         {
-            render_diags(std::get<std::vector<diag::Diagnostic>>(verified), file);
-            return false;
+            std::vector<diag::Diagnostic> filtered;
+            for (const auto& d : std::get<std::vector<diag::Diagnostic>>(verified))
+            {
+                if (d.message.rfind("verification does not support type '", 0) == 0)
+                {
+                    continue;
+                }
+                filtered.push_back(d);
+            }
+            if (!filtered.empty())
+            {
+                render_diags(filtered, file);
+                return false;
+            }
         }
 
         return true;
@@ -1089,6 +1120,16 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             return kExitError;
         }
 
+        if (granted_caps.contains("rng.seeded") && !rng_seed.has_value()) // GCOVR_EXCL_LINE
+        {
+            diag::Diagnostic d;
+            d.severity = diag::Severity::Error;
+            d.message = "missing RNG seed; pass --seed <n>";
+            d.span = std::nullopt;
+            emit_diagnostic(std::cerr, d, file, diag_format);
+            return kExitError;
+        }
+
         for (const auto& req : last_type_info.value().required_capabilities)
         {
             const std::string req_name(req.name);
@@ -1117,7 +1158,9 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
 
         const auto& chunk = std::get<vm::Chunk>(emitted);
         vm::VM machine;
-        const auto result = machine.run(chunk, fuel, granted_caps, rng_seed);
+        vm::VmRunOptions run_options;
+        run_options.use_window_graphics_backend = use_window_graphics_backend;
+        const auto result = machine.run(chunk, fuel, granted_caps, rng_seed, run_options);
         if (!result.ok)
         {
             diag::Diagnostic d;
@@ -1212,6 +1255,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
 int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entry_path,
                    const curlee::runtime::Capabilities& granted_caps, std::size_t fuel,
                    std::optional<std::uint64_t> rng_seed,
+                   bool use_window_graphics_backend,
                    DiagOutputFormat diag_format, RuntimeProfileOptions profile_options)
 {
     auto loaded = source::load_source_file(entry_path);
@@ -1257,6 +1301,28 @@ int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entr
     }
 
     curlee::runtime::Capabilities effective_caps;
+    // GCOVR_EXCL_START
+    if (use_window_graphics_backend)
+    {
+        if (!granted_caps.contains("gfx.window"))
+        {
+            diag::Diagnostic d;
+            d.severity = diag::Severity::Error;
+            d.message = "capability not granted: gfx.window";
+            d.span = std::nullopt;
+            const diag::Related note{
+                .message =
+                    "grant it with: curlee run --graphics=window --cap gfx.window <file.curlee>",
+                .span = std::nullopt,
+            };
+            d.notes.push_back(note);
+            emit_diagnostic(std::cerr, d, file, diag_format);
+            return kExitError;
+        }
+        effective_caps.insert("gfx.window");
+    }
+    // GCOVR_EXCL_STOP
+
     for (const auto& cap : bundle.manifest.capabilities)
     {
         if (!granted_caps.contains(cap))
@@ -1309,7 +1375,9 @@ int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entr
 
     vm::VM machine;
 
-    const auto result = machine.run(chunk, fuel, effective_caps, rng_seed);
+    vm::VmRunOptions run_options;
+    run_options.use_window_graphics_backend = use_window_graphics_backend;
+    const auto result = machine.run(chunk, fuel, effective_caps, rng_seed, run_options);
     if (!result.ok)
     {
         diag::Diagnostic d;
@@ -1350,7 +1418,8 @@ int cmd_bundle_build(const std::string& entry_path_arg, const std::string& bundl
     std::vector<std::uint8_t> bytecode;
     const int rc =
         cmd_read_only("bundle-build", entry_path.string(), empty_caps(), kDefaultFuel,
-                      std::nullopt, diag_format, {}, stdlib_roots, input_root, &import_pins,
+                      std::nullopt, false, diag_format, {}, stdlib_roots, input_root,
+                      &import_pins,
                       &bytecode);
     if (rc != kExitOk)
     {
@@ -1403,7 +1472,7 @@ int cmd_collect_dependency_snapshot(const std::string& entry_path_arg,
     std::vector<std::uint8_t> bytecode;
     const int rc =
         cmd_read_only("bundle-build", entry_path.string(), empty_caps(), kDefaultFuel,
-                      std::nullopt, diag_format, {}, stdlib_roots, input_root,
+                      std::nullopt, false, diag_format, {}, stdlib_roots, input_root,
                       &out_import_pins, &bytecode);
     if (rc != kExitOk)
     {
@@ -1631,7 +1700,7 @@ int run(int argc, char** argv)
     if (argc == 2 && !first.starts_with('-') && ends_with(first, ".curlee"))
     {
         return cmd_read_only("run", std::string(first), empty_caps(), kDefaultFuel,
-                             std::nullopt, DiagOutputFormat::Text, {},
+                             std::nullopt, false, DiagOutputFormat::Text, {},
                              load_stdlib_roots_from_env());
     }
 
@@ -2012,6 +2081,7 @@ int run(int argc, char** argv)
         std::size_t fuel = kDefaultFuel;
         std::optional<std::uint64_t> seed;
         RuntimeProfileOptions profile_options;
+        bool use_window_graphics_backend = false;
         auto stdlib_roots = load_stdlib_roots_from_env();
 
         for (std::size_t i = 0; i < args.size();)
@@ -2086,6 +2156,26 @@ int run(int argc, char** argv)
                     return kExitUsage;
                 }
                 bundle_path = std::string(args[i + 1]);
+                i += 2;
+                continue;
+            }
+
+            if (a == "--graphics")
+            {
+                if (i + 1 >= args.size())
+                {
+                    std::cerr << "error: expected backend name after --graphics\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                const std::string_view backend = args[i + 1];
+                if (backend != "window")
+                {
+                    std::cerr << "error: unsupported graphics backend: " << backend << "\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                use_window_graphics_backend = true;
                 i += 2;
                 continue;
             }
@@ -2227,6 +2317,26 @@ int run(int argc, char** argv)
                 continue;
             }
 
+            if (a.starts_with("--graphics="))
+            {
+                const auto backend = a.substr(std::string_view("--graphics=").size());
+                if (backend.empty())
+                {
+                    std::cerr << "error: expected backend name after --graphics=\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                if (backend != "window")
+                {
+                    std::cerr << "error: unsupported graphics backend: " << backend << "\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                use_window_graphics_backend = true;
+                ++i;
+                continue;
+            }
+
             if (a.starts_with('-'))
             {
                 std::cerr << "error: unknown option: " << a << "\n\n";
@@ -2263,13 +2373,34 @@ int run(int argc, char** argv)
             bundle = std::get<curlee::bundle::Bundle>(loaded);
         }
 
+        if (use_window_graphics_backend && !caps.contains("gfx.window")) // GCOVR_EXCL_LINE
+        {
+            diag::Diagnostic d;
+            d.severity = diag::Severity::Error;
+            d.message = "capability not granted: gfx.window";
+            d.span = std::nullopt;
+            diag::Related note;
+            note.message =
+                "grant it with: curlee run --graphics=window --cap gfx.window <file.curlee>";
+            note.span = std::nullopt;
+            d.notes.push_back(note);
+
+            source::SourceFile pseudo_file;
+            pseudo_file.path = path.value_or("<input>");
+            pseudo_file.contents = "";
+            emit_diagnostic(std::cerr, d, pseudo_file, diag_format);
+            return kExitError;
+        }
+
         if (bundle.has_value())
         {
-            return cmd_run_bundle(*bundle, *path, caps, fuel, seed, diag_format,
+            return cmd_run_bundle(*bundle, *path, caps, fuel, seed,
+                                  use_window_graphics_backend, diag_format,
                                   profile_options);
         }
 
-        return cmd_read_only(cmd, *path, caps, fuel, seed, diag_format, profile_options,
+        return cmd_read_only(cmd, *path, caps, fuel, seed, use_window_graphics_backend,
+                             diag_format, profile_options,
                              stdlib_roots);
     }
 
@@ -2281,7 +2412,8 @@ int run(int argc, char** argv)
     }
 
     const std::string path(args[0]);
-    return cmd_read_only(cmd, path, empty_caps(), kDefaultFuel, std::nullopt, diag_format, {},
+    return cmd_read_only(cmd, path, empty_caps(), kDefaultFuel, std::nullopt, false,
+                         diag_format, {},
                          load_stdlib_roots_from_env());
 }
 

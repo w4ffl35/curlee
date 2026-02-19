@@ -49,6 +49,19 @@ static std::string join_path(const std::vector<std::string_view>& parts)
     return out;
 } // GCOVR_EXCL_LINE
 
+static bool is_reserved_builtin_name(std::string_view name)
+{
+    static const std::unordered_set<std::string_view> reserved = {
+        "print",           "__read_line",      "__tty_clear",      "__fs_read_text",
+        "__fs_write_text", "__tty_write_at",   "__tty_flush",      "__rng_next_int",
+        "__vec_new_int",   "__vec_len_int",    "__vec_push_int",   "__vec_get_int",
+        "__vec_set_int",   "__vec_new_bool",   "__vec_len_bool",   "__vec_push_bool",
+        "__vec_get_bool",  "__vec_set_bool",   "__set_new_int",    "__set_has_int",
+        "__set_insert_int",
+    };
+    return reserved.contains(name);
+}
+
 static bool collect_member_chain(const Expr& expr, std::vector<std::string_view>& out)
 {
     if (const auto* name = std::get_if<NameExpr>(&expr.node))
@@ -114,12 +127,7 @@ class Emitter
 
         for (const auto& f : program.functions)
         {
-            if (f.name == "print" || f.name == "__read_line" || f.name == "__tty_clear" ||
-                f.name == "__fs_read_text" || f.name == "__fs_write_text" ||
-                f.name == "__tty_write_at" || f.name == "__tty_flush" ||
-                f.name == "__rng_next_int" || f.name == "__vec_new_int" ||
-                f.name == "__vec_len_int" || f.name == "__vec_push_int" ||
-                f.name == "__vec_get_int" || f.name == "__vec_set_int")
+            if (is_reserved_builtin_name(f.name))
             {
                 diags_.push_back(error_at(f.span, "cannot declare builtin function '" +
                                                       std::string(f.name) + "'"));
@@ -1097,6 +1105,196 @@ class Emitter
             }
 
             chunk_.emit(OpCode::VecSet, span);
+            return;
+        }
+
+        // Builtin: __vec_new_bool(<max_len>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__vec_new_bool")
+        {
+            if (expr.args.size() != 1)
+            {
+                diags_.push_back(error_at(span, "__vec_new_bool expects exactly 1 argument"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::VecNewBool, span);
+            return;
+        }
+
+        // Builtin: __vec_len_bool(<vec>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__vec_len_bool")
+        {
+            if (expr.args.size() != 1)
+            {
+                diags_.push_back(error_at(span, "__vec_len_bool expects exactly 1 argument"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::VecLenBool, span);
+            return;
+        }
+
+        // Builtin: __vec_push_bool(<vec>, <value>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__vec_push_bool")
+        {
+            if (expr.args.size() != 2)
+            {
+                diags_.push_back(error_at(span, "__vec_push_bool expects exactly 2 arguments"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            emit_expr(expr.args[1]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::VecPushBool, span);
+            return;
+        }
+
+        // Builtin: __vec_get_bool(<vec>, <index>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__vec_get_bool")
+        {
+            if (expr.args.size() != 2)
+            {
+                diags_.push_back(error_at(span, "__vec_get_bool expects exactly 2 arguments"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            emit_expr(expr.args[1]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::VecGetBool, span);
+            return;
+        }
+
+        // Builtin: __vec_set_bool(<vec>, <index>, <value>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__vec_set_bool")
+        {
+            if (expr.args.size() != 3)
+            {
+                diags_.push_back(error_at(span, "__vec_set_bool expects exactly 3 arguments"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            emit_expr(expr.args[1]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            emit_expr(expr.args[2]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::VecSetBool, span);
+            return;
+        }
+
+        // Builtin: __set_new_int()
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__set_new_int")
+        {
+            if (expr.args.size() != 0)
+            {
+                diags_.push_back(error_at(span, "__set_new_int expects exactly 0 arguments"));
+                return;
+            }
+
+            chunk_.emit(OpCode::SetNewInt, span);
+            return;
+        }
+
+        // Builtin: __set_has_int(<set>, <value>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__set_has_int")
+        {
+            if (expr.args.size() != 2)
+            {
+                diags_.push_back(error_at(span, "__set_has_int expects exactly 2 arguments"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            emit_expr(expr.args[1]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::SetHasInt, span);
+            return;
+        }
+
+        // Builtin: __set_insert_int(<set>, <value>)
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr && callee_name->name == "__set_insert_int")
+        {
+            if (expr.args.size() != 2)
+            {
+                diags_.push_back(error_at(span, "__set_insert_int expects exactly 2 arguments"));
+                return;
+            }
+
+            emit_expr(expr.args[0]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            emit_expr(expr.args[1]);
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit(OpCode::SetInsertInt, span);
             return;
         }
 
