@@ -20,6 +20,7 @@
   "deprecation": {
     "minimum_minor_releases_before_removal": 2,
     "removal_before_next_major_forbidden": true,
-    "required_migration_notes": true
+    "required_migration_notes": true,
+    "exercise_registry": ".github/migration-exercises.json"
   }
 }

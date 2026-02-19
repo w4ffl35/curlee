@@ -130,6 +130,46 @@ jobs:
               print('minimum_minor_releases_before_removal must be >= 2')
               sys.exit(1)
 
+            exercise_registry = deprecation.get('exercise_registry')
+            if not exercise_registry:
+              print('missing deprecation.exercise_registry')
+              sys.exit(1)
+
+            exercises_doc = json.load(open(exercise_registry, encoding='utf-8'))
+            if exercises_doc.get('schema_version') != 1:
+              print('unexpected migration exercise schema_version', exercises_doc.get('schema_version'))
+              sys.exit(1)
+
+            exercises = exercises_doc.get('exercises')
+            if not isinstance(exercises, list) or not exercises:
+              print('expected at least one migration exercise')
+              sys.exit(1)
+
+            def parse_minor(version: str) -> int:
+              parts = version.split('.')
+              if len(parts) < 2:
+                raise ValueError(f'invalid version: {version}')
+              return int(parts[1])
+
+            min_minor_gap = int(deprecation['minimum_minor_releases_before_removal'])
+            for exercise in exercises:
+              introduced = exercise.get('introduced_in')
+              removal = exercise.get('removal_not_before')
+              if not introduced or not removal:
+                print('migration exercise missing introduced/removal versions', exercise)
+                sys.exit(1)
+
+              try:
+                introduced_minor = parse_minor(introduced)
+                removal_minor = parse_minor(removal)
+              except Exception as exc:
+                print('invalid migration exercise version format', exercise, str(exc))
+                sys.exit(1)
+
+              if (removal_minor - introduced_minor) < min_minor_gap:
+                print('migration exercise does not satisfy minimum minor gap', exercise)
+                sys.exit(1)
+
           header = open('include/curlee/bundle/bundle.h', encoding='utf-8').read()
           match = re.search(r'kBundleFormatVersion\s*=\s*(\d+)', header)
           if not match:

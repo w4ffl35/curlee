@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "exercises": [
+    {
+      "id": "deps-lock-update-cycle-v0",
+      "deprecated_behavior": "Using `curlee deps lock` as the update path for existing lockfiles.",
+      "replacement": "Use `curlee deps update` for lockfile refresh while keeping `deps lock` for initial creation.",
+      "introduced_in": "0.3.0",
+      "removal_not_before": "0.5.0",
+      "status": "active",
+      "migration_notes_ref": "wiki/Release-Checklist-and-Versioning.md#22-deprecation-and-migration-policy-v1"
+    }
+  ]
+}
