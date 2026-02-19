@@ -291,6 +291,10 @@ class Lexer
         {
             return TokenKind::KwEnsures;
         }
+        if (lexeme == "invariant")
+        {
+            return TokenKind::KwInvariant;
+        }
         if (lexeme == "where")
         {
             return TokenKind::KwWhere;

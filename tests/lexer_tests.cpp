@@ -41,7 +41,8 @@ int main()
             TokenKind::StringLiteral, TokenKind::KwFn,       TokenKind::KwLet,
             TokenKind::KwIf,          TokenKind::KwElse,     TokenKind::KwWhile,
             TokenKind::KwReturn,      TokenKind::KwTrue,     TokenKind::KwFalse,
-            TokenKind::KwRequires,    TokenKind::KwEnsures,  TokenKind::KwWhere,
+            TokenKind::KwRequires,    TokenKind::KwEnsures,  TokenKind::KwInvariant,
+            TokenKind::KwWhere,
             TokenKind::KwUnsafe,      TokenKind::KwCap,      TokenKind::KwImport,
             TokenKind::KwAs,          TokenKind::KwStruct,   TokenKind::KwEnum,
             TokenKind::KwMatch,       TokenKind::LParen,     TokenKind::RParen,
@@ -79,6 +80,19 @@ int main()
 
         const auto& toks = std::get<std::vector<Token>>(res);
         expect_token(toks, 0, TokenKind::KwMatch, "match");
+        expect_token(toks, 1, TokenKind::Eof, "");
+    }
+
+    {
+        const std::string src = "invariant";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for invariant keyword");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::KwInvariant, "invariant");
         expect_token(toks, 1, TokenKind::Eof, "");
     }
 

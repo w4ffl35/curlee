@@ -934,6 +934,28 @@ class Verifier
     {
         check_expr_for_calls(s.cond);
 
+        struct LoweredInvariant
+        {
+            const curlee::parser::Pred* pred = nullptr;
+            z3::expr fact;
+        };
+        std::vector<LoweredInvariant> lowered_invariants;
+        lowered_invariants.reserve(s.invariants.size());
+        for (const auto& inv : s.invariants)
+        {
+            auto lowered = lower_predicate(inv, lower_ctx_);
+            if (std::holds_alternative<Diagnostic>(lowered))
+            {
+                diags_.push_back(std::get<Diagnostic>(std::move(lowered)));
+                continue;
+            }
+
+            auto inv_fact = std::get<z3::expr>(std::move(lowered));
+            check_obligation(inv, lower_ctx_, inv_fact, inv.span, {},
+                             "loop invariant not established");
+            lowered_invariants.push_back(LoweredInvariant{.pred = &inv, .fact = std::move(inv_fact)});
+        }
+
         std::optional<z3::expr> cond_fact;
         {
             auto lowered = lower_expr(s.cond);
@@ -948,6 +970,10 @@ class Verifier
         }
 
         push_scope();
+        for (const auto& inv : lowered_invariants)
+        {
+            facts_.push_back(inv.fact);
+        }
         if (cond_fact.has_value())
         {
             facts_.push_back(*cond_fact);
@@ -955,6 +981,12 @@ class Verifier
         for (const auto& stmt : s.body->stmts)
         {
             check_stmt(stmt, expected_return);
+        }
+
+        for (const auto& inv : lowered_invariants)
+        {
+            check_obligation(*inv.pred, lower_ctx_, inv.fact, inv.pred->span, {},
+                             "loop invariant not preserved");
         }
         pop_scope();
     }

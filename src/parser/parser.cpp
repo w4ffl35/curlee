@@ -1386,6 +1386,39 @@ class Parser
                 return *err;
             }
 
+            std::vector<Pred> invariants;
+            if (match(TokenKind::LBracket))
+            {
+                while (!check(TokenKind::RBracket) && !is_at_end())
+                {
+                    if (!match(TokenKind::KwInvariant))
+                    {
+                        return error_at(peek(), "expected 'invariant' in while invariant block");
+                    }
+
+                    auto pred_res = parse_pred();
+                    if (std::holds_alternative<curlee::diag::Diagnostic>(pred_res))
+                    {
+                        return std::get<curlee::diag::Diagnostic>(std::move(pred_res));
+                    }
+                    invariants.push_back(std::get<Pred>(std::move(pred_res)));
+
+                    if (auto err = consume(TokenKind::Semicolon,
+                                           "expected ';' after while invariant");
+                        err.has_value())
+                    {
+                        return *err;
+                    }
+                }
+
+                if (auto err = consume(TokenKind::RBracket,
+                                       "expected ']' to end while invariant block");
+                    err.has_value())
+                {
+                    return *err;
+                }
+            }
+
             auto body_res = parse_block();
             if (std::holds_alternative<curlee::diag::Diagnostic>(body_res))
             {
@@ -1395,7 +1428,11 @@ class Parser
 
             Stmt stmt{
                 .span = span_cover(kw.span, body->span),
-                .node = WhileStmt{.cond = std::move(cond), .body = std::move(body)},
+                .node = WhileStmt{
+                    .cond = std::move(cond),
+                    .invariants = std::move(invariants),
+                    .body = std::move(body),
+                },
             };
             return stmt;
         }
@@ -2323,7 +2360,23 @@ class Dumper
     {
         out_ << "while (";
         dump_expr(s.cond);
-        out_ << ") ";
+        out_ << ")";
+        if (!s.invariants.empty())
+        {
+            out_ << " [";
+            for (std::size_t i = 0; i < s.invariants.size(); ++i)
+            {
+                out_ << "invariant ";
+                dump_pred(s.invariants[i]);
+                out_ << ";";
+                if (i + 1 < s.invariants.size())
+                {
+                    out_ << " ";
+                }
+            }
+            out_ << "]";
+        }
+        out_ << " ";
         dump_block(*s.body);
     }
 

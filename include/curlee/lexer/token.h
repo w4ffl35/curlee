@@ -33,6 +33,7 @@ enum class TokenKind
 
     KwRequires,
     KwEnsures,
+    KwInvariant,
     KwWhere,
 
     KwUnsafe,
@@ -122,6 +123,8 @@ struct Token
         return "kw_requires";
     case TokenKind::KwEnsures:
         return "kw_ensures";
+    case TokenKind::KwInvariant:
+        return "kw_invariant";
     case TokenKind::KwWhere:
         return "kw_where";
 

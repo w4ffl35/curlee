@@ -1006,6 +1006,34 @@ enum E { V; }
     }
 
     {
+        const std::string src = R"(fn main() -> Unit {
+  while (1 < 2) [invariant 1 < 2; invariant true;] { return; }
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on while invariant program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on while invariant program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("while (") == std::string::npos ||
+            dumped.find("invariant") == std::string::npos ||
+            dumped.find("true;") == std::string::npos)
+        {
+            fail("dump missing while invariants");
+        }
+    }
+
+    {
         const std::string src = R"(fn main() -> Bool {
   let b: Bool = true;
   return b;

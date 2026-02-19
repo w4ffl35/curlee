@@ -212,6 +212,7 @@ struct IfStmt
 struct WhileStmt
 {
     Expr cond;
+    std::vector<Pred> invariants;
     std::unique_ptr<Block> body;
 };
 

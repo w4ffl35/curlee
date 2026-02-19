@@ -479,6 +479,55 @@ int main()
     }
 
     {
+        // Loop invariants: each invariant must hold at loop entry under current facts.
+        const std::string source = "fn main(x: Int) -> Int {\n"
+                                   "  while (x > 0) [invariant x < 0;] {\n"
+                                   "    return 0;\n"
+                                   "  }\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "while invariant establish test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for while invariant establish test");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "loop invariant not established"))
+        {
+            fail("expected invariant establish diagnostic");
+        }
+        if (!any_note_has_prefix(diags, "goal: "))
+        {
+            fail("expected goal note for while invariant establish test");
+        }
+    }
+
+    {
+        // Loop invariants: established invariants are carried into loop-body checking.
+        const std::string source = "fn take_pos(x: Int) -> Int [\n"
+                                   "  requires x > 0;\n"
+                                   "] {\n"
+                                   "  return x;\n"
+                                   "}\n"
+                                   "fn main(x: Int) -> Int [\n"
+                                   "  requires x > 0;\n"
+                                   "] {\n"
+                                   "  while (x > 0) [invariant x > 0;] {\n"
+                                   "    take_pos(x);\n"
+                                   "    return x;\n"
+                                   "  }\n"
+                                   "  return x;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "while invariant body fact test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification success for while invariant body fact test");
+        }
+    }
+
+    {
         // Non-scalar let without refinements is allowed.
         const std::string source = "struct S { x: Int; }\n"
                                    "fn main() -> Int {\n"
