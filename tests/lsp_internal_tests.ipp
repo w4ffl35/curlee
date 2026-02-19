@@ -833,6 +833,12 @@ int main()
                         "semanticTokens/full\",\"params\":{\"textDocument\":{\"uri\":\"") +
             uri + "\"}}}";
 
+        const std::string code_action =
+            std::string("{\"jsonrpc\":\"2.0\",\"id\":18,\"method\":\"textDocument/"
+                        "codeAction\",\"params\":{\"textDocument\":{\"uri\":\"") +
+            uri +
+            "\"},\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":0,\"character\":1}},\"context\":{\"diagnostics\":[]}}}";
+
         const std::string shutdown =
             "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{}}";
         const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
@@ -864,6 +870,7 @@ int main()
         in_data += lsp_frame(completion_at_foo);
         in_data += lsp_frame(rename_on_foo);
         in_data += lsp_frame(semantic_tokens_full);
+        in_data += lsp_frame(code_action);
         in_data += lsp_frame(shutdown);
         in_data += lsp_frame(exit);
 
@@ -934,9 +941,17 @@ int main()
         {
             fail("expected semantic tokens response for id=17");
         }
+        if (out_str.find("\"id\":18") == std::string::npos)
+        {
+            fail("expected code action response for id=18");
+        }
         if (out_str.find("semanticTokensProvider") == std::string::npos)
         {
             fail("expected initialize response to advertise semanticTokensProvider");
+        }
+        if (out_str.find("codeActionProvider") == std::string::npos)
+        {
+            fail("expected initialize response to advertise codeActionProvider");
         }
         if (out_str.find("Content-Length:") == std::string::npos)
         {
@@ -957,6 +972,7 @@ int main()
             bool saw_rename_16_with_edits = false;
             bool saw_initialize_1_with_semantic_provider = false;
             bool saw_semantic_17_with_data = false;
+            bool saw_code_action_18_with_array = false;
 
             while (read_lsp_message(framed, payload))
             {
@@ -1008,6 +1024,14 @@ int main()
                     if (!semantic_provider.has_value())
                     {
                         fail("expected initialize id=1 capabilities to include semanticTokensProvider");
+                    }
+
+                    const auto code_action_provider =
+                        capabilities->as_object()->find("codeActionProvider");
+                    if (code_action_provider == capabilities->as_object()->end() ||
+                        !code_action_provider->second.is_bool())
+                    {
+                        fail("expected initialize id=1 capabilities to include boolean codeActionProvider");
                     }
 
                     const auto legend = json_get_object(*semantic_provider->as_object(), "legend");
@@ -1180,6 +1204,20 @@ int main()
 
                     saw_semantic_17_with_data = true;
                 }
+                else if (*id == 18)
+                {
+                    const auto result_it = root.find("result");
+                    if (result_it == root.end())
+                    {
+                        fail("expected code action id=18 to include result");
+                    }
+                    if (!result_it->second.is_array())
+                    {
+                        fail("expected code action id=18 result to be an array");
+                    }
+
+                    saw_code_action_18_with_array = true;
+                }
             }
 
             if (!saw_definition_5)
@@ -1217,6 +1255,10 @@ int main()
             if (!saw_semantic_17_with_data)
             {
                 fail("expected to observe semantic tokens response for id=17 with data");
+            }
+            if (!saw_code_action_18_with_array)
+            {
+                fail("expected to observe code action response for id=18 with array result");
             }
         }
     }

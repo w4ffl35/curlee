@@ -1600,6 +1600,7 @@ int main()
             capabilities["definitionProvider"] = Json{true};
             capabilities["hoverProvider"] = Json{true};
             capabilities["renameProvider"] = Json{true};
+            capabilities["codeActionProvider"] = Json{true};
             Json::Object completion_provider;
             completion_provider["resolveProvider"] = Json{false};
             capabilities["completionProvider"] = Json{completion_provider};
@@ -1717,6 +1718,42 @@ int main()
             oss << "\"params\":{\"uri\":\"" << json_escape(*uri) << "\",";
             oss << "\"diagnostics\":" << diagnostics_to_json(diagnostics, map) << "}}";
             write_lsp_message(oss.str());
+            continue;
+        }
+
+        if (*method == "textDocument/codeAction")
+        {
+            const auto params = json_get_object(root, "params");
+            if (!params.has_value())
+            {
+                continue;
+            }
+
+            const auto text_doc = json_get_object(*params->as_object(), "textDocument");
+            if (!text_doc.has_value())
+            {
+                continue;
+            }
+
+            const auto uri = json_get_string(*text_doc->as_object(), "uri");
+            if (!uri.has_value())
+            {
+                continue;
+            }
+
+            if (documents.find(*uri) == documents.end())
+            {
+                continue;
+            }
+
+            Json::Object response;
+            response["jsonrpc"] = Json{std::string("2.0")};
+            if (id_it != root.end())
+            {
+                response["id"] = id_it->second;
+            }
+            response["result"] = Json{Json::Array{}};
+            write_lsp_message(json_serialize(Json{response}));
             continue;
         }
 

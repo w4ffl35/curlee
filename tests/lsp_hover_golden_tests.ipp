@@ -523,6 +523,11 @@ static bool run_initialize_capabilities_golden_case(const fs::path& data_dir,
     got += (init_response->find("\"renameProvider\"") != std::string::npos) ? "present" : "absent";
     got += "\n";
 
+    got += "codeActionProvider=";
+    got +=
+        (init_response->find("\"codeActionProvider\":true") != std::string::npos) ? "true" : "<missing>";
+    got += "\n";
+
     got += "semanticTokensProvider=";
     got += (init_response->find("\"semanticTokensProvider\"") != std::string::npos)
                ? "present"

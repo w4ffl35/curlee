@@ -3,4 +3,5 @@ definitionProvider=true
 hoverProvider=true
 completionProvider=present
 renameProvider=present
+codeActionProvider=true
 semanticTokensProvider=present
