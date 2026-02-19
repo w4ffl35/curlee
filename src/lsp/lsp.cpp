@@ -1175,6 +1175,142 @@ void find_exprs_in_stmt(const curlee::parser::Stmt& stmt, std::size_t offset,
         stmt.node);
 }
 
+void collect_let_names_in_stmt(const curlee::parser::Stmt& stmt,
+                               std::unordered_set<std::string>& out)
+{
+    std::visit(
+        [&](const auto& node)
+        {
+            using T = std::decay_t<decltype(node)>;
+            if constexpr (std::is_same_v<T, curlee::parser::LetStmt>)
+            {
+                out.insert(std::string(node.name));
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::IfStmt>)
+            {
+                for (const auto& inner : node.then_block->stmts)
+                {
+                    collect_let_names_in_stmt(inner, out);
+                }
+                if (node.else_block != nullptr)
+                {
+                    for (const auto& inner : node.else_block->stmts)
+                    {
+                        collect_let_names_in_stmt(inner, out);
+                    }
+                }
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::WhileStmt>)
+            {
+                for (const auto& inner : node.body->stmts)
+                {
+                    collect_let_names_in_stmt(inner, out);
+                }
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::MatchStmt>)
+            {
+                for (const auto& arm : node.arms)
+                {
+                    if (arm.pattern.payload_name.has_value())
+                    {
+                        out.insert(std::string(*arm.pattern.payload_name));
+                    }
+                    if (arm.body != nullptr)
+                    {
+                        for (const auto& inner : arm.body->stmts)
+                        {
+                            collect_let_names_in_stmt(inner, out);
+                        }
+                    }
+                }
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::BlockStmt>)
+            {
+                if (node.block != nullptr)
+                {
+                    for (const auto& inner : node.block->stmts)
+                    {
+                        collect_let_names_in_stmt(inner, out);
+                    }
+                }
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::UnsafeStmt>)
+            {
+                if (node.body != nullptr)
+                {
+                    for (const auto& inner : node.body->stmts)
+                    {
+                        collect_let_names_in_stmt(inner, out);
+                    }
+                }
+            }
+        },
+        stmt.node);
+}
+
+void append_completion_item(Json::Array& items, std::unordered_set<std::string>& seen,
+                            std::string label, double kind)
+{
+    if (!seen.insert(label).second)
+    {
+        return;
+    }
+
+    Json::Object item;
+    item["label"] = Json{std::move(label)};
+    item["kind"] = Json{kind};
+    items.push_back(Json{item});
+}
+
+Json completion_result_for(const Analysis& analysis, std::size_t offset)
+{
+    Json::Array items;
+    std::unordered_set<std::string> seen;
+
+    for (const auto& function : analysis.program.functions)
+    {
+        append_completion_item(items, seen, std::string(function.name), 3.0);
+    }
+    for (const auto& s : analysis.program.structs)
+    {
+        append_completion_item(items, seen, std::string(s.name), 7.0);
+    }
+    for (const auto& e : analysis.program.enums)
+    {
+        append_completion_item(items, seen, std::string(e.name), 13.0);
+    }
+
+    for (const auto& function : analysis.program.functions)
+    {
+        if (!span_contains(function.body.span, offset))
+        {
+            continue;
+        }
+
+        for (const auto& param : function.params)
+        {
+            append_completion_item(items, seen, std::string(param.name), 6.0);
+        }
+
+        std::unordered_set<std::string> local_names;
+        for (const auto& stmt : function.body.stmts)
+        {
+            collect_let_names_in_stmt(stmt, local_names);
+        }
+        for (const auto& name : local_names)
+        {
+            append_completion_item(items, seen, name, 6.0);
+        }
+
+        break;
+    }
+
+    Json::Object result;
+    result["isIncomplete"] = Json{false};
+    result["items"] = Json{items};
+    return Json{result};
+}
+
 std::string diagnostics_to_json(const std::vector<curlee::diag::Diagnostic>& diags,
                                 const curlee::source::LineMap& map)
 {
@@ -1231,6 +1367,9 @@ int main()
             capabilities["textDocumentSync"] = Json{1.0};
             capabilities["definitionProvider"] = Json{true};
             capabilities["hoverProvider"] = Json{true};
+            Json::Object completion_provider;
+            completion_provider["resolveProvider"] = Json{false};
+            capabilities["completionProvider"] = Json{completion_provider};
 
             Json::Object result;
             result["capabilities"] = Json{capabilities};
@@ -1333,7 +1472,8 @@ int main()
             continue;
         }
 
-        if (*method == "textDocument/definition" || *method == "textDocument/hover")
+        if (*method == "textDocument/definition" || *method == "textDocument/hover" ||
+            *method == "textDocument/completion")
         {
             const auto params = json_get_object(root, "params");
             if (!params.has_value())
@@ -1380,6 +1520,19 @@ int main()
             const auto analysis = analyze(file);
             if (!analysis.has_value())
             {
+                continue;
+            }
+
+            if (*method == "textDocument/completion")
+            {
+                Json::Object response;
+                response["jsonrpc"] = Json{std::string("2.0")};
+                if (id_it != root.end())
+                {
+                    response["id"] = id_it->second;
+                }
+                response["result"] = completion_result_for(*analysis, *offset_opt);
+                write_lsp_message(json_serialize(Json{response}));
                 continue;
             }
 

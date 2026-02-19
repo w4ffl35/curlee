@@ -816,6 +816,12 @@ int main()
                         "definition\",\"params\":{\"textDocument\":{\"uri\":\"") +
             uri + "\"},\"position\":{\"line\":0,\"character\":0}}}";
 
+        const std::string completion_at_foo =
+            std::string("{\"jsonrpc\":\"2.0\",\"id\":15,\"method\":\"textDocument/"
+                        "completion\",\"params\":{\"textDocument\":{\"uri\":\"") +
+            uri + "\"},\"position\":{\"line\":0,\"character\":" +
+            std::to_string(foo_call) + "}}}";
+
         const std::string shutdown =
             "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{}}";
         const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
@@ -844,6 +850,7 @@ int main()
         in_data += lsp_frame(definition_on_bar);
         in_data += lsp_frame(definition_no_id);
         in_data += lsp_frame(definition_no_use);
+        in_data += lsp_frame(completion_at_foo);
         in_data += lsp_frame(shutdown);
         in_data += lsp_frame(exit);
 
@@ -902,6 +909,10 @@ int main()
         {
             fail("expected hover response for id=10");
         }
+        if (out_str.find("\"id\":15") == std::string::npos)
+        {
+            fail("expected completion response for id=15");
+        }
         if (out_str.find("Content-Length:") == std::string::npos)
         {
             fail("expected framed LSP output");
@@ -917,6 +928,7 @@ int main()
             bool saw_hover_9_with_range = false;
             bool saw_hover_10_null = false;
             bool saw_hover_12_type = false;
+            bool saw_completion_15_with_foo = false;
 
             while (read_lsp_message(framed, payload))
             {
@@ -1005,6 +1017,40 @@ int main()
                     }
                     saw_hover_10_null = true;
                 }
+                else if (*id == 15)
+                {
+                    const auto result = json_get_object(root, "result");
+                    if (!result.has_value())
+                    {
+                        fail("expected completion id=15 to return object result");
+                    }
+
+                    const auto items = json_get_array(*result->as_object(), "items");
+                    if (!items.has_value())
+                    {
+                        fail("expected completion id=15 to include items array");
+                    }
+
+                    bool found_foo = false;
+                    for (const auto& item : *items->as_array())
+                    {
+                        if (!item.is_object())
+                        {
+                            continue;
+                        }
+                        const auto label = json_get_string(*item.as_object(), "label");
+                        if (label.has_value() && *label == "foo")
+                        {
+                            found_foo = true;
+                            break;
+                        }
+                    }
+                    if (!found_foo)
+                    {
+                        fail("expected completion id=15 to include foo label");
+                    }
+                    saw_completion_15_with_foo = true;
+                }
             }
 
             if (!saw_definition_5)
@@ -1026,6 +1072,10 @@ int main()
             if (!saw_hover_12_type)
             {
                 fail("expected to observe type hover response for id=12");
+            }
+            if (!saw_completion_15_with_foo)
+            {
+                fail("expected to observe completion response for id=15 with foo");
             }
         }
     }
