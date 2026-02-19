@@ -1544,7 +1544,8 @@ Json semantic_tokens_result_for(const Analysis& analysis, const std::string& tex
 }
 
 std::string diagnostics_to_json(const std::vector<curlee::diag::Diagnostic>& diags,
-                                const curlee::source::LineMap& map)
+                                const curlee::source::LineMap& map,
+                                std::string_view file_path)
 {
     std::string out = "[";
     for (std::size_t i = 0; i < diags.size(); ++i)
@@ -1555,14 +1556,24 @@ std::string diagnostics_to_json(const std::vector<curlee::diag::Diagnostic>& dia
         }
         const auto& d = diags[i];
         LspRange range{{0, 0}, {0, 0}};
+        std::string span_json = "null";
         if (d.span)
         {
             range = to_lsp_range(*d.span, map);
+            span_json = "{\"start\":" + std::to_string(d.span->start) +
+                        ",\"end\":" + std::to_string(d.span->end) + "}";
         }
         out += "{";
         out += "\"range\":" + lsp_range_to_json(range);
         out += ",\"severity\":" + std::to_string(lsp_severity(d.severity));
+        out += ",\"source\":\"curlee\"";
+        out += ",\"code\":\"curlee.diagnostic\"";
         out += ",\"message\":\"" + json_escape(d.message) + "\"";
+        out += ",\"data\":{";
+        out += "\"schema\":\"curlee.diag.v1\",";
+        out += "\"file\":\"" + json_escape(file_path) + "\",";
+        out += "\"span\":" + span_json;
+        out += "}";
         out += "}";
     }
     out += "]";
@@ -1716,7 +1727,8 @@ int main()
             std::ostringstream oss;
             oss << "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",";
             oss << "\"params\":{\"uri\":\"" << json_escape(*uri) << "\",";
-            oss << "\"diagnostics\":" << diagnostics_to_json(diagnostics, map) << "}}";
+            oss << "\"diagnostics\":" << diagnostics_to_json(diagnostics, map, file.path)
+                << "}}";
             write_lsp_message(oss.str());
             continue;
         }

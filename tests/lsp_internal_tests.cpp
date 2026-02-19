@@ -400,7 +400,7 @@ int main()
                                                  .message = "with span",
                                                  .span = curlee::source::Span{.start = 0, .end = 1},
                                                  .notes = {}});
-        const auto json = diagnostics_to_json(diags, map);
+        const auto json = diagnostics_to_json(diags, map, "/tmp/diag.curlee");
         if (json.find("no span") == std::string::npos ||
             json.find("with span") == std::string::npos)
         {

@@ -400,7 +400,7 @@ int main()
                                                  .message = "with span",
                                                  .span = curlee::source::Span{.start = 0, .end = 1},
                                                  .notes = {}});
-        const auto json = diagnostics_to_json(diags, map);
+        const auto json = diagnostics_to_json(diags, map, "/tmp/diag.curlee");
         if (json.find("no span") == std::string::npos ||
             json.find("with span") == std::string::npos)
         {
@@ -1270,6 +1270,29 @@ int main()
         if (diags.empty())
         {
             fail("expected diagnostics for invalid character");
+        }
+
+        const curlee::source::LineMap map(bad.contents);
+        const std::string json = diagnostics_to_json(diags, map, bad.path);
+        if (json.find("\"source\":\"curlee\"") == std::string::npos)
+        {
+            fail("expected diagnostics json to include source=curlee");
+        }
+        if (json.find("\"code\":\"curlee.diagnostic\"") == std::string::npos)
+        {
+            fail("expected diagnostics json to include stable code");
+        }
+        if (json.find("\"schema\":\"curlee.diag.v1\"") == std::string::npos)
+        {
+            fail("expected diagnostics json to include schema version");
+        }
+        if (json.find("\"file\":\"/tmp/bad.curlee\"") == std::string::npos)
+        {
+            fail("expected diagnostics json data to include source file path");
+        }
+        if (json.find("\"span\":{") == std::string::npos)
+        {
+            fail("expected diagnostics json data to include structured span");
         }
     }
 
