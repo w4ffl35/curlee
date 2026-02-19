@@ -221,5 +221,62 @@ int main()
         }
     }
 
+    // Ambiguous import diagnostics should be deterministic regardless of root declaration order.
+    {
+        const fs::path dir = make_temp_dir("ambiguous_deterministic_order");
+        const fs::path importing = dir / "workspace";
+        const fs::path entry = importing;
+        const fs::path root_a = dir / "root_a";
+        const fs::path root_b = dir / "root_b";
+
+        write_file(root_a / "pkg" / "util.curlee", "fn one() -> Int { return 1; }\n");
+        write_file(root_b / "pkg" / "util.curlee", "fn one() -> Int { return 2; }\n");
+
+        curlee::resolver::ModuleSearchOptions opts;
+        opts.importing_file_dir = importing;
+        opts.entry_dir = entry;
+        opts.allow_stdlib = true;
+        opts.stdlib_roots = {root_b, root_a};
+
+        const std::vector<std::string_view> import_path = {"pkg", "util"};
+        const auto got = curlee::resolver::resolve_module_path(import_path, opts);
+        if (got)
+        {
+            fail("expected ambiguous import to fail");
+        }
+
+        const auto& d = got.error();
+        if (d.message.find("ambiguous import") == std::string::npos)
+        {
+            fail("expected ambiguous import diagnostic message");
+        }
+
+        const std::string a_path = fs::absolute(root_a / "pkg" / "util.curlee").string();
+        const std::string b_path = fs::absolute(root_b / "pkg" / "util.curlee").string();
+        std::size_t a_index = std::string::npos;
+        std::size_t b_index = std::string::npos;
+
+        for (std::size_t i = 0; i < d.notes.size(); ++i)
+        {
+            if (d.notes[i].message.find(a_path) != std::string::npos)
+            {
+                a_index = i;
+            }
+            if (d.notes[i].message.find(b_path) != std::string::npos)
+            {
+                b_index = i;
+            }
+        }
+
+        if (a_index == std::string::npos || b_index == std::string::npos)
+        {
+            fail("expected ambiguous import notes to contain both matching module paths");
+        }
+        if (!(a_index < b_index))
+        {
+            fail("expected ambiguous import notes to be sorted deterministically");
+        }
+    }
+
     return 0;
 }
