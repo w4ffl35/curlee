@@ -409,6 +409,58 @@ int main()
     }
 
     {
+        // semantic_tokens_result_for: cover success and lex-failure paths.
+        const curlee::source::SourceFile file{
+            .path = "/tmp/semantic_ok.curlee",
+            .contents =
+                "struct S { x: Int; } enum E { V; } "
+                "fn f(p: Int) -> Int { let y: Int = p + 1; return y; }",
+        };
+
+        const auto a = analyze(file);
+        if (!a.has_value())
+        {
+            fail("expected analyze to succeed for semantic token helper test");
+        }
+
+        const curlee::source::LineMap map_ok(file.contents);
+        const Json ok = semantic_tokens_result_for(*a, file.contents, map_ok);
+        if (!ok.is_object())
+        {
+            fail("expected semantic token result to be object");
+        }
+        const auto data_ok = json_get_array(*ok.as_object(), "data");
+        if (!data_ok.has_value())
+        {
+            fail("expected semantic token result to include data array");
+        }
+        if (data_ok->as_array()->empty())
+        {
+            fail("expected semantic token data to be non-empty for valid source");
+        }
+        if ((data_ok->as_array()->size() % 5) != 0)
+        {
+            fail("expected semantic token data to be encoded in 5-tuples");
+        }
+
+        const curlee::source::LineMap map_bad("@");
+        const Json bad = semantic_tokens_result_for(*a, "@", map_bad);
+        if (!bad.is_object())
+        {
+            fail("expected semantic token lex-failure result to be object");
+        }
+        const auto data_bad = json_get_array(*bad.as_object(), "data");
+        if (!data_bad.has_value())
+        {
+            fail("expected semantic token lex-failure result to include data array");
+        }
+        if (!data_bad->as_array()->empty())
+        {
+            fail("expected semantic token data to be empty when lexing fails");
+        }
+    }
+
+    {
         // function_signature_to_string and find_function_by_name.
         curlee::parser::Function f;
         f.name = "foo";
