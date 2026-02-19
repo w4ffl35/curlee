@@ -335,6 +335,40 @@ class Checker
             return Type{.kind = TypeKind::Capability, .name = name.name};
         }
 
+        if (name.name == "Vec" || name.name == "Set")
+        {
+            if (!name.type_arg.has_value())
+            {
+                error_at(name.span, std::string(name.name) + " type requires one type argument");
+                return std::nullopt;
+            }
+
+            const auto& arg = *name.type_arg;
+            auto elem = core_type_from_name(arg);
+            if (!elem.has_value())
+            {
+                if (structs_.contains(arg))
+                {
+                    elem = Type{.kind = TypeKind::Struct, .name = arg};
+                }
+                else if (enums_.contains(arg))
+                {
+                    elem = Type{.kind = TypeKind::Enum, .name = arg};
+                }
+            }
+
+            if (!elem.has_value())
+            {
+                error_at(name.span,
+                         "unknown collection element type '" + std::string(arg) + "'");
+                return std::nullopt;
+            }
+
+            return Type{.kind = (name.name == "Vec") ? TypeKind::Vec : TypeKind::Set,
+                        .element_kind = elem->kind,
+                        .element_name = elem->name};
+        }
+
         const auto t = core_type_from_name(name.name);
         if (!t.has_value())
         {
@@ -350,6 +384,14 @@ class Checker
             error_at(name.span, "unknown type '" + std::string(name.name) + "'");
             return std::nullopt;
         }
+
+        if (name.type_arg.has_value())
+        {
+            error_at(name.span,
+                     "type '" + std::string(name.name) + "' does not take type arguments");
+            return std::nullopt;
+        }
+
         return *t;
     }
 

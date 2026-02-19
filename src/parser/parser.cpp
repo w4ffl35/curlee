@@ -415,7 +415,8 @@ class Parser
             return TypeName{.span =
                                 curlee::source::Span{.start = kw.span.start, .end = last.span.end},
                             .is_capability = true,
-                            .name = name};
+                            .name = name,
+                            .type_arg = std::nullopt};
         }
 
         if (!check(TokenKind::Identifier))
@@ -423,7 +424,28 @@ class Parser
             return error_at(peek(), "expected type name");
         }
         const Token t = advance();
-        return TypeName{.span = t.span, .is_capability = false, .name = t.lexeme};
+        if (match(TokenKind::Less))
+        {
+            if (!check(TokenKind::Identifier))
+            {
+                return error_at(peek(), "expected type name after '<'");
+            }
+            const Token arg = advance();
+            if (auto err = consume(TokenKind::Greater, "expected '>' after type argument");
+                err.has_value())
+            {
+                return *err;
+            }
+            const Token gt = previous();
+            return TypeName{.span = curlee::source::Span{.start = t.span.start, .end = gt.span.end},
+                            .is_capability = false,
+                            .name = t.lexeme,
+                            .type_arg = arg.lexeme};
+        }
+        return TypeName{.span = t.span,
+                        .is_capability = false,
+                        .name = t.lexeme,
+                        .type_arg = std::nullopt};
     }
 
     [[nodiscard]] std::variant<ImportDecl, curlee::diag::Diagnostic> parse_import()

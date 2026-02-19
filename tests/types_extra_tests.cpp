@@ -1629,6 +1629,26 @@ fn main(v: E) -> Unit {
         expect_diag(
             run_tc("enum E { A(Int); } fn main() -> Int { let e: E = E::A(1); return variant_unwrap(e, E::B); }"),
             "unknown variant 'B' for enum 'E'");
+
+        expect_ok(run_tc("fn main() -> Unit { let v: Vec<Bool> = __vec_new_bool(4); return; }"));
+
+        expect_ok(run_tc("fn main() -> Unit { let s: Set<Int> = __set_new_int(); return; }"));
+
+        expect_diag(
+            run_tc("fn main() -> Unit { let v: Vec<Int> = __vec_new_bool(4); return; }"),
+            "type mismatch in let");
+
+        expect_diag(run_tc("fn main() -> Unit { let v: Vec = __vec_new_int(4); return; }"),
+                    "Vec type requires one type argument");
+
+        expect_diag(run_tc("fn main() -> Unit { let s: Set = __set_new_int(); return; }"),
+                    "Set type requires one type argument");
+
+        expect_diag(run_tc("fn main() -> Unit { let x: Int<Bool> = 1; return; }"),
+                    "type 'Int' does not take type arguments");
+
+        expect_diag(run_tc("fn main() -> Unit { let v: Vec<Nope> = __vec_new_int(4); return; }"),
+                    "unknown collection element type 'Nope'");
     }
 
     std::cout << "OK\n";
