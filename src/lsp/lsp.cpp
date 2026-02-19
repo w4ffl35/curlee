@@ -1398,6 +1398,151 @@ Json rename_result_for(const Analysis& analysis, const std::string& uri, const s
     return Json{result};
 }
 
+bool token_kind_is_keyword(const curlee::lexer::TokenKind kind)
+{
+    using curlee::lexer::TokenKind;
+    switch (kind)
+    {
+    case TokenKind::KwFn:
+    case TokenKind::KwLet:
+    case TokenKind::KwIf:
+    case TokenKind::KwElse:
+    case TokenKind::KwWhile:
+    case TokenKind::KwReturn:
+    case TokenKind::KwTrue:
+    case TokenKind::KwFalse:
+    case TokenKind::KwRequires:
+    case TokenKind::KwEnsures:
+    case TokenKind::KwInvariant:
+    case TokenKind::KwWhere:
+    case TokenKind::KwUnsafe:
+    case TokenKind::KwCap:
+    case TokenKind::KwImport:
+    case TokenKind::KwAs:
+    case TokenKind::KwStruct:
+    case TokenKind::KwEnum:
+    case TokenKind::KwMatch:
+        return true;
+    default:
+        return false;
+    }
+}
+
+Json semantic_tokens_result_for(const Analysis& analysis, const std::string& text,
+                               const curlee::source::LineMap& map)
+{
+    constexpr double kSemanticTypeKeyword = 0.0;
+    constexpr double kSemanticTypeFunction = 1.0;
+    constexpr double kSemanticTypeVariable = 2.0;
+    constexpr double kSemanticTypeType = 3.0;
+    constexpr double kSemanticTypeNumber = 4.0;
+    constexpr double kSemanticTypeString = 5.0;
+    constexpr double kNoModifiers = 0.0;
+
+    Json::Array encoded;
+
+    const auto lexed = curlee::lexer::lex(text);
+    if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+    {
+        Json::Object result;
+        result["data"] = Json{encoded};
+        return Json{result};
+    }
+
+    std::unordered_set<std::string> function_names;
+    std::unordered_set<std::string> type_names;
+    std::unordered_set<std::string> variable_names;
+
+    for (const auto& function : analysis.program.functions)
+    {
+        function_names.insert(std::string(function.name));
+        for (const auto& param : function.params)
+        {
+            variable_names.insert(std::string(param.name));
+        }
+        for (const auto& stmt : function.body.stmts)
+        {
+            collect_let_names_in_stmt(stmt, variable_names);
+        }
+    }
+    for (const auto& s : analysis.program.structs)
+    {
+        type_names.insert(std::string(s.name));
+    }
+    for (const auto& e : analysis.program.enums)
+    {
+        type_names.insert(std::string(e.name));
+    }
+
+    std::size_t prev_line = 0;
+    std::size_t prev_char = 0;
+
+    const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+    for (const auto& token : tokens)
+    {
+        if (token.kind == curlee::lexer::TokenKind::Eof || token.span.end <= token.span.start)
+        {
+            continue;
+        }
+
+        std::optional<double> token_type;
+        if (token_kind_is_keyword(token.kind))
+        {
+            token_type = kSemanticTypeKeyword;
+        }
+        else if (token.kind == curlee::lexer::TokenKind::IntLiteral)
+        {
+            token_type = kSemanticTypeNumber;
+        }
+        else if (token.kind == curlee::lexer::TokenKind::StringLiteral)
+        {
+            token_type = kSemanticTypeString;
+        }
+        else if (token.kind == curlee::lexer::TokenKind::Identifier)
+        {
+            const std::string label(token.lexeme);
+            if (function_names.contains(label))
+            {
+                token_type = kSemanticTypeFunction;
+            }
+            else if (type_names.contains(label))
+            {
+                token_type = kSemanticTypeType;
+            }
+            else
+            {
+                token_type = kSemanticTypeVariable;
+            }
+        }
+
+        if (!token_type.has_value())
+        {
+            continue;
+        }
+
+        const auto start_lc = map.offset_to_line_col(token.span.start);
+        const std::size_t line = start_lc.line - 1;
+        const std::size_t ch = start_lc.col - 1;
+        const std::size_t len = token.span.end - token.span.start;
+
+        const std::size_t delta_line = line - prev_line;
+        const std::size_t delta_char = delta_line == 0 ? (ch - prev_char) : ch;
+
+        encoded.push_back(Json{static_cast<double>(delta_line)});
+        encoded.push_back(Json{static_cast<double>(delta_char)});
+        encoded.push_back(Json{static_cast<double>(len)});
+        encoded.push_back(Json{*token_type});
+        encoded.push_back(Json{kNoModifiers});
+
+        prev_line = line;
+        prev_char = ch;
+    }
+
+    Json::Object result;
+    result["data"] = Json{encoded};
+    return Json{result};
+}
+
 std::string diagnostics_to_json(const std::vector<curlee::diag::Diagnostic>& diags,
                                 const curlee::source::LineMap& map)
 {
@@ -1458,6 +1603,21 @@ int main()
             Json::Object completion_provider;
             completion_provider["resolveProvider"] = Json{false};
             capabilities["completionProvider"] = Json{completion_provider};
+            Json::Object semantic_tokens_legend;
+            Json::Array semantic_token_types;
+            semantic_token_types.push_back(Json{std::string("keyword")});
+            semantic_token_types.push_back(Json{std::string("function")});
+            semantic_token_types.push_back(Json{std::string("variable")});
+            semantic_token_types.push_back(Json{std::string("type")});
+            semantic_token_types.push_back(Json{std::string("number")});
+            semantic_token_types.push_back(Json{std::string("string")});
+            semantic_tokens_legend["tokenTypes"] = Json{semantic_token_types};
+            semantic_tokens_legend["tokenModifiers"] = Json{Json::Array{}};
+
+            Json::Object semantic_tokens_provider;
+            semantic_tokens_provider["legend"] = Json{semantic_tokens_legend};
+            semantic_tokens_provider["full"] = Json{true};
+            capabilities["semanticTokensProvider"] = Json{semantic_tokens_provider};
 
             Json::Object result;
             result["capabilities"] = Json{capabilities};
@@ -1557,6 +1717,54 @@ int main()
             oss << "\"params\":{\"uri\":\"" << json_escape(*uri) << "\",";
             oss << "\"diagnostics\":" << diagnostics_to_json(diagnostics, map) << "}}";
             write_lsp_message(oss.str());
+            continue;
+        }
+
+        if (*method == "textDocument/semanticTokens/full")
+        {
+            const auto params = json_get_object(root, "params");
+            if (!params.has_value())
+            {
+                continue;
+            }
+
+            const auto text_doc = json_get_object(*params->as_object(), "textDocument");
+            if (!text_doc.has_value())
+            {
+                continue;
+            }
+
+            const auto uri = json_get_string(*text_doc->as_object(), "uri");
+            if (!uri.has_value())
+            {
+                continue;
+            }
+
+            const auto doc_it = documents.find(*uri);
+            if (doc_it == documents.end())
+            {
+                continue;
+            }
+            const auto& doc = doc_it->second;
+
+            curlee::source::SourceFile file;
+            file.path = uri_to_path(*uri);
+            file.contents = doc.text;
+            const auto analysis = analyze(file);
+            if (!analysis.has_value())
+            {
+                continue;
+            }
+
+            curlee::source::LineMap map(doc.text);
+            Json::Object response;
+            response["jsonrpc"] = Json{std::string("2.0")};
+            if (id_it != root.end())
+            {
+                response["id"] = id_it->second;
+            }
+            response["result"] = semantic_tokens_result_for(*analysis, doc.text, map);
+            write_lsp_message(json_serialize(Json{response}));
             continue;
         }
 

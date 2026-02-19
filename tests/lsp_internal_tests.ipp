@@ -828,6 +828,11 @@ int main()
             uri + "\"},\"position\":{\"line\":0,\"character\":" +
             std::to_string(foo_call) + "},\"newName\":\"foo_renamed\"}}";
 
+        const std::string semantic_tokens_full =
+            std::string("{\"jsonrpc\":\"2.0\",\"id\":17,\"method\":\"textDocument/"
+                        "semanticTokens/full\",\"params\":{\"textDocument\":{\"uri\":\"") +
+            uri + "\"}}}";
+
         const std::string shutdown =
             "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{}}";
         const std::string exit = "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}";
@@ -858,6 +863,7 @@ int main()
         in_data += lsp_frame(definition_no_use);
         in_data += lsp_frame(completion_at_foo);
         in_data += lsp_frame(rename_on_foo);
+        in_data += lsp_frame(semantic_tokens_full);
         in_data += lsp_frame(shutdown);
         in_data += lsp_frame(exit);
 
@@ -924,6 +930,14 @@ int main()
         {
             fail("expected rename response for id=16");
         }
+        if (out_str.find("\"id\":17") == std::string::npos)
+        {
+            fail("expected semantic tokens response for id=17");
+        }
+        if (out_str.find("semanticTokensProvider") == std::string::npos)
+        {
+            fail("expected initialize response to advertise semanticTokensProvider");
+        }
         if (out_str.find("Content-Length:") == std::string::npos)
         {
             fail("expected framed LSP output");
@@ -941,6 +955,8 @@ int main()
             bool saw_hover_12_type = false;
             bool saw_completion_15_with_foo = false;
             bool saw_rename_16_with_edits = false;
+            bool saw_initialize_1_with_semantic_provider = false;
+            bool saw_semantic_17_with_data = false;
 
             while (read_lsp_message(framed, payload))
             {
@@ -971,6 +987,42 @@ int main()
                         fail("expected definition id=5 to include uri+range");
                     }
                     saw_definition_5 = true;
+                }
+                else if (*id == 1)
+                {
+                    const auto result = json_get_object(root, "result");
+                    if (!result.has_value())
+                    {
+                        fail("expected initialize id=1 to return object result");
+                    }
+
+                    const auto capabilities =
+                        json_get_object(*result->as_object(), "capabilities");
+                    if (!capabilities.has_value())
+                    {
+                        fail("expected initialize id=1 to include capabilities");
+                    }
+
+                    const auto semantic_provider =
+                        json_get_object(*capabilities->as_object(), "semanticTokensProvider");
+                    if (!semantic_provider.has_value())
+                    {
+                        fail("expected initialize id=1 capabilities to include semanticTokensProvider");
+                    }
+
+                    const auto legend = json_get_object(*semantic_provider->as_object(), "legend");
+                    if (!legend.has_value())
+                    {
+                        fail("expected semanticTokensProvider to include legend");
+                    }
+
+                    const auto token_types = json_get_array(*legend->as_object(), "tokenTypes");
+                    if (!token_types.has_value() || token_types->as_array()->empty())
+                    {
+                        fail("expected semanticTokensProvider legend to include tokenTypes");
+                    }
+
+                    saw_initialize_1_with_semantic_provider = true;
                 }
                 else if (*id == 14)
                 {
@@ -1104,6 +1156,30 @@ int main()
 
                     saw_rename_16_with_edits = true;
                 }
+                else if (*id == 17)
+                {
+                    const auto result = json_get_object(root, "result");
+                    if (!result.has_value())
+                    {
+                        fail("expected semantic tokens id=17 to return object result");
+                    }
+
+                    const auto data = json_get_array(*result->as_object(), "data");
+                    if (!data.has_value())
+                    {
+                        fail("expected semantic tokens id=17 to include data array");
+                    }
+                    if (data->as_array()->empty())
+                    {
+                        fail("expected semantic tokens id=17 data array to be non-empty");
+                    }
+                    if ((data->as_array()->size() % 5) != 0)
+                    {
+                        fail("expected semantic tokens id=17 data size to be a multiple of 5");
+                    }
+
+                    saw_semantic_17_with_data = true;
+                }
             }
 
             if (!saw_definition_5)
@@ -1133,6 +1209,14 @@ int main()
             if (!saw_rename_16_with_edits)
             {
                 fail("expected to observe rename response for id=16 with edits");
+            }
+            if (!saw_initialize_1_with_semantic_provider)
+            {
+                fail("expected to observe initialize response id=1 with semantic tokens provider");
+            }
+            if (!saw_semantic_17_with_data)
+            {
+                fail("expected to observe semantic tokens response for id=17 with data");
             }
         }
     }

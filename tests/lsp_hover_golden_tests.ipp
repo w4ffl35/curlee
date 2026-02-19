@@ -523,6 +523,12 @@ static bool run_initialize_capabilities_golden_case(const fs::path& data_dir,
     got += (init_response->find("\"renameProvider\"") != std::string::npos) ? "present" : "absent";
     got += "\n";
 
+    got += "semanticTokensProvider=";
+    got += (init_response->find("\"semanticTokensProvider\"") != std::string::npos)
+               ? "present"
+               : "absent";
+    got += "\n";
+
     if (got != expected)
     {
         std::cerr << "GOLDEN MISMATCH: initialize_capabilities.expected\n";
