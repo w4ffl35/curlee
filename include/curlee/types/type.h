@@ -24,6 +24,7 @@ enum class TypeKind
     Capability,
     Vec,
     Set,
+    Result,
     Struct,
     Enum,
 };
@@ -63,6 +64,10 @@ struct Type
         return a.element_kind == b.element_kind && a.element_name == b.element_name;
     }
     if (a.kind == TypeKind::Set)
+    {
+        return a.element_kind == b.element_kind && a.element_name == b.element_name;
+    }
+    if (a.kind == TypeKind::Result)
     {
         return a.element_kind == b.element_kind && a.element_name == b.element_name;
     }
@@ -115,6 +120,8 @@ struct CapabilityType
         return "Vec";
     case TypeKind::Set:
         return "Set";
+    case TypeKind::Result:
+        return "Result";
     case TypeKind::Struct:
         return "Struct";
     case TypeKind::Enum:
@@ -137,6 +144,10 @@ struct CapabilityType
     if (t.kind == TypeKind::Set)
     {
         return "Set";
+    }
+    if (t.kind == TypeKind::Result)
+    {
+        return "Result";
     }
     return to_string(t.kind);
 }

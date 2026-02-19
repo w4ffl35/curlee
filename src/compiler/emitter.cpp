@@ -59,7 +59,8 @@ static bool is_reserved_builtin_name(std::string_view name)
         "__vec_new_int",   "__vec_len_int",    "__vec_push_int",   "__vec_get_int",
         "__vec_set_int",   "__vec_new_bool",   "__vec_len_bool",   "__vec_push_bool",
         "__vec_get_bool",  "__vec_set_bool",   "__set_new_int",    "__set_has_int",
-        "__set_insert_int", // GCOVR_EXCL_LINE
+        "__set_insert_int", "ok", "err", "result_is_ok", "result_unwrap_ok",
+        "result_unwrap_err", // GCOVR_EXCL_LINE
     }; // GCOVR_EXCL_LINE
     return reserved.contains(name);
 }
@@ -1094,6 +1095,77 @@ class Emitter
             if (callee_name->name == "__set_insert_int")
             {
                 emit_intrinsic(OpCode::SetInsertInt, 2, "__set_insert_int");
+                return;
+            }
+
+            if (callee_name->name == "ok")
+            {
+                if (expr.args.size() != 1)
+                {
+                    diags_.push_back(error_at(span, "ok expects exactly 1 argument(s)"));
+                    return;
+                }
+                emit_enum_constructor("Result", "Ok", &expr.args[0], span);
+                return;
+            }
+
+            if (callee_name->name == "err")
+            {
+                if (expr.args.size() != 2)
+                {
+                    diags_.push_back(error_at(span, "err expects exactly 2 argument(s)"));
+                    return;
+                }
+                emit_expr(expr.args[0]);
+                if (!diags_.empty())
+                {
+                    return;
+                }
+                chunk_.emit(OpCode::Pop, span);
+                emit_enum_constructor("Result", "Err", &expr.args[1], span);
+                return;
+            }
+
+            const auto emit_result_tag_op = [&](OpCode op,
+                                                std::string_view variant,
+                                                std::string_view display_name) -> bool
+            {
+                if (expr.args.size() != 1)
+                {
+                    diags_.push_back(error_at(span, std::string(display_name) +
+                                                        " expects exactly 1 argument(s)"));
+                    return true;
+                }
+
+                emit_expr(expr.args[0]);
+                if (!diags_.empty())
+                {
+                    return true;
+                }
+
+                const auto enum_idx = emit_string_constant("Result", span, display_name);
+                const auto variant_idx = emit_string_constant(variant, span, display_name);
+                chunk_.emit(op, span);
+                chunk_.emit_u16(enum_idx, span);
+                chunk_.emit_u16(variant_idx, span);
+                return true;
+            };
+
+            if (callee_name->name == "result_is_ok")
+            {
+                emit_result_tag_op(OpCode::EnumIs, "Ok", "result_is_ok");
+                return;
+            }
+
+            if (callee_name->name == "result_unwrap_ok")
+            {
+                emit_result_tag_op(OpCode::EnumUnwrap, "Ok", "result_unwrap_ok");
+                return;
+            }
+
+            if (callee_name->name == "result_unwrap_err")
+            {
+                emit_result_tag_op(OpCode::EnumUnwrap, "Err", "result_unwrap_err");
                 return;
             }
 

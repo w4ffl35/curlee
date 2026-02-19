@@ -291,6 +291,30 @@ fn main() -> Int {
     }
 
     {
+        const std::string source =
+            "fn main() -> Int { let r: Result<Int> = ok(41); if (result_is_ok(r)) { return result_unwrap_ok(r) + 1; } return 0; }";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(42)))
+        {
+            fail("expected Result ok path to equal 42");
+        }
+    }
+
+    {
+        const std::string source =
+            "fn main() -> String { let r: Result<Int> = err(0, \"boom\"); return result_unwrap_err(r); }";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::string_v("boom")))
+        {
+            fail("expected Result err path to return boom");
+        }
+    }
+
+    {
         const std::string source = "fn add(x: Int, y: Int) -> Int { return x + y; } fn main() -> "
                                    "Int { return add(1, 2); }";
 

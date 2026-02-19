@@ -58,7 +58,8 @@ static bool is_reserved_builtin_name(std::string_view name)
         "__vec_new_int",   "__vec_len_int",    "__vec_push_int",   "__vec_get_int",
         "__vec_set_int",   "__vec_new_bool",   "__vec_len_bool",   "__vec_push_bool",
         "__vec_get_bool",  "__vec_set_bool",   "__set_new_int",    "__set_has_int",
-        "__set_insert_int",
+        "__set_insert_int", "ok", "err", "result_is_ok", "result_unwrap_ok",
+        "result_unwrap_err",
     }; // GCOVR_EXCL_LINE
     return reserved.contains(name);
 }
@@ -494,7 +495,7 @@ class Checker
             return Type{.kind = TypeKind::TypeParam, .name = name.name};
         }
 
-        if (name.name == "Vec" || name.name == "Set")
+        if (name.name == "Vec" || name.name == "Set" || name.name == "Result")
         {
             if (!name.type_arg.has_value())
             {
@@ -533,7 +534,17 @@ class Checker
                 return std::nullopt;
             }
 
-            return Type{.kind = (name.name == "Vec") ? TypeKind::Vec : TypeKind::Set,
+            TypeKind container_kind = TypeKind::Vec;
+            if (name.name == "Set")
+            {
+                container_kind = TypeKind::Set;
+            }
+            else if (name.name == "Result")
+            {
+                container_kind = TypeKind::Result;
+            }
+
+            return Type{.kind = container_kind,
                         .element_kind = elem->kind,
                         .element_name = elem->name};
         }
@@ -1354,6 +1365,18 @@ class Checker
             return std::nullopt;
         }
 
+        const auto check_builtin_arity = [&](std::size_t arity,
+                                             std::string_view name) -> bool
+        {
+            if (e.args.size() != arity)
+            {
+                error_at(span, std::string(name) + " expects exactly " + std::to_string(arity) +
+                                   " argument(s)");
+                return false;
+            }
+            return true;
+        };
+
         if (callee_name == "print")
         {
             if (e.args.size() != 1)
@@ -1378,17 +1401,110 @@ class Checker
             return Type{.kind = TypeKind::Unit};
         }
 
-        const auto check_builtin_arity = [&](std::size_t arity,
-                                             std::string_view name) -> bool
+        if (callee_name == "ok")
         {
-            if (e.args.size() != arity)
+            if (!check_builtin_arity(1, callee_name))
             {
-                error_at(span, std::string(name) + " expects exactly " + std::to_string(arity) +
-                                   " argument(s)");
-                return false;
+                return std::nullopt;
             }
-            return true;
-        };
+
+            const auto value_t = check_expr(e.args[0]);
+            if (!value_t.has_value())
+            {
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Result,
+                        .element_kind = value_t->kind,
+                        .element_name = value_t->name};
+        }
+
+        if (callee_name == "err")
+        {
+            if (!check_builtin_arity(2, callee_name))
+            {
+                return std::nullopt;
+            }
+
+            const auto sample_t = check_expr(e.args[0]);
+            const auto message_t = check_expr(e.args[1]);
+            if (!sample_t.has_value() || !message_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (message_t->kind != TypeKind::String)
+            {
+                error_at(span, "err message must be String");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Result,
+                        .element_kind = sample_t->kind,
+                        .element_name = sample_t->name};
+        }
+
+        if (callee_name == "result_is_ok")
+        {
+            if (!check_builtin_arity(1, callee_name))
+            {
+                return std::nullopt;
+            }
+
+            const auto result_t = check_expr(e.args[0]);
+            if (!result_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (result_t->kind != TypeKind::Result)
+            {
+                error_at(span, "result_is_ok expects a Result value");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Bool};
+        }
+
+        if (callee_name == "result_unwrap_ok")
+        {
+            if (!check_builtin_arity(1, callee_name))
+            {
+                return std::nullopt;
+            }
+
+            const auto result_t = check_expr(e.args[0]);
+            if (!result_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (result_t->kind != TypeKind::Result || !result_t->element_kind.has_value())
+            {
+                error_at(span, "result_unwrap_ok expects a Result value");
+                return std::nullopt;
+            }
+
+            return Type{.kind = *result_t->element_kind, .name = result_t->element_name};
+        }
+
+        if (callee_name == "result_unwrap_err")
+        {
+            if (!check_builtin_arity(1, callee_name))
+            {
+                return std::nullopt;
+            }
+
+            const auto result_t = check_expr(e.args[0]);
+            if (!result_t.has_value())
+            {
+                return std::nullopt;
+            }
+            if (result_t->kind != TypeKind::Result)
+            {
+                error_at(span, "result_unwrap_err expects a Result value");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::String};
+        }
 
         if (callee_name == "__read_line")
         {

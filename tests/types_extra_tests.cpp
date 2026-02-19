@@ -1663,6 +1663,19 @@ fn main(v: E) -> Unit {
 
         expect_diag(run_tc("struct Box<T> { value: T; } fn main() -> Unit { let b: Box<Int> = Box<Int>{ value: false }; return; }"),
                 "field 'value' type mismatch: expected Int, got Bool");
+
+        expect_ok(run_tc("fn main() -> Int { let r: Result<Int> = ok(7); if (result_is_ok(r)) { return result_unwrap_ok(r); } return 0; }"));
+
+        expect_ok(run_tc("fn main() -> String { let r: Result<Int> = err(0, \"bad\"); return result_unwrap_err(r); }"));
+
+        expect_diag(run_tc("fn main() -> Unit { let r: Result<Int> = ok(false); return; }"),
+                "type mismatch in let");
+
+        expect_diag(run_tc("fn main() -> Unit { let r: Result<Int> = err(0, 1); return; }"),
+                "err message must be String");
+
+        expect_diag(run_tc("fn main() -> Unit { let x: Int = 1; result_is_ok(x); return; }"),
+                "result_is_ok expects a Result value");
     }
 
     std::cout << "OK\n";
