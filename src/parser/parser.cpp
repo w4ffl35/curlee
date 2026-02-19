@@ -1863,6 +1863,14 @@ class Parser
     [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic>
     parse_struct_literal_after_name(const Token& type_name)
     {
+        return parse_struct_literal_after_name(type_name, std::nullopt, type_name.span);
+    }
+
+    [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic>
+    parse_struct_literal_after_name(const Token& type_name,
+                                    std::optional<std::string_view> type_arg,
+                                    curlee::source::Span type_span)
+    {
         if (auto err = consume(TokenKind::LBrace, "expected '{' to start struct literal");
             err.has_value())
         {
@@ -1934,8 +1942,12 @@ class Parser
         const Token rbrace = previous();
 
         Expr expr;
-        expr.span = span_cover(type_name.span, rbrace.span);
-        expr.node = StructLiteralExpr{.type_name = type_name.lexeme, .fields = std::move(fields)};
+        expr.span = span_cover(type_span, rbrace.span);
+        expr.node = StructLiteralExpr{
+            .type_name = type_name.lexeme,
+            .type_arg = type_arg,
+            .fields = std::move(fields),
+        };
         return expr;
     }
 
@@ -1987,7 +1999,32 @@ class Parser
 
             if (check(TokenKind::LBrace))
             {
-                return parse_struct_literal_after_name(name);
+                return parse_struct_literal_after_name(name, std::nullopt, name.span);
+            }
+
+            if (check(TokenKind::Less))
+            {
+                const std::size_t maybe_generic_pos = pos_;
+                (void)advance(); // '<'
+
+                if (check(TokenKind::Identifier))
+                {
+                    const Token type_arg = advance();
+                    if (check(TokenKind::Greater))
+                    {
+                        const Token gt = advance();
+                        if (check(TokenKind::LBrace))
+                        {
+                            return parse_struct_literal_after_name(
+                                name,
+                                type_arg.lexeme,
+                                curlee::source::Span{.start = name.span.start,
+                                                     .end = gt.span.end});
+                        }
+                    }
+                }
+
+                pos_ = maybe_generic_pos;
             }
 
             Expr expr;
@@ -2365,7 +2402,12 @@ class Dumper
 
     void dump_expr_node(const StructLiteralExpr& e)
     {
-        out_ << e.type_name << "{";
+        out_ << e.type_name;
+        if (e.type_arg.has_value())
+        {
+            out_ << "<" << *e.type_arg << ">";
+        }
+        out_ << "{";
         for (std::size_t i = 0; i < e.fields.size(); ++i)
         {
             const auto& f = e.fields[i];

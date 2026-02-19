@@ -279,6 +279,18 @@ fn main() -> Int {
     }
 
     {
+        const std::string source =
+            "struct Box<T> { value: T; } fn main() -> Int { let b: Box<Int> = Box<Int>{ value: 41 }; return b.value + 1; }";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(42)))
+        {
+            fail("expected generic struct literal/member access to equal 42");
+        }
+    }
+
+    {
         const std::string source = "fn add(x: Int, y: Int) -> Int { return x + y; } fn main() -> "
                                    "Int { return add(1, 2); }";
 

@@ -236,6 +236,7 @@ fn main() -> Unit {
 }
 fn id<T>(x: T) -> T { return x; }
 fn main() -> Unit {
+    let b: Box<Int> = Box<Int>{ value: 1 };
   return;
 }
 )";
@@ -262,6 +263,10 @@ fn main() -> Unit {
         if (dumped.find("fn id<T>(x: T) -> T") == std::string::npos)
         {
             fail("dump missing generic function declaration");
+        }
+        if (dumped.find("Box<Int>{ value: 1 }") == std::string::npos)
+        {
+            fail("dump missing generic struct literal");
         }
     }
 

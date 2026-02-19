@@ -1,6 +1,7 @@
 #include <cassert>
 #include <curlee/parser/ast.h>
 #include <curlee/types/type_check.h>
+#include <deque>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -166,6 +167,12 @@ class Checker
         std::unordered_map<std::string_view, Type> fields;
     };
 
+    struct StructTemplateInfo
+    {
+        std::string_view type_param;
+        std::unordered_map<std::string_view, Type> field_templates;
+    };
+
     struct EnumInfo
     {
         struct VariantInfo
@@ -177,8 +184,99 @@ class Checker
     };
 
     std::unordered_map<std::string_view, StructInfo> structs_;
+    std::unordered_map<std::string_view, StructTemplateInfo> struct_templates_;
     std::unordered_map<std::string_view, EnumInfo> enums_;
     std::unordered_set<std::string_view> current_type_params_;
+    std::deque<std::string> owned_strings_;
+
+    [[nodiscard]] std::string_view intern_string(std::string value)
+    {
+        owned_strings_.push_back(std::move(value));
+        return owned_strings_.back();
+    }
+
+    [[nodiscard]] static std::string render_type_name(const Type& t)
+    {
+        if (t.kind == TypeKind::Vec || t.kind == TypeKind::Set)
+        {
+            if (!t.element_kind.has_value())
+            {
+                return std::string(to_string(t.kind));
+            }
+
+            const Type elem{.kind = *t.element_kind, .name = t.element_name};
+            return std::string(to_string(t.kind)) + "<" + render_type_name(elem) + ">";
+        }
+
+        return std::string(to_string(t));
+    }
+
+    [[nodiscard]] static Type substitute_type_param(const Type& in, std::string_view type_param,
+                                                    const Type& replacement)
+    {
+        if (in.kind == TypeKind::TypeParam && in.name == type_param)
+        {
+            return replacement;
+        }
+
+        if (in.kind == TypeKind::Vec || in.kind == TypeKind::Set)
+        {
+            if (!in.element_kind.has_value())
+            {
+                return in;
+            }
+
+            const Type element_type{.kind = *in.element_kind, .name = in.element_name};
+            const auto substituted = substitute_type_param(element_type, type_param, replacement);
+
+            Type out = in;
+            out.element_kind = substituted.kind;
+            out.element_name = substituted.name;
+            return out;
+        }
+
+        return in;
+    }
+
+    [[nodiscard]] std::optional<std::string_view> ensure_struct_instantiated(
+        std::string_view template_name,
+        const Type& type_arg,
+        Span span
+    )
+    {
+        const auto template_it = struct_templates_.find(template_name);
+        if (template_it == struct_templates_.end())
+        {
+            return std::nullopt;
+        }
+
+        const std::string inst_name = std::string(template_name) + "<" + render_type_name(type_arg) +
+                                      ">";
+        const auto inst_name_view = intern_string(inst_name);
+
+        if (structs_.contains(inst_name_view))
+        {
+            return inst_name_view;
+        }
+
+        StructInfo info;
+        for (const auto& [field_name, field_type_template] : template_it->second.field_templates)
+        {
+            info.fields.emplace(
+                field_name,
+                substitute_type_param(field_type_template, template_it->second.type_param, type_arg));
+        }
+
+        const auto [_, inserted] = structs_.emplace(inst_name_view, std::move(info));
+        if (!inserted)
+        {
+            error_at(span,
+                     "failed to instantiate generic struct '" + std::string(template_name) + "'");
+            return std::nullopt;
+        }
+
+        return inst_name_view;
+    }
 
     void collect_structs_and_enums(const curlee::parser::Program& program)
     {
@@ -186,17 +284,33 @@ class Checker
         for (const auto& s : program.structs)
         {
             // Note: enums_ is empty during this first structs-only pass.
-            if (structs_.contains(s.name))
+            if (structs_.contains(s.name) || struct_templates_.contains(s.name))
             {
                 error_at(s.span, "duplicate type name '" + std::string(s.name) + "'");
                 continue;
             }
-            structs_.emplace(s.name, StructInfo{});
+
+            if (s.type_params.empty())
+            {
+                structs_.emplace(s.name, StructInfo{});
+                continue;
+            }
+
+            if (s.type_params.size() != 1)
+            {
+                error_at(s.span, "generic structs currently support exactly one type parameter");
+                continue;
+            }
+
+            StructTemplateInfo tmpl;
+            tmpl.type_param = s.type_params.front();
+            struct_templates_.emplace(s.name, std::move(tmpl));
         }
 
         for (const auto& e : program.enums)
         {
-            if (structs_.contains(e.name) || enums_.contains(e.name))
+            if (structs_.contains(e.name) || struct_templates_.contains(e.name) ||
+                enums_.contains(e.name))
             {
                 error_at(e.span, "duplicate type name '" + std::string(e.name) + "'");
                 continue;
@@ -207,20 +321,43 @@ class Checker
         // Second pass: resolve field/variant types.
         for (const auto& s : program.structs)
         {
-            auto it = structs_.find(s.name);
-            if (it == structs_.end()) // GCOVR_EXCL_LINE
+            if (s.type_params.empty())
             {
-                continue; // GCOVR_EXCL_LINE
-            }
+                auto it = structs_.find(s.name);
+                if (it == structs_.end()) // GCOVR_EXCL_LINE
+                {
+                    continue; // GCOVR_EXCL_LINE
+                }
 
-            if (!s.type_params.empty())
-            {
-                error_at(s.span,
-                         "generic structs are not yet supported by the type checker");
+                StructInfo info;
+                for (const auto& field : s.fields)
+                {
+                    auto ft = type_from_ast(field.type);
+                    if (!ft.has_value())
+                    {
+                        continue;
+                    }
+                    info.fields.emplace(field.name, *ft);
+                }
+                it->second = std::move(info);
                 continue;
             }
 
-            StructInfo info;
+            if (s.type_params.size() != 1)
+            {
+                continue;
+            }
+
+            auto tmpl_it = struct_templates_.find(s.name);
+            if (tmpl_it == struct_templates_.end())
+            {
+                continue;
+            }
+
+            const auto saved_type_params = current_type_params_;
+            current_type_params_.clear();
+            current_type_params_.insert(s.type_params.front());
+
             for (const auto& field : s.fields)
             {
                 auto ft = type_from_ast(field.type);
@@ -228,9 +365,10 @@ class Checker
                 {
                     continue;
                 }
-                info.fields.emplace(field.name, *ft);
+                tmpl_it->second.field_templates.emplace(field.name, *ft);
             }
-            it->second = std::move(info);
+
+            current_type_params_ = saved_type_params;
         }
 
         for (const auto& e : program.enums)
@@ -380,6 +518,12 @@ class Checker
                 {
                     elem = Type{.kind = TypeKind::Enum, .name = arg};
                 }
+                else if (struct_templates_.contains(arg))
+                {
+                    error_at(name.span,
+                             "type '" + std::string(arg) + "' requires one type argument");
+                    return std::nullopt;
+                }
             }
 
             if (!elem.has_value())
@@ -397,12 +541,76 @@ class Checker
         const auto t = core_type_from_name(name.name);
         if (!t.has_value())
         {
+            if (struct_templates_.contains(name.name))
+            {
+                if (!name.type_arg.has_value())
+                {
+                    error_at(name.span,
+                             "type '" + std::string(name.name) + "' requires one type argument");
+                    return std::nullopt;
+                }
+
+                const auto type_arg_name = *name.type_arg;
+                auto type_arg = core_type_from_name(type_arg_name);
+                if (!type_arg.has_value() && current_type_params_.contains(type_arg_name))
+                {
+                    type_arg = Type{.kind = TypeKind::TypeParam, .name = type_arg_name};
+                }
+                if (!type_arg.has_value())
+                {
+                    if (structs_.contains(type_arg_name))
+                    {
+                        type_arg = Type{.kind = TypeKind::Struct, .name = type_arg_name};
+                    }
+                    else if (enums_.contains(type_arg_name))
+                    {
+                        type_arg = Type{.kind = TypeKind::Enum, .name = type_arg_name};
+                    }
+                    else if (struct_templates_.contains(type_arg_name))
+                    {
+                        error_at(name.span, "type '" + std::string(type_arg_name) +
+                                                "' requires one type argument");
+                        return std::nullopt;
+                    }
+                }
+
+                if (!type_arg.has_value())
+                {
+                    error_at(name.span,
+                             "unknown type '" + std::string(type_arg_name) + "'");
+                    return std::nullopt;
+                }
+
+                const auto instantiated_name =
+                    ensure_struct_instantiated(name.name, *type_arg, name.span);
+                if (!instantiated_name.has_value())
+                {
+                    return std::nullopt;
+                }
+
+                return Type{.kind = TypeKind::Struct, .name = *instantiated_name};
+            }
+
             if (structs_.contains(name.name))
             {
+                if (name.type_arg.has_value())
+                {
+                    error_at(name.span,
+                             "type '" + std::string(name.name) +
+                                 "' does not take type arguments");
+                    return std::nullopt;
+                }
                 return Type{.kind = TypeKind::Struct, .name = name.name};
             }
             if (enums_.contains(name.name))
             {
+                if (name.type_arg.has_value())
+                {
+                    error_at(name.span,
+                             "type '" + std::string(name.name) +
+                                 "' does not take type arguments");
+                    return std::nullopt;
+                }
                 return Type{.kind = TypeKind::Enum, .name = name.name};
             }
 
@@ -1658,11 +1866,42 @@ class Checker
 
     [[nodiscard]] std::optional<Type> check_expr_node(const StructLiteralExpr& e, Span span)
     {
-        const auto it = structs_.find(e.type_name);
-        if (it == structs_.end())
+        if (!e.type_arg.has_value() && !structs_.contains(e.type_name) &&
+            !struct_templates_.contains(e.type_name))
         {
             error_at(span, "unknown struct type '" + std::string(e.type_name) + "'");
             return std::nullopt;
+        }
+
+        curlee::parser::TypeName literal_type;
+        literal_type.span = span;
+        literal_type.is_capability = false;
+        literal_type.name = e.type_name;
+        literal_type.type_arg = e.type_arg;
+
+        const auto literal_struct_type = type_from_ast(literal_type);
+        if (!literal_struct_type.has_value())
+        {
+            return std::nullopt;
+        }
+        if (literal_struct_type->kind != TypeKind::Struct)
+        {
+            error_at(span, "struct literal type must resolve to a struct");
+            return std::nullopt;
+        }
+
+        const auto it = structs_.find(literal_struct_type->name);
+        if (it == structs_.end())
+        {
+            error_at(span, "unknown struct type '" + std::string(literal_struct_type->name) +
+                               "'");
+            return std::nullopt;
+        }
+
+        std::string struct_name_for_diag = std::string(e.type_name);
+        if (e.type_arg.has_value())
+        {
+            struct_name_for_diag += "<" + std::string(*e.type_arg) + ">";
         }
 
         std::unordered_set<std::string_view> seen;
@@ -1706,8 +1945,8 @@ class Checker
 
         if (!missing.empty())
         {
-            std::string msg =
-                "struct literal for '" + std::string(e.type_name) + "' is missing required field";
+            std::string msg = "struct literal for '" + struct_name_for_diag +
+                              "' is missing required field";
             msg += (missing.size() == 1) ? " '" : "s: ";
             for (std::size_t i = 0; i < missing.size(); ++i)
             {
@@ -1727,7 +1966,7 @@ class Checker
             error_at(span, std::move(msg));
         }
 
-        return Type{.kind = TypeKind::Struct, .name = e.type_name};
+        return Type{.kind = TypeKind::Struct, .name = literal_struct_type->name};
     }
 
     [[nodiscard]] std::optional<Type> check_expr_node(const ScopedNameExpr& e, Span span)

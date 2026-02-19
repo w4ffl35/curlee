@@ -154,6 +154,7 @@ struct StructLiteralExprField
 struct StructLiteralExpr
 {
     std::string_view type_name;
+    std::optional<std::string_view> type_arg = std::nullopt;
     std::vector<StructLiteralExprField> fields;
 };
 

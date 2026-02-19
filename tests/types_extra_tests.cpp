@@ -1656,8 +1656,13 @@ fn main(v: E) -> Unit {
         expect_diag(run_tc("fn dup<T>(x: T, y: T) -> T { return x; } fn main() -> Int { return dup(1, false); }"),
                     "argument type mismatch for call to 'dup'");
 
-        expect_diag(run_tc("struct Box<T> { value: T; } fn main() -> Unit { return; }"),
-                    "generic structs are not yet supported by the type checker");
+        expect_ok(run_tc("struct Box<T> { value: T; } fn main() -> Int { let b: Box<Int> = Box<Int>{ value: 7 }; return b.value; }"));
+
+        expect_diag(run_tc("struct Box<T> { value: T; } fn main() -> Unit { let b: Box = Box<Int>{ value: 1 }; return; }"),
+                "type 'Box' requires one type argument");
+
+        expect_diag(run_tc("struct Box<T> { value: T; } fn main() -> Unit { let b: Box<Int> = Box<Int>{ value: false }; return; }"),
+                "field 'value' type mismatch: expected Int, got Bool");
     }
 
     std::cout << "OK\n";
