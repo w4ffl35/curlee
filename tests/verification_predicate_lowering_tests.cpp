@@ -410,6 +410,38 @@ int main()
     }
 
     {
+        const char* previous = std::getenv("CURLEE_VERIFY_HIGHER_POWER");
+        const std::string previous_value = previous == nullptr ? "" : std::string(previous);
+        setenv("CURLEE_VERIFY_HIGHER_POWER", "1", 1);
+
+        Solver solver;
+        auto& ctx = solver.context();
+        LoweringContext lower_ctx(ctx);
+        auto x = ctx.int_const("x");
+        auto y = ctx.int_const("y");
+        lower_ctx.int_vars.emplace("x", x);
+        lower_ctx.int_vars.emplace("y", y);
+
+        auto pred = make_binary(TokenKind::EqualEqual,
+                                make_binary(TokenKind::Star, make_name("x"), make_name("y")),
+                                make_int("6"));
+        auto lowered = lower_predicate(pred, lower_ctx);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lowered))
+        {
+            fail("expected non-linear multiplication to lower in higher-power mode");
+        }
+
+        if (previous != nullptr)
+        {
+            setenv("CURLEE_VERIFY_HIGHER_POWER", previous_value.c_str(), 1);
+        }
+        else
+        {
+            unsetenv("CURLEE_VERIFY_HIGHER_POWER");
+        }
+    }
+
+    {
         Solver solver;
         auto& ctx = solver.context();
         LoweringContext lower_ctx(ctx);

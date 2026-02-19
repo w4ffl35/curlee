@@ -1,4 +1,5 @@
 #include <cstddef>
+#include <cstdlib>
 #include <curlee/lexer/token.h>
 #include <curlee/types/type.h>
 #include <curlee/verification/checker.h>
@@ -74,6 +75,18 @@ std::string token_to_string(curlee::lexer::TokenKind kind)
         break;
     }
     return "<op>";
+}
+
+[[nodiscard]] bool higher_power_mode_enabled()
+{
+    const char* value = std::getenv("CURLEE_VERIFY_HIGHER_POWER");
+    if (value == nullptr)
+    {
+        return false;
+    }
+
+    const std::string_view opt(value);
+    return opt == "1" || opt == "true" || opt == "on";
 }
 
 std::string pred_to_string(const curlee::parser::Pred& pred)
@@ -535,7 +548,7 @@ class Verifier
                         {
                             return error_at(e.span, "'*' expects Int expressions");
                         }
-                        if (!lhs.is_literal && !rhs.is_literal)
+                        if (!lhs.is_literal && !rhs.is_literal && !higher_power_mode_enabled())
                         {
                             return error_at(e.span, "non-linear multiplication is not supported");
                         }

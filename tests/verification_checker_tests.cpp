@@ -190,6 +190,40 @@ int main()
     }
 
     {
+        // Higher-power mode: non-linear multiplication is accepted only when explicitly
+        // enabled.
+        const char* previous = std::getenv("CURLEE_VERIFY_HIGHER_POWER");
+        const std::string previous_value = previous == nullptr ? "" : std::string(previous);
+        setenv("CURLEE_VERIFY_HIGHER_POWER", "1", 1);
+
+        const std::string source = "fn mul_pos(a: Int, b: Int) -> Int [\n"
+                                   "  requires a > 0;\n"
+                                   "  requires b > 0;\n"
+                                   "  ensures result > 0;\n"
+                                   "] {\n"
+                                   "  return a * b;\n"
+                                   "}\n"
+                                   "fn main() -> Int {\n"
+                                   "  return mul_pos(2, 3);\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "higher-power non-linear opt-in test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification success for higher-power non-linear opt-in test");
+        }
+
+        if (previous != nullptr)
+        {
+            setenv("CURLEE_VERIFY_HIGHER_POWER", previous_value.c_str(), 1);
+        }
+        else
+        {
+            unsetenv("CURLEE_VERIFY_HIGHER_POWER");
+        }
+    }
+
+    {
         // Expressions in verification: calls are not supported in expressions lowered to the
         // solver.
         const std::string source = "fn id(x: Int) -> Int { return x; }\n"

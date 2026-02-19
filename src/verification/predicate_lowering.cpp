@@ -1,5 +1,7 @@
 #include <curlee/verification/predicate_lowering.h>
 
+#include <cstdlib>
+
 namespace curlee::verification
 {
 namespace
@@ -17,6 +19,18 @@ struct TypedExpr
     PredType type;
     bool is_literal = false;
 };
+
+[[nodiscard]] bool higher_power_mode_enabled()
+{
+    const char* value = std::getenv("CURLEE_VERIFY_HIGHER_POWER");
+    if (value == nullptr)
+    {
+        return false;
+    }
+
+    const std::string_view opt(value);
+    return opt == "1" || opt == "true" || opt == "on";
+}
 
 curlee::diag::Diagnostic error_at(curlee::source::Span span, std::string message)
 {
@@ -172,7 +186,7 @@ TypedResult lower_node(const curlee::parser::Pred& pred, const LoweringContext& 
                     {
                         return error_at(pred.span, "'*' expects Int predicates");
                     }
-                    if (!left.is_literal && !right.is_literal)
+                    if (!left.is_literal && !right.is_literal && !higher_power_mode_enabled())
                     {
                         return error_at(pred.span, "non-linear multiplication is not supported");
                     }
