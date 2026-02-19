@@ -294,6 +294,12 @@ class Emitter
     {
         current_is_main_ = is_main;
 
+        std::unordered_set<std::string_view> generic_type_params;
+        for (const auto type_param : fn.type_params)
+        {
+            generic_type_params.insert(type_param);
+        }
+
         // Track function start address for calls.
         function_addrs_.emplace(fn.name, ip());
 
@@ -320,7 +326,8 @@ class Emitter
         for (std::size_t i = 0; i < fn.params.size(); ++i)
         {
             const auto& p = fn.params[i];
-            if (!p.type.is_capability && p.type.name != "Int" && p.type.name != "Bool")
+            if (!p.type.is_capability && p.type.name != "Int" && p.type.name != "Bool" &&
+                !generic_type_params.contains(p.type.name))
             {
                 diags_.push_back(
                     error_at(p.type.span, "parameter type not supported in runnable code: '" +

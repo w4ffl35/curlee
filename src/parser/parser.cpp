@@ -514,6 +514,45 @@ class Parser
         }
         const Token name = advance();
 
+        std::vector<std::string_view> type_params;
+        if (match(TokenKind::Less))
+        {
+            std::unordered_map<std::string_view, curlee::source::Span> seen_type_params;
+            while (true)
+            {
+                if (!check(TokenKind::Identifier))
+                {
+                    return error_at(peek(), "expected type parameter name in struct declaration");
+                }
+
+                const Token type_param = advance();
+                if (auto it = seen_type_params.find(type_param.lexeme);
+                    it != seen_type_params.end())
+                {
+                    auto d = error_at(type_param,
+                                      "duplicate type parameter in struct declaration");
+                    set_notes1(d, "previous type parameter declaration is here", it->second);
+                    return d;
+                }
+
+                seen_type_params.emplace(type_param.lexeme, type_param.span);
+                type_params.push_back(type_param.lexeme);
+
+                if (match(TokenKind::Comma))
+                {
+                    continue;
+                }
+                break;
+            }
+
+            if (auto err = consume(TokenKind::Greater,
+                                   "expected '>' after struct type parameter list");
+                err.has_value())
+            {
+                return *err;
+            }
+        }
+
         if (auto err = consume(TokenKind::LBrace, "expected '{' after struct name");
             err.has_value())
         {
@@ -575,6 +614,7 @@ class Parser
 
         return StructDecl{.span = span_cover(kw.span, rbrace.span),
                           .name = name.lexeme,
+                          .type_params = std::move(type_params),
                           .fields = std::move(fields)};
     }
 
@@ -699,6 +739,55 @@ class Parser
                                .name = name.lexeme,
                                .type = std::move(type),
                                .refinement = std::move(refinement)};
+    }
+
+    [[nodiscard]] std::variant<std::vector<std::string_view>, curlee::diag::Diagnostic>
+    parse_type_params(std::string_view owner_kind)
+    {
+        std::vector<std::string_view> type_params;
+        if (!match(TokenKind::Less))
+        {
+            return type_params;
+        }
+
+        std::unordered_map<std::string_view, curlee::source::Span> seen_type_params;
+        while (true)
+        {
+            if (!check(TokenKind::Identifier))
+            {
+                if (owner_kind == "function")
+                {
+                    return error_at(peek(), "expected type parameter name in function declaration");
+                }
+                return error_at(peek(), "expected type parameter name in declaration");
+            }
+
+            const Token type_param = advance();
+            if (auto it = seen_type_params.find(type_param.lexeme);
+                it != seen_type_params.end())
+            {
+                auto d = error_at(type_param, "duplicate type parameter in declaration");
+                set_notes1(d, "previous type parameter declaration is here", it->second);
+                return d;
+            }
+
+            seen_type_params.emplace(type_param.lexeme, type_param.span);
+            type_params.push_back(type_param.lexeme);
+
+            if (match(TokenKind::Comma))
+            {
+                continue;
+            }
+            break;
+        }
+
+        if (auto err = consume(TokenKind::Greater, "expected '>' after type parameter list");
+            err.has_value())
+        {
+            return *err;
+        }
+
+        return type_params;
     }
 
     [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred()
@@ -976,6 +1065,14 @@ class Parser
         }
         const Token name = advance();
 
+        auto type_params_res = parse_type_params("function");
+        if (std::holds_alternative<curlee::diag::Diagnostic>(type_params_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(type_params_res));
+        }
+        std::vector<std::string_view> type_params =
+            std::get<std::vector<std::string_view>>(std::move(type_params_res));
+
         if (auto err = consume(TokenKind::LParen, "expected '(' after function name");
             err.has_value())
         {
@@ -1072,6 +1169,7 @@ class Parser
         Function fn{
             .span = span_cover(name.span, body.span),
             .name = name.lexeme,
+            .type_params = std::move(type_params),
             .body = std::move(body),
             .params = std::move(params),
             .requires_clauses = std::move(requires_clauses),
@@ -2005,11 +2103,29 @@ class Dumper
             return;
         }
         out_ << t.name;
+        if (t.type_arg.has_value())
+        {
+            out_ << "<" << *t.type_arg << ">";
+        }
     }
 
     void dump_struct_decl(const StructDecl& s)
     {
-        out_ << "struct " << s.name << " {";
+        out_ << "struct " << s.name;
+        if (!s.type_params.empty())
+        {
+            out_ << "<";
+            for (std::size_t i = 0; i < s.type_params.size(); ++i)
+            {
+                out_ << s.type_params[i];
+                if (i + 1 < s.type_params.size())
+                {
+                    out_ << ", ";
+                }
+            }
+            out_ << ">";
+        }
+        out_ << " {";
         for (const auto& f : s.fields)
         {
             out_ << " " << f.name << ": ";
@@ -2038,7 +2154,21 @@ class Dumper
 
     void dump_function(const Function& f)
     {
-        out_ << "fn " << f.name << "(";
+        out_ << "fn " << f.name;
+        if (!f.type_params.empty())
+        {
+            out_ << "<";
+            for (std::size_t i = 0; i < f.type_params.size(); ++i)
+            {
+                out_ << f.type_params[i];
+                if (i + 1 < f.type_params.size())
+                {
+                    out_ << ", ";
+                }
+            }
+            out_ << ">";
+        }
+        out_ << "(";
         for (std::size_t i = 0; i < f.params.size(); ++i)
         {
             const auto& p = f.params[i];

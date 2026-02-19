@@ -267,6 +267,18 @@ fn main() -> Int {
     }
 
     {
+        const std::string source =
+            "fn id<T>(x: T) -> T { return x; } fn main() -> Int { return id(42); }";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(42)))
+        {
+            fail("expected generic id(42) to equal 42");
+        }
+    }
+
+    {
         const std::string source = "fn add(x: Int, y: Int) -> Int { return x + y; } fn main() -> "
                                    "Int { return add(1, 2); }";
 

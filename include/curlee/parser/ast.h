@@ -274,6 +274,7 @@ struct Function
 {
     curlee::source::Span span;
     std::string_view name;
+    std::vector<std::string_view> type_params;
     Block body;
 
     struct Param
@@ -313,6 +314,7 @@ struct StructDecl
 {
     curlee::source::Span span;
     std::string_view name;
+    std::vector<std::string_view> type_params;
     std::vector<StructDeclField> fields;
 };
 

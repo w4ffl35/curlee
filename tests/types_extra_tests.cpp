@@ -1649,6 +1649,15 @@ fn main(v: E) -> Unit {
 
         expect_diag(run_tc("fn main() -> Unit { let v: Vec<Nope> = __vec_new_int(4); return; }"),
                     "unknown collection element type 'Nope'");
+
+        expect_ok(run_tc(
+            "fn id<T>(x: T) -> T { return x; } fn main() -> Int { return id(41); }"));
+
+        expect_diag(run_tc("fn dup<T>(x: T, y: T) -> T { return x; } fn main() -> Int { return dup(1, false); }"),
+                    "argument type mismatch for call to 'dup'");
+
+        expect_diag(run_tc("struct Box<T> { value: T; } fn main() -> Unit { return; }"),
+                    "generic structs are not yet supported by the type checker");
     }
 
     std::cout << "OK\n";

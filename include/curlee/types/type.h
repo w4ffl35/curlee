@@ -20,6 +20,7 @@ enum class TypeKind
     Bool,
     String,
     Unit,
+    TypeParam,
     Capability,
     Vec,
     Set,
@@ -53,6 +54,10 @@ struct Type
     {
         return a.name == b.name;
     }
+    if (a.kind == TypeKind::TypeParam)
+    {
+        return a.name == b.name;
+    }
     if (a.kind == TypeKind::Vec)
     {
         return a.element_kind == b.element_kind && a.element_name == b.element_name;
@@ -67,6 +72,7 @@ struct Type
 /** @brief Function type with parameter types and a result type. */
 struct FunctionType
 {
+    std::vector<std::string_view> type_params;
     std::vector<Type> params;
     Type result;
 };
@@ -101,6 +107,8 @@ struct CapabilityType
         return "String";
     case TypeKind::Unit:
         return "Unit";
+    case TypeKind::TypeParam:
+        return "TypeParam";
     case TypeKind::Capability:
         return "cap";
     case TypeKind::Vec:
@@ -117,7 +125,8 @@ struct CapabilityType
 
 [[nodiscard]] constexpr std::string_view to_string(Type t)
 {
-    if (t.kind == TypeKind::Capability || t.kind == TypeKind::Struct || t.kind == TypeKind::Enum)
+    if (t.kind == TypeKind::Capability || t.kind == TypeKind::Struct || t.kind == TypeKind::Enum ||
+        t.kind == TypeKind::TypeParam)
     {
         return t.name;
     }

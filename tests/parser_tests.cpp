@@ -229,6 +229,42 @@ fn main() -> Unit {
         expect_parse_error_contains(src, "whitespace is not allowed in qualified capability names");
     }
 
+    // Generic declarations: parser accepts type parameter lists on structs/functions.
+    {
+        const std::string src = R"(struct Box<T> {
+  value: T;
+}
+fn id<T>(x: T) -> T { return x; }
+fn main() -> Unit {
+  return;
+}
+)";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on generic declaration program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on generic declaration program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("struct Box<T>") == std::string::npos)
+        {
+            fail("dump missing generic struct declaration");
+        }
+        if (dumped.find("fn id<T>(x: T) -> T") == std::string::npos)
+        {
+            fail("dump missing generic function declaration");
+        }
+    }
+
     // Struct literal: allow trailing comma.
     {
         const std::string src = R"(struct Point { x: Int; y: Int; }

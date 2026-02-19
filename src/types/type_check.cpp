@@ -1,6 +1,7 @@
 #include <cassert>
 #include <curlee/parser/ast.h>
 #include <curlee/types/type_check.h>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -177,6 +178,7 @@ class Checker
 
     std::unordered_map<std::string_view, StructInfo> structs_;
     std::unordered_map<std::string_view, EnumInfo> enums_;
+    std::unordered_set<std::string_view> current_type_params_;
 
     void collect_structs_and_enums(const curlee::parser::Program& program)
     {
@@ -209,6 +211,13 @@ class Checker
             if (it == structs_.end()) // GCOVR_EXCL_LINE
             {
                 continue; // GCOVR_EXCL_LINE
+            }
+
+            if (!s.type_params.empty())
+            {
+                error_at(s.span,
+                         "generic structs are not yet supported by the type checker");
+                continue;
             }
 
             StructInfo info;
@@ -335,6 +344,18 @@ class Checker
             return Type{.kind = TypeKind::Capability, .name = name.name};
         }
 
+        if (current_type_params_.contains(name.name))
+        {
+            if (name.type_arg.has_value())
+            {
+                error_at(name.span,
+                         "type parameter '" + std::string(name.name) +
+                             "' does not take type arguments");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::TypeParam, .name = name.name};
+        }
+
         if (name.name == "Vec" || name.name == "Set")
         {
             if (!name.type_arg.has_value())
@@ -345,6 +366,10 @@ class Checker
 
             const auto& arg = *name.type_arg;
             auto elem = core_type_from_name(arg);
+            if (!elem.has_value() && current_type_params_.contains(arg))
+            {
+                elem = Type{.kind = TypeKind::TypeParam, .name = arg};
+            }
             if (!elem.has_value())
             {
                 if (structs_.contains(arg))
@@ -404,13 +429,37 @@ class Checker
             return std::nullopt;
         }
 
+        FunctionType sig;
+        sig.type_params = f.type_params;
+        {
+            std::unordered_set<std::string_view> seen_type_params;
+            for (const auto type_param : f.type_params)
+            {
+                if (seen_type_params.contains(type_param))
+                {
+                    error_at(f.span,
+                             "duplicate type parameter '" + std::string(type_param) +
+                                 "' in function declaration");
+                    return std::nullopt;
+                }
+                seen_type_params.insert(type_param);
+            }
+        }
+
+        const auto saved_type_params = current_type_params_;
+        current_type_params_.clear();
+        for (const auto type_param : f.type_params)
+        {
+            current_type_params_.insert(type_param);
+        }
+
         auto ret = type_from_ast(*f.return_type);
         if (!ret.has_value())
         {
+            current_type_params_ = saved_type_params;
             return std::nullopt;
         }
 
-        FunctionType sig;
         sig.result = *ret;
 
         for (const auto& p : f.params)
@@ -418,12 +467,90 @@ class Checker
             auto pt = type_from_ast(p.type);
             if (!pt.has_value())
             {
+                current_type_params_ = saved_type_params;
                 return std::nullopt;
             }
             sig.params.push_back(*pt);
         }
 
+        current_type_params_ = saved_type_params;
+
         return sig;
+    }
+
+    [[nodiscard]] static bool unify_type(const Type& expected, const Type& actual,
+                                         std::unordered_map<std::string_view, Type>& inferred)
+    {
+        if (expected.kind == TypeKind::TypeParam)
+        {
+            if (const auto it = inferred.find(expected.name); it != inferred.end())
+            {
+                return it->second == actual;
+            }
+            inferred.emplace(expected.name, actual);
+            return true;
+        }
+
+        if (expected.kind != actual.kind)
+        {
+            return false;
+        }
+
+        if (expected.kind == TypeKind::Capability || expected.kind == TypeKind::Struct ||
+            expected.kind == TypeKind::Enum)
+        {
+            return expected.name == actual.name;
+        }
+
+        if (expected.kind == TypeKind::Vec || expected.kind == TypeKind::Set)
+        {
+            if (!expected.element_kind.has_value() || !actual.element_kind.has_value())
+            {
+                return false;
+            }
+
+            Type expected_elem{.kind = *expected.element_kind, .name = expected.element_name};
+            Type actual_elem{.kind = *actual.element_kind, .name = actual.element_name};
+            return unify_type(expected_elem, actual_elem, inferred);
+        }
+
+        return true;
+    }
+
+    [[nodiscard]] static std::optional<Type>
+    substitute_type(const Type& templ,
+                    const std::unordered_map<std::string_view, Type>& inferred)
+    {
+        if (templ.kind == TypeKind::TypeParam)
+        {
+            if (const auto it = inferred.find(templ.name); it != inferred.end())
+            {
+                return it->second;
+            }
+            return std::nullopt;
+        }
+
+        if (templ.kind == TypeKind::Vec || templ.kind == TypeKind::Set)
+        {
+            if (!templ.element_kind.has_value())
+            {
+                return std::nullopt;
+            }
+
+            Type element_t{.kind = *templ.element_kind, .name = templ.element_name};
+            const auto resolved_element = substitute_type(element_t, inferred);
+            if (!resolved_element.has_value())
+            {
+                return std::nullopt;
+            }
+
+            Type out = templ;
+            out.element_kind = resolved_element->kind;
+            out.element_name = resolved_element->name;
+            return out;
+        }
+
+        return templ;
     }
 
     void check_function(const Function& f)
@@ -1481,6 +1608,8 @@ class Checker
             return std::nullopt;
         }
 
+        std::unordered_map<std::string_view, Type> inferred_type_args;
+
         for (std::size_t i = 0; i < e.args.size(); ++i)
         {
             const auto arg_t = check_expr(e.args[i]);
@@ -1488,11 +1617,35 @@ class Checker
             {
                 continue;
             }
+
+            if (!sig.type_params.empty())
+            {
+                if (!unify_type(sig.params[i], *arg_t, inferred_type_args))
+                {
+                    error_at(span, "argument type mismatch for call to '" +
+                                       std::string(callee_name) + "'");
+                }
+                continue;
+            }
+
             if (*arg_t != sig.params[i])
             {
                 error_at(span,
                          "argument type mismatch for call to '" + std::string(callee_name) + "'");
             }
+        }
+
+        if (!sig.type_params.empty())
+        {
+            const auto resolved = substitute_type(sig.result, inferred_type_args);
+            if (!resolved.has_value())
+            {
+                error_at(span,
+                         "could not infer generic return type for call to '" +
+                             std::string(callee_name) + "'");
+                return std::nullopt;
+            }
+            return *resolved;
         }
 
         return sig.result;
