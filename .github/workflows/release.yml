@@ -129,6 +129,181 @@ jobs:
           Path("dist/RELEASE_NOTES.md").write_text(notes, encoding="utf-8")
           PY
 
+      - name: Upload linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: |
+            dist/curlee
+            dist/*.tar.gz
+
+  macos-release-artifacts:
+    name: Build macOS release artifacts
+    runs-on: macos-latest
+    needs: [release-preflight]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install cmake ninja z3 pkg-config
+
+      - name: Configure (macos-release)
+        run: cmake -S . -B build/macos-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (macos-release)
+        run: cmake --build build/macos-release --target curlee
+
+      - name: Smoke (macos-release)
+        run: ./build/macos-release/curlee --help
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          arch="$(uname -m)"
+
+          mkdir -p dist
+          cp -v "build/macos-release/curlee" "dist/curlee"
+          chmod +x "dist/curlee"
+
+          tarball="curlee-${tag}-macos-${arch}.tar.gz"
+          tar -C dist -czf "dist/${tarball}" curlee
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: dist/*.tar.gz
+
+  windows-release-artifacts:
+    name: Build windows-release artifacts
+    runs-on: windows-latest
+    needs: [release-preflight]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja
+        run: choco install ninja --yes
+
+      - name: Configure (windows-release)
+        shell: pwsh
+        run: >
+          cmake -S . -B build/windows-release -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCURLEE_USE_SYSTEM_Z3=OFF
+
+      - name: Build (windows-release)
+        shell: pwsh
+        run: cmake --build build/windows-release --target curlee
+
+      - name: Smoke (windows-release)
+        shell: pwsh
+        run: .\build\windows-release\curlee.exe --help
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $tag = "${env:GITHUB_REF_NAME}"
+          $arch = "x86_64"
+
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item -Path .\build\windows-release\curlee.exe -Destination .\dist\curlee.exe -Force
+
+          $zip = "curlee-$tag-windows-$arch.zip"
+          Compress-Archive -Path .\dist\curlee.exe -DestinationPath ".\dist\$zip" -Force
+
+      - name: Upload windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: dist/*.zip
+
+  publish-release:
+    name: Publish multi-platform release
+    runs-on: ubuntu-latest
+    needs: [release-preflight, linux-release-artifacts, macos-release-artifacts, windows-release-artifacts]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: Generate checksums + release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          tag = os.environ.get("GITHUB_REF_NAME", "(unknown)")
+          sums = Path("dist/SHA256SUMS.txt").read_text(encoding="utf-8")
+
+          notes = f"""# Curlee {tag}
+
+          ## How to verify
+
+          ```bash
+          cmake --preset linux-debug
+          cmake --build --preset linux-debug
+          ctest --preset linux-debug --output-on-failure
+
+          bash scripts/smoke.sh --both
+          bash scripts/coverage.sh --fail-under 100 --fail-under-branch 100 --fail-under-function 100
+          ```
+
+          ## Artifacts
+
+          Multi-platform release artifacts are built on GitHub Actions for Linux, macOS, and Windows.
+
+          ### Checksums (SHA-256)
+
+          ```
+          {sums}
+          ```
+
+          ### SBOM (SPDX JSON)
+
+          Release asset: `SBOM.spdx.json`
+
+          ### Provenance attestation (GitHub Artifact Attestations)
+
+          Provenance attestations are published for release artifacts and tied to this tag build.
+
+          Verify locally (requires GitHub CLI):
+
+          ```bash
+          gh attestation verify curlee --repo "$GITHUB_REPOSITORY"
+          gh attestation verify curlee-{tag}-linux-$(uname -m).tar.gz --repo "$GITHUB_REPOSITORY"
+          gh attestation verify curlee-{tag}-macos-$(uname -m).tar.gz --repo "$GITHUB_REPOSITORY"
+          gh attestation verify curlee-{tag}-windows-x86_64.zip --repo "$GITHUB_REPOSITORY"
+          ```
+          """
+
+          Path("dist/RELEASE_NOTES.md").write_text(notes, encoding="utf-8")
+          PY
+
       - name: Generate SBOM (SPDX JSON)
         uses: anchore/sbom-action@v0
         with:
@@ -139,19 +314,12 @@ jobs:
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: |
-            dist/curlee
-            dist/*.tar.gz
-            dist/SHA256SUMS.txt
-            dist/SBOM.spdx.json
+          subject-path: dist/*
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           body_path: dist/RELEASE_NOTES.md
           files: |
-            dist/curlee
-            dist/*.tar.gz
-            dist/SHA256SUMS.txt
-            dist/SBOM.spdx.json
+            dist/*
           fail_on_unmatched_files: true
