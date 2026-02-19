@@ -99,44 +99,16 @@ CapturedRun run_cli_with_stdin(std::vector<std::string> argv_storage, const std:
 
 bool check_exit_code(const std::string& case_name, int rc, bool expect_zero)
 {
-    std::ostringstream captured_out;
-    std::ostringstream captured_err;
-
-    auto* old_cout = std::cout.rdbuf(captured_out.rdbuf());
-    auto* old_cerr = std::cerr.rdbuf(captured_err.rdbuf());
-
-    const std::string rel_path = "tests/fixtures/check_refinement_implies.curlee";
-
-    std::vector<std::string> argv_storage = {"curlee", "check", rel_path};
-    std::vector<char*> argv;
-    argv.reserve(argv_storage.size());
-    for (auto& s : argv_storage)
+    if (expect_zero && rc != 0)
     {
-        argv.push_back(s.data());
-    }
-
-    const int rc = curlee::cli::run(static_cast<int>(argv.size()), argv.data());
-
-    std::cout.rdbuf(old_cout);
-    std::cerr.rdbuf(old_cerr);
-
-    const std::string got = captured_err.str();
-    const std::string expected = slurp(golden_path);
-
-    if (rc != 0)
-    {
-        std::cerr << "expected zero exit code for refinement-implies check\n";
+        std::cerr << "expected zero exit code for " << case_name << "\n";
         return false;
     }
-
-    if (got != expected)
+    if (!expect_zero && rc == 0)
     {
-        std::cerr << "GOLDEN MISMATCH: " << golden_path.filename().string() << "\n";
-        std::cerr << "--- expected ---\n" << expected;
-        std::cerr << "--- got ---\n" << got;
+        std::cerr << "expected non-zero exit code for " << case_name << "\n";
         return false;
     }
-
     return true;
 }
 
@@ -763,6 +735,9 @@ static bool run_check_struct_ok_case(const fs::path& golden_path)
     return true;
 }
 
+bool check_text_equal(const std::string& label, const fs::path& golden_path,
+                      const std::string& got, const std::string& expected);
+
 static bool run_run_python_ffi_case(std::vector<std::string> argv_storage,
                                     const fs::path& out_golden_path,
                                     const fs::path& err_golden_path, const std::string& case_name,
@@ -791,17 +766,18 @@ static bool run_run_python_ffi_case(std::vector<std::string> argv_storage,
     const std::string expected_out = slurp(out_golden_path);
     const std::string expected_err = slurp(err_golden_path);
 
-    if (expected_exit_code == 0 && rc != 0)
+    if (rc != expected_exit_code)
     {
-        std::cerr << "expected exit code 0 for " << case_name << "\n";
+        std::cerr << "expected exit code " << expected_exit_code << " for " << case_name
+                  << ", got " << rc << "\n";
         return false;
     }
-    if (!expect_zero && rc == 0)
+
+    if (!check_text_equal("stderr", err_golden_path, got_err, expected_err))
     {
-        std::cerr << "expected non-zero exit code for " << case_name << "\n";
         return false;
     }
-    return true;
+    return check_text_equal("stdout", out_golden_path, got_out, expected_out);
 }
 
 bool check_text_equal(const std::string& label,
@@ -907,13 +883,28 @@ int main(int argc, char** argv)
     }
 
     const fs::path dir = fs::path(argv[1]);
-    const std::string fake_runner_error = argv[2];
-    const std::string fake_runner_hang = argv[3];
-    const std::string fake_runner_spam = argv[4];
-    const std::string fake_runner_env_check = argv[5];
-    const std::string fake_runner_sandbox_required = argv[6];
-    const std::string fake_bwrap = argv[7];
-    const fs::path golden = dir / "missing_file.golden";
+    const fs::path stdlib_v1_root = fs::path("stdlib") / "v1";
+
+    const fs::path rel_missing_file = fs::path("tests/fixtures/does_not_exist.cur");
+    const fs::path rel_requires_divide = fs::path("tests/fixtures/check_requires_divide.curlee");
+    const fs::path rel_refinement_implies =
+        fs::path("tests/fixtures/check_refinement_implies.curlee");
+    const fs::path rel_if_path_sensitive =
+        fs::path("tests/fixtures/check_requires_if_path_sensitive.curlee");
+    const fs::path rel_while_condition_fact =
+        fs::path("tests/fixtures/check_requires_while_condition_fact.curlee");
+    const fs::path rel_unknown_name = fs::path("tests/fixtures/check_unknown_name.curlee");
+    const fs::path rel_type_error = fs::path("tests/fixtures/check_type_error.curlee");
+    const fs::path rel_struct_ok = fs::path("tests/fixtures/check_struct_ok.curlee");
+    const fs::path rel_ensures_fail = fs::path("tests/fixtures/check_ensures_fail.curlee");
+    const fs::path rel_run_missing_stdout_cap = fs::path("tests/fixtures/r.curlee");
+    const fs::path rel_run_missing_tty_cap = fs::path("tests/fixtures/run_missing_tty_cap.curlee");
+    const fs::path rel_run_read_line = fs::path("tests/fixtures/run_read_line.curlee");
+    const fs::path rel_run_tty_order = fs::path("tests/fixtures/run_tty_order.curlee");
+    const fs::path rel_run_success = fs::path("tests/fixtures/run_success.curlee");
+    const fs::path rel_run_read_line_over_limit =
+        fs::path("tests/fixtures/run_read_line_over_limit.curlee");
+
     const fs::path check_requires_divide_golden = dir / "check_requires_divide.golden";
     const fs::path check_refinement_implies_golden = dir / "check_refinement_implies.golden";
     const fs::path check_requires_if_path_sensitive_golden =
@@ -1058,7 +1049,7 @@ int main(int argc, char** argv)
         if (!run_stderr_case("run-struct-not-runnable",
                              {"curlee", "run", rel_struct_ok.string()},
                              dir / "run_struct_not_runnable.golden",
-                             false))
+                             true))
         {
             return 1;
         }

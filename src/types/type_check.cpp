@@ -48,6 +48,19 @@ static std::string join_path(const std::vector<std::string_view>& parts)
     return out;
 } // GCOVR_EXCL_LINE
 
+static bool is_reserved_builtin_name(std::string_view name)
+{
+    static const std::unordered_set<std::string_view> reserved = {
+        "print",           "__read_line",      "__tty_clear",      "__fs_read_text",
+        "__fs_write_text", "__tty_write_at",   "__tty_flush",      "__rng_next_int",
+        "__vec_new_int",   "__vec_len_int",    "__vec_push_int",   "__vec_get_int",
+        "__vec_set_int",   "__vec_new_bool",   "__vec_len_bool",   "__vec_push_bool",
+        "__vec_get_bool",  "__vec_set_bool",   "__set_new_int",    "__set_has_int",
+        "__set_insert_int",
+    }; // GCOVR_EXCL_LINE
+    return reserved.contains(name);
+}
+
 static bool collect_member_chain(const Expr& expr, std::vector<std::string_view>& out)
 {
     if (const auto* name = std::get_if<NameExpr>(&expr.node))
@@ -112,9 +125,10 @@ class Checker
         // Collect function signatures first.
         for (const auto& f : program.functions)
         {
-            if (f.name == "print")
+            if (is_reserved_builtin_name(f.name))
             {
-                error_at(f.span, "cannot declare builtin function 'print'");
+                error_at(f.span, "cannot declare builtin function '" + std::string(f.name) +
+                                     "'");
                 continue;
             }
             auto sig = function_signature(f);
@@ -985,6 +999,428 @@ class Checker
                 return std::nullopt;
             }
             return Type{.kind = TypeKind::Unit};
+        }
+
+        const auto check_builtin_arity = [&](std::size_t arity,
+                                             std::string_view name) -> bool
+        {
+            if (e.args.size() != arity)
+            {
+                error_at(span, std::string(name) + " expects exactly " + std::to_string(arity) +
+                                   " argument(s)");
+                return false;
+            }
+            return true;
+        };
+
+        if (callee_name == "__read_line")
+        {
+            if (!check_builtin_arity(1, callee_name))
+            {
+                return std::nullopt;
+            }
+            require_capability("io.stdin", span);
+            (void)check_expr(e.args[0]);
+            return Type{.kind = TypeKind::String};
+        }
+
+        if (callee_name == "__fs_read_text")
+        {
+            if (!check_builtin_arity(2, callee_name))
+            {
+                return std::nullopt;
+            }
+            require_capability("fs.read", span);
+            const auto path_t = check_expr(e.args[0]);
+            (void)check_expr(e.args[1]);
+            if (path_t.has_value() && path_t->kind != TypeKind::String)
+            {
+                error_at(span, "fs path must be String");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::String};
+        }
+
+        if (callee_name == "__fs_write_text")
+        {
+            if (!check_builtin_arity(3, callee_name))
+            {
+                return std::nullopt;
+            }
+            require_capability("fs.write", span);
+            const auto path_t = check_expr(e.args[0]);
+            const auto content_t = check_expr(e.args[1]);
+            (void)check_expr(e.args[2]);
+            if (path_t.has_value() && path_t->kind != TypeKind::String)
+            {
+                error_at(span, "fs path must be String");
+                return std::nullopt;
+            }
+            if (content_t.has_value() && content_t->kind != TypeKind::String)
+            {
+                error_at(span, "fs content must be String");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "__tty_clear")
+        {
+            if (!check_builtin_arity(1, callee_name))
+            {
+                return std::nullopt;
+            }
+            require_capability("io.tty", span);
+            (void)check_expr(e.args[0]);
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "__tty_write_at")
+        {
+            if (!check_builtin_arity(4, callee_name))
+            {
+                return std::nullopt;
+            }
+            require_capability("io.tty", span);
+            const auto row_t = check_expr(e.args[0]);
+            const auto col_t = check_expr(e.args[1]);
+            const auto text_t = check_expr(e.args[2]);
+            (void)check_expr(e.args[3]);
+            if (row_t.has_value() && row_t->kind != TypeKind::Int)
+            {
+                error_at(span, "tty row must be Int");
+                return std::nullopt;
+            }
+            if (col_t.has_value() && col_t->kind != TypeKind::Int)
+            {
+                error_at(span, "tty col must be Int");
+                return std::nullopt;
+            }
+            if (text_t.has_value() && text_t->kind != TypeKind::String)
+            {
+                error_at(span, "tty text must be String");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "__tty_flush")
+        {
+            if (!check_builtin_arity(1, callee_name))
+            {
+                return std::nullopt;
+            }
+            require_capability("io.tty", span);
+            (void)check_expr(e.args[0]);
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "__rng_next_int")
+        {
+            if (!check_builtin_arity(2, callee_name))
+            {
+                return std::nullopt;
+            }
+            require_capability("rng.seeded", span);
+            const auto max_t = check_expr(e.args[0]);
+            (void)check_expr(e.args[1]);
+            if (max_t.has_value() && max_t->kind != TypeKind::Int)
+            {
+                error_at(span, "rng max must be Int");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Int};
+        }
+
+        if (callee_name == "__vec_new_int")
+        {
+            if (!check_builtin_arity(1, callee_name))
+            {
+                return std::nullopt;
+            }
+            const auto max_t = check_expr(e.args[0]);
+            if (max_t.has_value() && max_t->kind != TypeKind::Int)
+            {
+                error_at(span, "vec max length must be Int");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Vec, .element_kind = TypeKind::Int};
+        }
+
+        if (callee_name == "__vec_len_int")
+        {
+            if (!check_builtin_arity(1, callee_name))
+            {
+                return std::nullopt;
+            }
+            (void)check_expr(e.args[0]);
+            return Type{.kind = TypeKind::Int};
+        }
+
+        if (callee_name == "__vec_push_int")
+        {
+            if (!check_builtin_arity(2, callee_name))
+            {
+                return std::nullopt;
+            }
+            (void)check_expr(e.args[0]);
+            const auto value_t = check_expr(e.args[1]);
+            if (value_t.has_value() && value_t->kind != TypeKind::Int)
+            {
+                error_at(span, "vec value must be Int");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "__vec_get_int")
+        {
+            if (!check_builtin_arity(2, callee_name))
+            {
+                return std::nullopt;
+            }
+            (void)check_expr(e.args[0]);
+            const auto index_t = check_expr(e.args[1]);
+            if (index_t.has_value() && index_t->kind != TypeKind::Int)
+            {
+                error_at(span, "vec index must be Int");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Int};
+        }
+
+        if (callee_name == "__vec_set_int")
+        {
+            if (!check_builtin_arity(3, callee_name))
+            {
+                return std::nullopt;
+            }
+            (void)check_expr(e.args[0]);
+            const auto index_t = check_expr(e.args[1]);
+            const auto value_t = check_expr(e.args[2]);
+            if (index_t.has_value() && index_t->kind != TypeKind::Int)
+            {
+                error_at(span, "vec index must be Int");
+                return std::nullopt;
+            }
+            if (value_t.has_value() && value_t->kind != TypeKind::Int)
+            {
+                error_at(span, "vec value must be Int");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "__vec_new_bool")
+        {
+            if (!check_builtin_arity(1, callee_name))
+            {
+                return std::nullopt;
+            }
+            const auto max_t = check_expr(e.args[0]);
+            if (max_t.has_value() && max_t->kind != TypeKind::Int)
+            {
+                error_at(span, "vec max length must be Int");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Vec, .element_kind = TypeKind::Bool};
+        }
+
+        if (callee_name == "__vec_len_bool")
+        {
+            if (!check_builtin_arity(1, callee_name))
+            {
+                return std::nullopt;
+            }
+            (void)check_expr(e.args[0]);
+            return Type{.kind = TypeKind::Int};
+        }
+
+        if (callee_name == "__vec_push_bool")
+        {
+            if (!check_builtin_arity(2, callee_name))
+            {
+                return std::nullopt;
+            }
+            (void)check_expr(e.args[0]);
+            const auto value_t = check_expr(e.args[1]);
+            if (value_t.has_value() && value_t->kind != TypeKind::Bool)
+            {
+                error_at(span, "vec value must be Bool");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "__vec_get_bool")
+        {
+            if (!check_builtin_arity(2, callee_name))
+            {
+                return std::nullopt;
+            }
+            (void)check_expr(e.args[0]);
+            const auto index_t = check_expr(e.args[1]);
+            if (index_t.has_value() && index_t->kind != TypeKind::Int)
+            {
+                error_at(span, "vec index must be Int");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Bool};
+        }
+
+        if (callee_name == "__vec_set_bool")
+        {
+            if (!check_builtin_arity(3, callee_name))
+            {
+                return std::nullopt;
+            }
+            (void)check_expr(e.args[0]);
+            const auto index_t = check_expr(e.args[1]);
+            const auto value_t = check_expr(e.args[2]);
+            if (index_t.has_value() && index_t->kind != TypeKind::Int)
+            {
+                error_at(span, "vec index must be Int");
+                return std::nullopt;
+            }
+            if (value_t.has_value() && value_t->kind != TypeKind::Bool)
+            {
+                error_at(span, "vec value must be Bool");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "__set_new_int")
+        {
+            if (!check_builtin_arity(0, callee_name))
+            {
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Set, .element_kind = TypeKind::Int};
+        }
+
+        if (callee_name == "__set_has_int")
+        {
+            if (!check_builtin_arity(2, callee_name))
+            {
+                return std::nullopt;
+            }
+            (void)check_expr(e.args[0]);
+            const auto value_t = check_expr(e.args[1]);
+            if (value_t.has_value() && value_t->kind != TypeKind::Int)
+            {
+                error_at(span, "set value must be Int");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Bool};
+        }
+
+        if (callee_name == "__set_insert_int")
+        {
+            if (!check_builtin_arity(2, callee_name))
+            {
+                return std::nullopt;
+            }
+            (void)check_expr(e.args[0]);
+            const auto value_t = check_expr(e.args[1]);
+            if (value_t.has_value() && value_t->kind != TypeKind::Int)
+            {
+                error_at(span, "set value must be Int");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Unit};
+        }
+
+        if (callee_name == "variant_is")
+        {
+            if (!check_builtin_arity(2, callee_name))
+            {
+                return std::nullopt;
+            }
+
+            const auto value_t = check_expr(e.args[0]);
+            if (!value_t.has_value() || value_t->kind != TypeKind::Enum)
+            {
+                error_at(span, "variant_is expects enum value as first argument");
+                return std::nullopt;
+            }
+
+            const auto* variant = std::get_if<ScopedNameExpr>(&e.args[1].node);
+            if (variant == nullptr)
+            {
+                error_at(span, "variant_is expects enum variant tag as second argument");
+                return std::nullopt;
+            }
+
+            if (variant->lhs != value_t->name)
+            {
+                error_at(span, "variant_is enum mismatch between value and variant tag");
+                return std::nullopt;
+            }
+
+            const auto enum_it = enums_.find(variant->lhs);
+            if (enum_it == enums_.end() || // GCOVR_EXCL_LINE
+                !enum_it->second.variants.contains(variant->rhs))
+            {
+                error_at(span, "unknown variant '" + std::string(variant->rhs) +
+                                   "' for enum '" + std::string(variant->lhs) + "'");
+                return std::nullopt;
+            }
+
+            return Type{.kind = TypeKind::Bool};
+        }
+
+        if (callee_name == "variant_unwrap")
+        {
+            if (!check_builtin_arity(2, callee_name))
+            {
+                return std::nullopt;
+            }
+
+            const auto value_t = check_expr(e.args[0]);
+            if (!value_t.has_value() || value_t->kind != TypeKind::Enum)
+            {
+                error_at(span, "variant_unwrap expects enum value as first argument");
+                return std::nullopt;
+            }
+
+            const auto* variant = std::get_if<ScopedNameExpr>(&e.args[1].node);
+            if (variant == nullptr)
+            {
+                error_at(span, "variant_unwrap expects enum variant tag as second argument");
+                return std::nullopt;
+            }
+
+            if (variant->lhs != value_t->name)
+            {
+                error_at(span, "variant_unwrap enum mismatch between value and variant tag");
+                return std::nullopt;
+            }
+
+            const auto enum_it = enums_.find(variant->lhs);
+            // GCOVR_EXCL_START
+            if (enum_it == enums_.end())
+            {
+                error_at(span, "unknown enum type '" + std::string(variant->lhs) + "'");
+                return std::nullopt;
+            }
+            // GCOVR_EXCL_STOP
+
+            const auto var_it = enum_it->second.variants.find(variant->rhs);
+            if (var_it == enum_it->second.variants.end())
+            {
+                error_at(span, "unknown variant '" + std::string(variant->rhs) +
+                                   "' for enum '" + std::string(variant->lhs) + "'");
+                return std::nullopt;
+            }
+
+            if (!var_it->second.payload.has_value())
+            {
+                error_at(span, "variant_unwrap expects a payload-carrying variant");
+                return std::nullopt;
+            }
+
+            return *var_it->second.payload;
         }
 
         const auto it = functions_.find(callee_name);

@@ -33,6 +33,7 @@ struct VmResult
     Value value = Value::unit_v();
     std::string error;
     std::optional<curlee::source::Span> error_span;
+  VmProfile profile;
     std::vector<std::string> command_stream;
 };
 
@@ -70,6 +71,11 @@ class VM
     [[nodiscard]] VmResult run(const Chunk& chunk, std::size_t fuel,
                    const Capabilities& capabilities,
                    std::optional<std::uint64_t> rng_seed);
+    /** @brief Run with fuel, capabilities, runtime options, and deterministic seeded RNG. */
+    [[nodiscard]] VmResult run(const Chunk& chunk, std::size_t fuel,
+             const Capabilities& capabilities,
+             std::optional<std::uint64_t> rng_seed,
+             const VmRunOptions& options);
 
   private:
     std::vector<Value> stack_;

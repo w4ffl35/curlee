@@ -4,6 +4,8 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 /**
@@ -16,6 +18,13 @@ namespace curlee::vm
 
 struct Value;
 struct VecValue;
+struct SetValue;
+
+enum class VecElementKind
+{
+    Int,
+    Bool,
+};
 
 /** @brief Kind of a runtime value. */
 enum class ValueKind
@@ -24,8 +33,10 @@ enum class ValueKind
     Bool,
     String,
     Unit,
+    Struct,
     Enum,
     Vec,
+    Set,
 };
 
 /**
@@ -39,10 +50,13 @@ struct Value
     std::int64_t int_value = 0;
     bool bool_value = false;
     std::string string_value;
+    std::string struct_name;
+    std::vector<std::pair<std::string, std::shared_ptr<Value>>> struct_fields;
     std::string enum_name;
     std::string variant_name;
     std::shared_ptr<Value> payload;
     std::shared_ptr<VecValue> vec_value;
+    std::shared_ptr<SetValue> set_value;
 
     static Value int_v(std::int64_t v)
     {
@@ -51,10 +65,13 @@ struct Value
             .int_value = v,
             .bool_value = false,
             .string_value = {},
+            .struct_name = {},
+            .struct_fields = {},
             .enum_name = {},
             .variant_name = {},
             .payload = nullptr,
             .vec_value = nullptr,
+            .set_value = nullptr,
         };
     } // GCOVR_EXCL_LINE
 
@@ -65,12 +82,15 @@ struct Value
             .int_value = 0,
             .bool_value = v,
             .string_value = {},
+            .struct_name = {},
+            .struct_fields = {},
             .enum_name = {},
             .variant_name = {},
             .payload = nullptr,
             .vec_value = nullptr,
+            .set_value = nullptr,
         };
-    }
+    } // GCOVR_EXCL_LINE
 
     static Value string_v(std::string v)
     {
@@ -80,11 +100,33 @@ struct Value
         out.bool_value = false;
         out.string_value = std::move(v);
         return out;
-    }
+    } // GCOVR_EXCL_LINE
 
     static Value unit_v() { return Value{}; }
 
-    static Value vec_v(std::size_t max_len);
+    static Value struct_v(std::string struct_name, std::vector<std::pair<std::string, Value>> fields)
+    {
+        Value out;
+        out.kind = ValueKind::Struct;
+        out.struct_name = std::move(struct_name);
+        out.struct_fields.reserve(fields.size());
+        for (auto& [name, value] : fields)
+        {
+            out.struct_fields.emplace_back(std::move(name),
+                                           std::make_shared<Value>(std::move(value)));
+        }
+        return out;
+    } // GCOVR_EXCL_LINE
+
+    static Value vec_v(std::size_t max_len, VecElementKind element_kind = VecElementKind::Int);
+
+    static Value set_v()
+    {
+        Value out;
+        out.kind = ValueKind::Set;
+        out.set_value = std::make_shared<SetValue>();
+        return out;
+    } // GCOVR_EXCL_LINE
 
     static Value enum_v(std::string enum_name, std::string variant_name,
                         std::optional<Value> payload = std::nullopt)
@@ -104,15 +146,22 @@ struct Value
 struct VecValue
 {
     std::size_t max_len = 0;
+    VecElementKind element_kind = VecElementKind::Int;
     std::vector<Value> items;
 };
 
-inline Value Value::vec_v(std::size_t max_len)
+struct SetValue
+{
+    std::unordered_set<std::int64_t> items;
+};
+
+inline Value Value::vec_v(std::size_t max_len, VecElementKind element_kind)
 {
     Value out;
     out.kind = ValueKind::Vec;
     out.vec_value = std::make_shared<VecValue>();
     out.vec_value->max_len = max_len;
+    out.vec_value->element_kind = element_kind;
     return out;
 } // GCOVR_EXCL_LINE
 
@@ -133,6 +182,33 @@ inline bool operator==(const Value& a, const Value& b)
         return a.string_value == b.string_value;
     case ValueKind::Unit:
         return true;
+    case ValueKind::Struct:
+        if (a.struct_name != b.struct_name || a.struct_fields.size() != b.struct_fields.size())
+        {
+            return false;
+        }
+        for (std::size_t i = 0; i < a.struct_fields.size(); ++i)
+        {
+            if (a.struct_fields[i].first != b.struct_fields[i].first)
+            {
+                return false;
+            }
+            const auto& av = a.struct_fields[i].second;
+            const auto& bv = b.struct_fields[i].second;
+            if (av == nullptr || bv == nullptr)
+            {
+                if (av != nullptr || bv != nullptr)
+                {
+                    return false;
+                }
+                continue;
+            }
+            if (!(*av == *bv))
+            {
+                return false;
+            }
+        }
+        return true;
     case ValueKind::Enum:
         if (a.enum_name != b.enum_name || a.variant_name != b.variant_name) // GCOVR_EXCL_LINE
         {
@@ -149,7 +225,14 @@ inline bool operator==(const Value& a, const Value& b)
             return a.vec_value == nullptr && b.vec_value == nullptr;
         }
         return a.vec_value->max_len == b.vec_value->max_len &&
+               a.vec_value->element_kind == b.vec_value->element_kind &&
                a.vec_value->items == b.vec_value->items;
+    case ValueKind::Set:
+        if (a.set_value == nullptr || b.set_value == nullptr)
+        {
+            return a.set_value == nullptr && b.set_value == nullptr;
+        }
+        return a.set_value->items == b.set_value->items;
     }
     return false;
 }
@@ -167,6 +250,28 @@ inline std::string to_string(const Value& v)
         return v.string_value;
     case ValueKind::Unit:
         return "()";
+    case ValueKind::Struct:
+    {
+        std::string out = v.struct_name + "{";
+        for (std::size_t i = 0; i < v.struct_fields.size(); ++i)
+        {
+            if (i > 0)
+            {
+                out += ", ";
+            }
+            out += v.struct_fields[i].first + ": ";
+            if (v.struct_fields[i].second == nullptr)
+            {
+                out += "<null>";
+            }
+            else
+            {
+                out += to_string(*v.struct_fields[i].second);
+            }
+        }
+        out += "}";
+        return out;
+    }
     case ValueKind::Enum:
         if (v.payload == nullptr)
         {
@@ -178,8 +283,16 @@ inline std::string to_string(const Value& v)
         {
             return "Vec<?>(null)";
         }
-        return "Vec(len=" + std::to_string(v.vec_value->items.size()) + "/" +
+        return std::string(v.vec_value->element_kind == VecElementKind::Bool ? "Vec<Bool>" :
+                                                                             "Vec<Int>") +
+               "(len=" + std::to_string(v.vec_value->items.size()) + "/" +
                std::to_string(v.vec_value->max_len) + ")";
+    case ValueKind::Set:
+        if (v.set_value == nullptr)
+        {
+            return "Set<Int>(null)";
+        }
+        return "Set<Int>(len=" + std::to_string(v.set_value->items.size()) + ")";
     }
     return "<unknown>";
 }

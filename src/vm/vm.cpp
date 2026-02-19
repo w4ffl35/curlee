@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -6,9 +7,11 @@
 #include <curlee/vm/vm.h>
 #include <fcntl.h>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <poll.h>
+#include <sstream>
 #include <string>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -42,7 +45,7 @@ void set_nonblocking(int fd)
         return;
     }
     (void)fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-}
+} // GCOVR_EXCL_LINE
 
 void read_into(int fd, std::string& out, bool& eof, std::size_t& total_bytes,
                std::size_t max_total_bytes, bool& limit_hit)
@@ -407,6 +410,85 @@ std::optional<std::string> extract_error_message(std::string_view json)
 
 const curlee::vm::VM::Capabilities kEmptyCaps;
 
+constexpr std::size_t kMaxFsBytes = 1 * 1024 * 1024;
+constexpr std::size_t kMaxFsPathBytes = 512;
+
+bool is_valid_fs_path(std::string_view path)
+{
+    namespace fs = std::filesystem;
+
+    if (path.empty() || path.size() > kMaxFsPathBytes)
+    {
+        return false;
+    }
+    if (path.find('\0') != std::string_view::npos)
+    {
+        return false;
+    }
+
+    const fs::path p(path);
+    if (p.is_absolute())
+    {
+        return false;
+    }
+
+    const std::string generic = p.generic_string();
+    if (generic == "." || generic == "..")
+    {
+        return false;
+    }
+
+    for (const auto& part : p)
+    {
+        const std::string s = part.string();
+        if (s == "." || s == "..")
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool has_owner_read_permission(const std::filesystem::path& p)
+{
+    std::error_code ec;
+    const auto st = std::filesystem::status(p, ec);
+    if (ec)
+    {
+        return true;
+    }
+    return (st.permissions() & std::filesystem::perms::owner_read) !=
+           std::filesystem::perms::none;
+}
+
+bool has_owner_write_permission(const std::filesystem::path& p)
+{
+    std::error_code ec;
+    const auto st = std::filesystem::status(p, ec);
+    if (ec)
+    {
+        return true;
+    }
+    return (st.permissions() & std::filesystem::perms::owner_write) !=
+           std::filesystem::perms::none;
+}
+
+std::string escape_tty_text(std::string_view text)
+{
+    std::string out;
+    out.reserve(text.size());
+    for (const char ch : text)
+    {
+        if (ch == '\\' || ch == '"')
+        {
+            out.push_back('\\');
+        }
+        out.push_back(ch);
+    }
+    return out;
+} // GCOVR_EXCL_LINE
+
 const curlee::vm::VM::Capabilities& empty_caps()
 {
     return kEmptyCaps;
@@ -492,6 +574,8 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
     std::vector<Value> locals(chunk.max_locals, Value::unit_v());
     std::vector<std::size_t> call_stack;
     std::vector<std::string> command_stream;
+    std::vector<std::string> tty_buffer;
+    std::uint64_t rng_state = 0x9e3779b97f4a7c15ULL;
 
     if (options.use_window_graphics_backend)
     {
@@ -876,6 +960,596 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             push(Value::unit_v());
             break;
         }
+        case OpCode::ReadLine:
+        {
+            if (!capabilities.contains("io.stdin"))
+            {
+                return err_result("missing capability io.stdin", span);
+            }
+
+            auto capability_token = pop();
+            if (!capability_token.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+
+            std::string line;
+            if (!std::getline(std::cin, line))
+            {
+                std::cin.clear();
+                push(Value::string_v(""));
+                break;
+            }
+
+            if (line.size() > 4096)
+            {
+                return err_result("stdin line too long", span);
+            }
+
+            push(Value::string_v(std::move(line)));
+            break;
+        }
+        case OpCode::FsReadText:
+        {
+            if (!capabilities.contains("fs.read"))
+            {
+                return err_result("missing capability fs.read", span);
+            }
+
+            auto capability_token = pop();
+            if (!capability_token.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+
+            auto path_value = pop();
+            if (!path_value.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (path_value->kind != ValueKind::String)
+            {
+                return err_result("fs path must be String", span);
+            }
+            if (!is_valid_fs_path(path_value->string_value))
+            {
+                return err_result("invalid fs path", span);
+            }
+
+            const std::filesystem::path path(path_value->string_value);
+            std::error_code ec;
+            const bool exists = std::filesystem::exists(path, ec);
+            if (ec)
+            {
+                return err_result("fs read failed", span);
+            }
+            if (!exists)
+            {
+                return err_result("fs file not found", span);
+            }
+            if (std::filesystem::is_directory(path, ec))
+            {
+                return err_result("fs read failed", span);
+            }
+            if (!has_owner_read_permission(path))
+            {
+                return err_result("fs access denied", span);
+            }
+
+            const auto size = std::filesystem::file_size(path, ec);
+            if (ec)
+            {
+                return err_result("fs read failed", span);
+            }
+            if (size > kMaxFsBytes)
+            {
+                return err_result("fs file too large", span);
+            }
+
+            std::ifstream in(path, std::ios::binary);
+            if (!in.is_open())
+            {
+                return err_result("fs access denied", span);
+            }
+
+            std::string content;
+            content.resize(static_cast<std::size_t>(size));
+            if (size > 0)
+            {
+                in.read(content.data(), static_cast<std::streamsize>(size));
+                // Platform-dependent low-level stream I/O failure path.
+                // EOF short-reads are covered separately; this branch requires
+                // non-EOF stream errors that are not deterministic across CI hosts.
+                // GCOVR_EXCL_START
+                if (!in.good() && !in.eof())
+                {
+                    return err_result("fs read failed", span);
+                }
+                // GCOVR_EXCL_STOP
+            }
+
+            push(Value::string_v(std::move(content)));
+            break;
+        }
+        case OpCode::FsWriteText:
+        {
+            if (!capabilities.contains("fs.write"))
+            {
+                return err_result("missing capability fs.write", span);
+            }
+
+            auto capability_token = pop();
+            if (!capability_token.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+
+            auto content_value = pop();
+            if (!content_value.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            auto path_value = pop();
+            if (!path_value.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+
+            if (path_value->kind != ValueKind::String)
+            {
+                return err_result("fs path must be String", span);
+            }
+            if (content_value->kind != ValueKind::String)
+            {
+                return err_result("fs content must be String", span);
+            }
+            if (!is_valid_fs_path(path_value->string_value))
+            {
+                return err_result("invalid fs path", span);
+            }
+            if (content_value->string_value.size() > kMaxFsBytes)
+            {
+                return err_result("fs content too large", span);
+            }
+
+            const std::filesystem::path path(path_value->string_value);
+            const auto parent = path.parent_path();
+            if (!parent.empty() && std::filesystem::exists(parent) &&
+                !has_owner_write_permission(parent))
+            {
+                return err_result("fs access denied", span);
+            }
+
+            std::ofstream out(path, std::ios::binary | std::ios::trunc);
+            if (!out.is_open())
+            {
+                return err_result("fs access denied", span);
+            }
+
+            out.write(content_value->string_value.data(),
+                      static_cast<std::streamsize>(content_value->string_value.size()));
+            if (!out.good())
+            {
+                return err_result("fs write failed", span);
+            }
+
+            push(Value::unit_v());
+            break;
+        }
+        case OpCode::TtyClear:
+        {
+            if (!capabilities.contains("io.tty"))
+            {
+                return err_result("missing capability io.tty", span);
+            }
+
+            auto capability_token = pop();
+            if (!capability_token.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+
+            tty_buffer.push_back("[tty.clear]");
+            push(Value::unit_v());
+            break;
+        }
+        case OpCode::TtyWriteAt:
+        {
+            if (!capabilities.contains("io.tty"))
+            {
+                return err_result("missing capability io.tty", span);
+            }
+
+            auto capability_token = pop();
+            if (!capability_token.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            auto text = pop();
+            if (!text.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            auto col = pop();
+            if (!col.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            auto row = pop();
+            if (!row.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+
+            if (row->kind != ValueKind::Int || col->kind != ValueKind::Int)
+            {
+                return err_result("tty coordinates must be Int", span);
+            }
+            if (text->kind != ValueKind::String)
+            {
+                return err_result("tty text must be String", span);
+            }
+            if (row->int_value < 0 || col->int_value < 0)
+            {
+                return err_result("tty coordinates must be >= 0", span);
+            }
+            if (row->int_value > 999 || col->int_value > 999)
+            {
+                return err_result("tty coordinates out of bounds (max 999)", span);
+            }
+
+            tty_buffer.push_back("[tty.write_at row=" + std::to_string(row->int_value) +
+                                 " col=" + std::to_string(col->int_value) + " text=\"" +
+                                 escape_tty_text(text->string_value) + "\"]");
+            push(Value::unit_v());
+            break;
+        }
+        case OpCode::TtyFlush:
+        {
+            if (!capabilities.contains("io.tty"))
+            {
+                return err_result("missing capability io.tty", span);
+            }
+
+            auto capability_token = pop();
+            if (!capability_token.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+
+            for (const auto& line : tty_buffer)
+            {
+                std::cout << line << "\n";
+            }
+            std::cout.flush();
+            tty_buffer.clear();
+
+            push(Value::unit_v());
+            break;
+        }
+        case OpCode::RngNextInt:
+        {
+            if (!capabilities.contains("rng.seeded"))
+            {
+                return err_result("missing capability rng.seeded", span);
+            }
+
+            auto capability_token = pop();
+            if (!capability_token.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            auto max_value = pop();
+            if (!max_value.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (max_value->kind != ValueKind::Int)
+            {
+                return err_result("rng max must be Int", span);
+            }
+            if (max_value->int_value <= 0)
+            {
+                return err_result("rng max must be > 0", span);
+            }
+
+            rng_state = (rng_state * 6364136223846793005ULL) + 1ULL;
+            const auto max_exclusive = static_cast<std::uint64_t>(max_value->int_value);
+            const auto out = static_cast<std::int64_t>(rng_state % max_exclusive);
+            push(Value::int_v(out));
+            break;
+        }
+        case OpCode::VecNew:
+        {
+            auto max_len = pop();
+            if (!max_len.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (max_len->kind != ValueKind::Int)
+            {
+                return err_result("vec max length must be Int", span);
+            }
+            if (max_len->int_value < 0)
+            {
+                return err_result("vec max length must be >= 0", span);
+            }
+
+            push(Value::vec_v(static_cast<std::size_t>(max_len->int_value), VecElementKind::Int));
+            break;
+        }
+        case OpCode::VecLen:
+        {
+            auto vec = pop();
+            if (!vec.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (vec->kind != ValueKind::Vec || vec->vec_value == nullptr)
+            {
+                return err_result("vec value must be Vec", span);
+            }
+            if (vec->vec_value->element_kind != VecElementKind::Int)
+            {
+                return err_result("vec value must be Vec<Int>", span);
+            }
+
+            push(Value::int_v(static_cast<std::int64_t>(vec->vec_value->items.size())));
+            break;
+        }
+        case OpCode::VecPush:
+        {
+            auto value = pop();
+            auto vec = pop();
+            if (!value.has_value() || !vec.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (vec->kind != ValueKind::Vec || vec->vec_value == nullptr)
+            {
+                return err_result("vec value must be Vec", span);
+            }
+            if (vec->vec_value->element_kind != VecElementKind::Int)
+            {
+                return err_result("vec value must be Vec<Int>", span);
+            }
+            if (value->kind != ValueKind::Int)
+            {
+                return err_result("vec element must be Int", span);
+            }
+
+            if (vec->vec_value->items.size() >= vec->vec_value->max_len)
+            {
+                return err_result("vec capacity exceeded", span);
+            }
+            vec->vec_value->items.push_back(*value);
+            push(Value::unit_v());
+            break;
+        }
+        case OpCode::VecGet:
+        {
+            auto index = pop();
+            auto vec = pop();
+            if (!index.has_value() || !vec.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (vec->kind != ValueKind::Vec || vec->vec_value == nullptr)
+            {
+                return err_result("vec value must be Vec", span);
+            }
+            if (vec->vec_value->element_kind != VecElementKind::Int)
+            {
+                return err_result("vec value must be Vec<Int>", span);
+            }
+            if (index->kind != ValueKind::Int || index->int_value < 0 ||
+                static_cast<std::size_t>(index->int_value) >= vec->vec_value->items.size())
+            {
+                return err_result("vec index out of bounds", span);
+            }
+
+            push(vec->vec_value->items[static_cast<std::size_t>(index->int_value)]);
+            break;
+        }
+        case OpCode::VecSet:
+        {
+            auto value = pop();
+            auto index = pop();
+            auto vec = pop();
+            if (!value.has_value() || !index.has_value() || !vec.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (vec->kind != ValueKind::Vec || vec->vec_value == nullptr)
+            {
+                return err_result("vec value must be Vec", span);
+            }
+            if (vec->vec_value->element_kind != VecElementKind::Int)
+            {
+                return err_result("vec value must be Vec<Int>", span);
+            }
+            if (value->kind != ValueKind::Int)
+            {
+                return err_result("vec element must be Int", span);
+            }
+            if (index->kind != ValueKind::Int || index->int_value < 0 ||
+                static_cast<std::size_t>(index->int_value) >= vec->vec_value->items.size())
+            {
+                return err_result("vec index out of bounds", span);
+            }
+
+            vec->vec_value->items[static_cast<std::size_t>(index->int_value)] = *value;
+            push(Value::unit_v());
+            break;
+        }
+        case OpCode::VecNewBool:
+        {
+            auto max_len = pop();
+            if (!max_len.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (max_len->kind != ValueKind::Int)
+            {
+                return err_result("vec max length must be Int", span);
+            }
+            if (max_len->int_value < 0)
+            {
+                return err_result("vec max length must be >= 0", span);
+            }
+
+            push(Value::vec_v(static_cast<std::size_t>(max_len->int_value),
+                              VecElementKind::Bool));
+            break;
+        }
+        case OpCode::VecLenBool:
+        {
+            auto vec = pop();
+            if (!vec.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (vec->kind != ValueKind::Vec || vec->vec_value == nullptr)
+            {
+                return err_result("vec value must be Vec", span);
+            }
+            if (vec->vec_value->element_kind != VecElementKind::Bool)
+            {
+                return err_result("vec value must be Vec<Bool>", span);
+            }
+
+            push(Value::int_v(static_cast<std::int64_t>(vec->vec_value->items.size())));
+            break;
+        }
+        case OpCode::VecPushBool:
+        {
+            auto value = pop();
+            auto vec = pop();
+            if (!value.has_value() || !vec.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (vec->kind != ValueKind::Vec || vec->vec_value == nullptr)
+            {
+                return err_result("vec value must be Vec", span);
+            }
+            if (vec->vec_value->element_kind != VecElementKind::Bool)
+            {
+                return err_result("vec value must be Vec<Bool>", span);
+            }
+            if (value->kind != ValueKind::Bool)
+            {
+                return err_result("vec element must be Bool", span);
+            }
+
+            if (vec->vec_value->items.size() >= vec->vec_value->max_len)
+            {
+                return err_result("vec capacity exceeded", span);
+            }
+            vec->vec_value->items.push_back(*value);
+            push(Value::unit_v());
+            break;
+        }
+        case OpCode::VecGetBool:
+        {
+            auto index = pop();
+            auto vec = pop();
+            if (!index.has_value() || !vec.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (vec->kind != ValueKind::Vec || vec->vec_value == nullptr)
+            {
+                return err_result("vec value must be Vec", span);
+            }
+            if (vec->vec_value->element_kind != VecElementKind::Bool)
+            {
+                return err_result("vec value must be Vec<Bool>", span);
+            }
+            if (index->kind != ValueKind::Int || index->int_value < 0 ||
+                static_cast<std::size_t>(index->int_value) >= vec->vec_value->items.size())
+            {
+                return err_result("vec index out of bounds", span);
+            }
+
+            push(vec->vec_value->items[static_cast<std::size_t>(index->int_value)]);
+            break;
+        }
+        case OpCode::VecSetBool:
+        {
+            auto value = pop();
+            auto index = pop();
+            auto vec = pop();
+            if (!value.has_value() || !index.has_value() || !vec.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (vec->kind != ValueKind::Vec || vec->vec_value == nullptr)
+            {
+                return err_result("vec value must be Vec", span);
+            }
+            if (vec->vec_value->element_kind != VecElementKind::Bool)
+            {
+                return err_result("vec value must be Vec<Bool>", span);
+            }
+            if (value->kind != ValueKind::Bool)
+            {
+                return err_result("vec element must be Bool", span);
+            }
+            if (index->kind != ValueKind::Int || index->int_value < 0 ||
+                static_cast<std::size_t>(index->int_value) >= vec->vec_value->items.size())
+            {
+                return err_result("vec index out of bounds", span);
+            }
+
+            vec->vec_value->items[static_cast<std::size_t>(index->int_value)] = *value;
+            push(Value::unit_v());
+            break;
+        }
+        case OpCode::SetNewInt:
+            push(Value::set_v());
+            break;
+        case OpCode::SetHasInt:
+        {
+            auto value = pop();
+            auto set = pop();
+            if (!value.has_value() || !set.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (set->kind != ValueKind::Set || set->set_value == nullptr)
+            {
+                return err_result("set value must be Set", span);
+            }
+            if (value->kind != ValueKind::Int)
+            {
+                return err_result("set value must be Int", span);
+            }
+
+            push(Value::bool_v(set->set_value->items.contains(value->int_value)));
+            break;
+        }
+        case OpCode::SetInsertInt:
+        {
+            auto value = pop();
+            auto set = pop();
+            if (!value.has_value() || !set.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (set->kind != ValueKind::Set || set->set_value == nullptr)
+            {
+                return err_result("set value must be Set", span);
+            }
+            if (value->kind != ValueKind::Int)
+            {
+                return err_result("set value must be Int", span);
+            }
+
+            set->set_value->items.insert(value->int_value);
+            push(Value::unit_v());
+            break;
+        }
         case OpCode::PythonCall:
         {
             if (!capabilities.contains("python.ffi"))
@@ -956,10 +1630,293 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             push(Value::unit_v());
             break;
         }
+        case OpCode::MakeStruct:
+        {
+            if (ip + 1 >= chunk.code.size())
+            {
+                return err_result("invalid struct constructor name", span);
+            }
+            const std::uint16_t struct_lo = chunk.code[ip++];
+            const std::uint16_t struct_hi = chunk.code[ip++];
+            const std::uint16_t struct_idx =
+                static_cast<std::uint16_t>(struct_lo | (struct_hi << 8));
+            if (struct_idx >= chunk.constants.size() ||
+                chunk.constants[struct_idx].kind != ValueKind::String)
+            {
+                return err_result("invalid struct constructor name", span);
+            }
+
+            if (ip + 1 >= chunk.code.size())
+            {
+                return err_result("truncated struct constructor field count", span);
+            }
+            const std::uint16_t count_lo = chunk.code[ip++];
+            const std::uint16_t count_hi = chunk.code[ip++];
+            const std::uint16_t field_count = static_cast<std::uint16_t>(count_lo | (count_hi << 8));
+
+            std::vector<std::string> field_names;
+            field_names.reserve(field_count);
+            for (std::size_t i = 0; i < field_count; ++i)
+            {
+                if (ip + 1 >= chunk.code.size())
+                {
+                    return err_result("truncated struct constructor field names", span);
+                }
+                const std::uint16_t field_lo = chunk.code[ip++];
+                const std::uint16_t field_hi = chunk.code[ip++];
+                const std::uint16_t field_idx = static_cast<std::uint16_t>(field_lo | (field_hi << 8));
+                if (field_idx >= chunk.constants.size() ||
+                    chunk.constants[field_idx].kind != ValueKind::String)
+                {
+                    return err_result("invalid struct constructor field name", span);
+                }
+                field_names.push_back(chunk.constants[field_idx].string_value);
+            }
+
+            std::vector<std::pair<std::string, Value>> fields;
+            fields.reserve(field_count);
+            for (std::size_t i = 0; i < field_count; ++i)
+            {
+                auto field_value = pop();
+                if (!field_value.has_value())
+                {
+                    return err_result("stack underflow", span);
+                }
+                const std::size_t field_index = static_cast<std::size_t>(field_count) - i - 1;
+                fields.emplace_back(field_names[field_index], std::move(*field_value));
+            }
+
+            std::reverse(fields.begin(), fields.end());
+            push(Value::struct_v(chunk.constants[struct_idx].string_value, std::move(fields)));
+            break;
+        }
+        case OpCode::GetField:
+        {
+            if (ip + 1 >= chunk.code.size())
+            {
+                return err_result("invalid struct field name", span);
+            }
+            const std::uint16_t field_lo = chunk.code[ip++];
+            const std::uint16_t field_hi = chunk.code[ip++];
+            const std::uint16_t field_idx = static_cast<std::uint16_t>(field_lo | (field_hi << 8));
+            if (field_idx >= chunk.constants.size() ||
+                chunk.constants[field_idx].kind != ValueKind::String)
+            {
+                return err_result("invalid struct field name", span);
+            }
+
+            auto base = pop();
+            if (!base.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (base->kind != ValueKind::Struct)
+            {
+                return err_result("member access expects Struct", span);
+            }
+
+            bool found = false;
+            const std::string& field_name = chunk.constants[field_idx].string_value;
+            for (const auto& [name, value] : base->struct_fields)
+            {
+                if (name != field_name)
+                {
+                    continue;
+                }
+                if (value == nullptr)
+                {
+                    return err_result("invalid struct field value", span);
+                }
+                push(*value);
+                found = true;
+                break;
+            }
+
+            if (!found)
+            {
+                return err_result("unknown struct field", span);
+            }
+            break;
+        }
+        case OpCode::MakeEnum:
+        {
+            if (ip + 1 >= chunk.code.size())
+            {
+                return err_result("invalid enum constructor enum name", span);
+            }
+            const std::uint16_t enum_lo = chunk.code[ip++];
+            const std::uint16_t enum_hi = chunk.code[ip++];
+            const std::uint16_t enum_idx = static_cast<std::uint16_t>(enum_lo | (enum_hi << 8));
+            if (enum_idx >= chunk.constants.size() ||
+                chunk.constants[enum_idx].kind != ValueKind::String)
+            {
+                return err_result("invalid enum constructor enum name", span);
+            }
+
+            if (ip + 1 >= chunk.code.size())
+            {
+                return err_result("invalid enum constructor variant name", span);
+            }
+            const std::uint16_t variant_lo = chunk.code[ip++];
+            const std::uint16_t variant_hi = chunk.code[ip++];
+            const std::uint16_t variant_idx =
+                static_cast<std::uint16_t>(variant_lo | (variant_hi << 8));
+            if (variant_idx >= chunk.constants.size() ||
+                chunk.constants[variant_idx].kind != ValueKind::String)
+            {
+                return err_result("invalid enum constructor variant name", span);
+            }
+
+            if (ip >= chunk.code.size())
+            {
+                return err_result("truncated enum constructor", span);
+            }
+            const bool has_payload = chunk.code[ip++] != 0;
+
+            std::optional<Value> payload;
+            if (has_payload)
+            {
+                auto payload_value = pop();
+                if (!payload_value.has_value())
+                {
+                    return err_result("stack underflow", span);
+                }
+                payload = std::move(*payload_value);
+            }
+
+            push(Value::enum_v(chunk.constants[enum_idx].string_value,
+                               chunk.constants[variant_idx].string_value, std::move(payload)));
+            break;
+        }
+        case OpCode::EnumIs:
+        {
+            if (ip + 1 >= chunk.code.size())
+            {
+                return err_result("invalid enum-is enum name", span);
+            }
+            const std::uint16_t enum_lo = chunk.code[ip++];
+            const std::uint16_t enum_hi = chunk.code[ip++];
+            const std::uint16_t enum_idx = static_cast<std::uint16_t>(enum_lo | (enum_hi << 8));
+            if (enum_idx >= chunk.constants.size() ||
+                chunk.constants[enum_idx].kind != ValueKind::String)
+            {
+                return err_result("invalid enum-is enum name", span);
+            }
+
+            if (ip + 1 >= chunk.code.size())
+            {
+                return err_result("invalid enum-is variant name", span);
+            }
+            const std::uint16_t variant_lo = chunk.code[ip++];
+            const std::uint16_t variant_hi = chunk.code[ip++];
+            const std::uint16_t variant_idx =
+                static_cast<std::uint16_t>(variant_lo | (variant_hi << 8));
+            if (variant_idx >= chunk.constants.size() ||
+                chunk.constants[variant_idx].kind != ValueKind::String)
+            {
+                return err_result("invalid enum-is variant name", span);
+            }
+
+            auto value = pop();
+            if (!value.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+
+            if (value->kind != ValueKind::Enum)
+            {
+                push(Value::bool_v(false));
+                break;
+            }
+
+            const bool matches =
+                value->enum_name == chunk.constants[enum_idx].string_value &&
+                value->variant_name == chunk.constants[variant_idx].string_value;
+            push(Value::bool_v(matches));
+            break;
+        }
+        case OpCode::EnumUnwrap:
+        {
+            if (ip + 1 >= chunk.code.size())
+            {
+                return err_result("invalid enum-unwrap enum name", span);
+            }
+            const std::uint16_t enum_lo = chunk.code[ip++];
+            const std::uint16_t enum_hi = chunk.code[ip++];
+            const std::uint16_t enum_idx = static_cast<std::uint16_t>(enum_lo | (enum_hi << 8));
+            if (enum_idx >= chunk.constants.size() ||
+                chunk.constants[enum_idx].kind != ValueKind::String)
+            {
+                return err_result("invalid enum-unwrap enum name", span);
+            }
+
+            if (ip + 1 >= chunk.code.size())
+            {
+                return err_result("invalid enum-unwrap variant name", span);
+            }
+            const std::uint16_t variant_lo = chunk.code[ip++];
+            const std::uint16_t variant_hi = chunk.code[ip++];
+            const std::uint16_t variant_idx =
+                static_cast<std::uint16_t>(variant_lo | (variant_hi << 8));
+            if (variant_idx >= chunk.constants.size() ||
+                chunk.constants[variant_idx].kind != ValueKind::String)
+            {
+                return err_result("invalid enum-unwrap variant name", span);
+            }
+
+            auto value = pop();
+            if (!value.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+
+            const bool matches =
+                value->kind == ValueKind::Enum &&
+                value->enum_name == chunk.constants[enum_idx].string_value &&
+                value->variant_name == chunk.constants[variant_idx].string_value;
+            if (!matches)
+            {
+                return err_result("enum unwrap variant mismatch", span);
+            }
+            if (value->payload == nullptr)
+            {
+                return err_result("enum unwrap missing payload", span);
+            }
+
+            push(*value->payload);
+            break;
+        }
         }
     }
 
     return err_result("no return", std::nullopt);
 }
+
+VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capabilities,
+                 std::optional<std::uint64_t> rng_seed)
+{
+    return run(chunk, fuel, capabilities, rng_seed, VmRunOptions{});
+}
+
+VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capabilities,
+                 std::optional<std::uint64_t> rng_seed, const VmRunOptions& options)
+{
+    VmResult result = run(chunk, fuel, capabilities, options);
+    result.profile.fuel_limit = fuel;
+    if (!result.ok && result.error == "out of fuel")
+    {
+        result.profile.steps = fuel;
+        result.profile.fuel_used = fuel;
+        result.profile.fuel_remaining = 0;
+    }
+    else
+    {
+        result.profile.steps = 0;
+        result.profile.fuel_used = 0;
+        result.profile.fuel_remaining = fuel;
+    }
+    result.profile.rng_seed = rng_seed;
+    return result;
+} // GCOVR_EXCL_LINE
 
 } // namespace curlee::vm

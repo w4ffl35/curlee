@@ -798,6 +798,20 @@ fn main(v: E) -> Unit {
         expect_diag(res, "cannot declare builtin function 'print'");
     }
 
+    // cannot redeclare reserved builtin function at tail of builtin-name list
+    {
+        const std::string src =
+            "fn __set_insert_int() -> Unit { return; } fn main() -> Unit { return; }";
+        const auto lexed = lexer::lex(src);
+        if (std::holds_alternative<diag::Diagnostic>(lexed))
+            fail("lex failed");
+        const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+            fail("parse failed");
+        const auto res = types::type_check(std::get<parser::Program>(parsed));
+        expect_diag(res, "cannot declare builtin function '__set_insert_int'");
+    }
+
     // duplicate type name between struct/enum
     {
         const std::string src = "struct S { x: Int; } enum S { A; } fn main() -> Unit { return; }";
@@ -1291,6 +1305,330 @@ fn main(v: E) -> Unit {
 
         const auto res = types::type_check(program);
         expect_diag(res, "unsupported binary operator");
+    }
+
+    // Builtin call typing coverage: exercise arity/type-error branches for runtime intrinsics.
+    {
+        const auto run_tc = [](const std::string& src) -> types::TypeCheckResult
+        {
+            const auto lexed = lexer::lex(src);
+            if (std::holds_alternative<diag::Diagnostic>(lexed))
+                fail("lex failed");
+            const auto parsed = parser::parse(std::get<std::vector<lexer::Token>>(lexed));
+            if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
+                fail("parse failed");
+            return types::type_check(std::get<parser::Program>(parsed));
+        };
+
+        expect_diag(run_tc("fn main() -> String { return __read_line(); }"),
+                    "__read_line expects exactly 1 argument");
+
+        expect_diag(run_tc("fn main(r: cap fs.read) -> String { return __fs_read_text(1, r); }"),
+                    "fs path must be String");
+
+        expect_diag(
+            run_tc("fn main(w: cap fs.write) -> Unit { __fs_write_text(1, \"x\", w); return; }"),
+            "fs path must be String");
+
+        expect_diag(
+            run_tc("fn main(w: cap fs.write) -> Unit { __fs_write_text(\"a\", 1, w); return; }"),
+            "fs content must be String");
+
+        expect_diag(
+            run_tc("fn main(t: cap io.tty) -> Unit { __tty_write_at(true, 0, \"x\", t); return; }"),
+            "tty row must be Int");
+
+        expect_diag(
+            run_tc("fn main(t: cap io.tty) -> Unit { __tty_write_at(0, true, \"x\", t); return; }"),
+            "tty col must be Int");
+
+        expect_diag(
+            run_tc("fn main(t: cap io.tty) -> Unit { __tty_write_at(0, 0, 1, t); return; }"),
+            "tty text must be String");
+
+        expect_diag(
+            run_tc("fn main(r: cap rng.seeded) -> Int { return __rng_next_int(true, r); }"),
+            "rng max must be Int");
+
+        expect_diag(run_tc("fn main() -> Unit { __vec_new_int(true); return; }"),
+                "vec max length must be Int");
+
+        expect_diag(run_tc("fn main() -> Unit { __vec_push_int(__vec_new_int(4), true); return; }"),
+                    "vec value must be Int");
+
+        expect_diag(run_tc("fn main() -> Int { return __vec_get_int(__vec_new_int(4), true); }"),
+                    "vec index must be Int");
+
+        expect_diag(
+            run_tc("fn main() -> Unit { __vec_set_int(__vec_new_int(4), true, 1); return; }"),
+            "vec index must be Int");
+
+        expect_diag(
+            run_tc("fn main() -> Unit { __vec_set_int(__vec_new_int(4), 0, true); return; }"),
+            "vec value must be Int");
+
+        expect_diag(run_tc("fn main() -> Unit { __vec_new_bool(true); return; }"),
+                    "vec max length must be Int");
+
+        expect_diag(
+            run_tc("fn main() -> Unit { __vec_push_bool(__vec_new_bool(4), 1); return; }"),
+            "vec value must be Bool");
+
+        expect_diag(
+            run_tc("fn main() -> Bool { return __vec_get_bool(__vec_new_bool(4), true); }"),
+            "vec index must be Int");
+
+        expect_diag(
+            run_tc("fn main() -> Unit { __vec_set_bool(__vec_new_bool(4), true, false); return; }"),
+            "vec index must be Int");
+
+        expect_diag(
+            run_tc("fn main() -> Unit { __vec_set_bool(__vec_new_bool(4), 0, 1); return; }"),
+            "vec value must be Bool");
+
+        expect_diag(run_tc("fn main() -> Bool { return __set_has_int(__set_new_int(), true); }"),
+                    "set value must be Int");
+
+        expect_diag(
+            run_tc("fn main() -> Unit { __set_insert_int(__set_new_int(), true); return; }"),
+            "set value must be Int");
+
+        expect_diag(run_tc("enum E { A(Int); } fn main() -> Bool { return variant_is(1, E::A); }"),
+                    "variant_is expects enum value as first argument");
+
+        expect_diag(
+            run_tc("enum E { A(Int); } fn main() -> Int { return variant_unwrap(1, E::A); }"),
+            "variant_unwrap expects enum value as first argument");
+
+        expect_diag(
+            run_tc("enum E { A(Int); } fn main() -> Int { let e: E = E::A(1); return variant_unwrap(e, e); }"),
+            "variant_unwrap expects enum variant tag as second argument");
+
+        expect_diag(
+            run_tc("fn main(r: cap fs.read) -> String { return __fs_read_text(\"p\"); }"),
+            "__fs_read_text expects exactly 2 argument");
+
+        expect_diag(
+            run_tc("fn main(w: cap fs.write) -> Unit { __fs_write_text(\"p\", \"x\"); return; }"),
+            "__fs_write_text expects exactly 3 argument");
+
+        expect_diag(
+            run_tc("fn main(t: cap io.tty) -> Unit { __tty_clear(); return; }"),
+            "__tty_clear expects exactly 1 argument");
+
+        expect_diag(
+            run_tc("fn main(t: cap io.tty) -> Unit { __tty_write_at(0, 0, \"x\"); return; }"),
+            "__tty_write_at expects exactly 4 argument");
+
+        expect_diag(
+            run_tc("fn main(t: cap io.tty) -> Unit { __tty_flush(); return; }"),
+            "__tty_flush expects exactly 1 argument");
+
+        expect_diag(
+            run_tc("fn main(r: cap rng.seeded) -> Int { return __rng_next_int(10); }"),
+            "__rng_next_int expects exactly 2 argument");
+
+        expect_diag(run_tc("fn main() -> Int { return __vec_len_int(); }"),
+                    "__vec_len_int expects exactly 1 argument");
+
+        expect_diag(run_tc("fn main() -> Unit { __vec_push_int(__vec_new_int(4)); return; }"),
+                    "__vec_push_int expects exactly 2 argument");
+
+        expect_diag(run_tc("fn main() -> Int { return __vec_get_int(__vec_new_int(4)); }"),
+                    "__vec_get_int expects exactly 2 argument");
+
+        expect_diag(run_tc("fn main() -> Unit { __vec_set_int(__vec_new_int(4), 0); return; }"),
+                    "__vec_set_int expects exactly 3 argument");
+
+        expect_diag(run_tc("fn main() -> Int { return __vec_len_bool(); }"),
+                    "__vec_len_bool expects exactly 1 argument");
+
+        expect_diag(run_tc("fn main() -> Unit { __vec_new_int(); return; }"),
+                "__vec_new_int expects exactly 1 argument");
+
+        expect_diag(run_tc("fn main() -> Unit { __vec_new_bool(); return; }"),
+                "__vec_new_bool expects exactly 1 argument");
+
+        expect_diag(run_tc("fn main() -> Int { return __set_new_int(1); }"),
+                "__set_new_int expects exactly 0 argument");
+
+        expect_diag(run_tc("fn main() -> Unit { __vec_push_bool(__vec_new_bool(4)); return; }"),
+                    "__vec_push_bool expects exactly 2 argument");
+
+        expect_diag(run_tc("fn main() -> Bool { return __vec_get_bool(__vec_new_bool(4)); }"),
+                    "__vec_get_bool expects exactly 2 argument");
+
+        expect_diag(
+            run_tc("fn main() -> Unit { __vec_set_bool(__vec_new_bool(4), 0); return; }"),
+            "__vec_set_bool expects exactly 3 argument");
+
+        expect_diag(run_tc("fn main() -> Bool { return __set_has_int(__set_new_int()); }"),
+                    "__set_has_int expects exactly 2 argument");
+
+        expect_diag(
+            run_tc("fn main() -> Unit { __set_insert_int(__set_new_int()); return; }"),
+            "__set_insert_int expects exactly 2 argument");
+
+        expect_diag(run_tc("enum E { A(Int); } fn main() -> Bool { return variant_is(1); }"),
+                    "variant_is expects exactly 2 argument");
+
+        expect_diag(
+            run_tc("enum E { A(Int); } fn main() -> Bool { let e: E = E::A(1); return variant_is(e, e); }"),
+            "variant_is expects enum variant tag as second argument");
+
+        expect_diag(
+            run_tc("enum E { A(Int); } enum F { A(Int); } fn main() -> Bool { let e: E = E::A(1); return variant_is(e, F::A); }"),
+            "variant_is enum mismatch between value and variant tag");
+
+        expect_diag(
+            run_tc("enum E { A(Int); } fn main() -> Bool { let e: E = E::A(1); return variant_is(e, E::Nope); }"),
+            "unknown variant 'Nope' for enum 'E'");
+
+        expect_diag(run_tc("enum E { A(Int); } fn main() -> Int { return variant_unwrap(1); }"),
+                    "variant_unwrap expects exactly 2 argument");
+
+        expect_diag(
+            run_tc("enum E { A(Int); } enum F { A(Int); } fn main() -> Int { let e: E = E::A(1); return variant_unwrap(e, F::A); }"),
+            "variant_unwrap enum mismatch between value and variant tag");
+
+        expect_diag(
+            run_tc("enum E { A(Int); } fn main() -> Int { let e: E = E::A(1); return variant_unwrap(e, E::Nope); }"),
+            "unknown variant 'Nope' for enum 'E'");
+
+        expect_diag(
+            run_tc("enum E { A(Int); B; } fn main() -> Int { let e: E = E::B; return variant_unwrap(e, E::B); }"),
+            "variant_unwrap expects a payload-carrying variant");
+
+        expect_ok(run_tc("fn main(r: cap fs.read) -> String { return __fs_read_text(\"p\", r); }"));
+
+        expect_ok(
+            run_tc("fn main(w: cap fs.write) -> Unit { __fs_write_text(\"p\", \"x\", w); return; }"));
+
+        expect_ok(run_tc("fn main(t: cap io.tty) -> Unit { __tty_clear(t); return; }"));
+
+        expect_ok(
+            run_tc("fn main(t: cap io.tty) -> Unit { __tty_write_at(0, 0, \"x\", t); return; }"));
+
+        expect_ok(run_tc("fn main(t: cap io.tty) -> Unit { __tty_flush(t); return; }"));
+
+        expect_ok(run_tc("fn main(r: cap rng.seeded) -> Int { return __rng_next_int(10, r); }"));
+
+        expect_ok(run_tc("fn main() -> Int { return __vec_len_int(__vec_new_int(4)); }"));
+
+        expect_ok(run_tc("fn main() -> Unit { __vec_push_int(__vec_new_int(4), 1); return; }"));
+
+        expect_ok(run_tc("fn main() -> Int { return __vec_get_int(__vec_new_int(4), 0); }"));
+
+        expect_ok(
+            run_tc("fn main() -> Unit { __vec_set_int(__vec_new_int(4), 0, 1); return; }"));
+
+        expect_ok(run_tc("fn main() -> Int { return __vec_len_bool(__vec_new_bool(4)); }"));
+
+        expect_ok(
+            run_tc("fn main() -> Unit { __vec_push_bool(__vec_new_bool(4), true); return; }"));
+
+        expect_ok(
+            run_tc("fn main() -> Bool { return __vec_get_bool(__vec_new_bool(4), 0); }"));
+
+        expect_ok(
+            run_tc("fn main() -> Unit { __vec_set_bool(__vec_new_bool(4), 0, false); return; }"));
+
+        expect_ok(run_tc("fn main() -> Bool { return __set_has_int(__set_new_int(), 1); }"));
+
+        expect_ok(
+            run_tc("fn main() -> Unit { __set_insert_int(__set_new_int(), 1); return; }"));
+
+        expect_ok(
+            run_tc("enum E { A(Int); } fn main() -> Bool { let e: E = E::A(1); return variant_is(e, E::A); }"));
+
+        expect_ok(
+            run_tc("enum E { A(Int); } fn main() -> Int { let e: E = E::A(1); return variant_unwrap(e, E::A); }"));
+
+        // Exercise short-circuit branches where check_expr(...) fails and returns nullopt.
+        expect_diag(
+            run_tc("fn main(r: cap fs.read) -> String { return __fs_read_text(missing, r); }"),
+            "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("fn main(w: cap fs.write) -> Unit { __fs_write_text(missing, \"x\", w); return; }"),
+            "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("fn main(w: cap fs.write) -> Unit { __fs_write_text(\"p\", missing, w); return; }"),
+            "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("fn main(t: cap io.tty) -> Unit { __tty_write_at(missing, 0, \"x\", t); return; }"),
+            "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("fn main(t: cap io.tty) -> Unit { __tty_write_at(0, missing, \"x\", t); return; }"),
+            "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("fn main(t: cap io.tty) -> Unit { __tty_write_at(0, 0, missing, t); return; }"),
+            "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("fn main(r: cap rng.seeded) -> Int { return __rng_next_int(missing, r); }"),
+            "unknown name 'missing'");
+
+        expect_diag(run_tc("fn main() -> Unit { __vec_new_int(missing); return; }"),
+                    "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("fn main() -> Unit { __vec_push_int(__vec_new_int(4), missing); return; }"),
+            "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("fn main() -> Int { return __vec_get_int(__vec_new_int(4), missing); }"),
+            "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("fn main() -> Unit { __vec_set_int(__vec_new_int(4), missing, 1); return; }"),
+            "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("fn main() -> Unit { __vec_set_int(__vec_new_int(4), 0, missing); return; }"),
+            "unknown name 'missing'");
+
+        expect_diag(run_tc("fn main() -> Unit { __vec_new_bool(missing); return; }"),
+                    "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("fn main() -> Unit { __vec_push_bool(__vec_new_bool(4), missing); return; }"),
+            "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("fn main() -> Bool { return __vec_get_bool(__vec_new_bool(4), missing); }"),
+            "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("fn main() -> Unit { __vec_set_bool(__vec_new_bool(4), missing, false); return; }"),
+            "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("fn main() -> Unit { __vec_set_bool(__vec_new_bool(4), 0, missing); return; }"),
+            "unknown name 'missing'");
+
+        expect_diag(run_tc("fn main() -> Bool { return __set_has_int(__set_new_int(), missing); }"),
+                    "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("fn main() -> Unit { __set_insert_int(__set_new_int(), missing); return; }"),
+            "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("enum E { A(Int); } fn main() -> Bool { return variant_is(missing, E::A); }"),
+            "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("enum E { A(Int); } fn main() -> Int { return variant_unwrap(missing, E::A); }"),
+            "unknown name 'missing'");
+
+        expect_diag(
+            run_tc("enum E { A(Int); } fn main() -> Int { let e: E = E::A(1); return variant_unwrap(e, E::B); }"),
+            "unknown variant 'B' for enum 'E'");
     }
 
     std::cout << "OK\n";

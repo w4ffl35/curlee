@@ -51,10 +51,20 @@ enum class OpCode : std::uint8_t
     VecPush,
     VecGet,
     VecSet,
+    VecNewBool,
+    VecLenBool,
+    VecPushBool,
+    VecGetBool,
+    VecSetBool,
+    SetNewInt,
+    SetHasInt,
+    SetInsertInt,
     PythonCall,
     MakeEnum,
     EnumIs,
     EnumUnwrap,
+    MakeStruct,
+    GetField,
 };
 
 /** @brief A compiled chunk of bytecode, constants and span map. */

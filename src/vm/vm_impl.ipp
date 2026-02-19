@@ -1369,7 +1369,7 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
                 return finalize_result(err_result("vec max_len too large", span));
             }
 
-            push(Value::vec_v(static_cast<std::size_t>(max_len)));
+            push(Value::vec_v(static_cast<std::size_t>(max_len), VecElementKind::Int));
             break;
         }
         case OpCode::VecLen:
@@ -1382,6 +1382,10 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             if (vec_value->kind != ValueKind::Vec || vec_value->vec_value == nullptr)
             {
                 return finalize_result(err_result("vec value must be Vec", span));
+            }
+            if (vec_value->vec_value->element_kind != VecElementKind::Int)
+            {
+                return finalize_result(err_result("vec value must be Vec<Int>", span));
             }
 
             push(Value::int_v(static_cast<long long>(vec_value->vec_value->items.size())));
@@ -1398,6 +1402,10 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             if (vec_value->kind != ValueKind::Vec || vec_value->vec_value == nullptr)
             {
                 return finalize_result(err_result("vec value must be Vec", span));
+            }
+            if (vec_value->vec_value->element_kind != VecElementKind::Int)
+            {
+                return finalize_result(err_result("vec value must be Vec<Int>", span));
             }
             if (value->kind != ValueKind::Int)
             {
@@ -1426,6 +1434,10 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             {
                 return finalize_result(err_result("vec value must be Vec", span));
             }
+            if (vec_value->vec_value->element_kind != VecElementKind::Int)
+            {
+                return finalize_result(err_result("vec value must be Vec<Int>", span));
+            }
             if (index->kind != ValueKind::Int)
             {
                 return finalize_result(err_result("vec index must be Int", span));
@@ -1453,6 +1465,10 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             {
                 return finalize_result(err_result("vec value must be Vec", span));
             }
+            if (vec_value->vec_value->element_kind != VecElementKind::Int)
+            {
+                return finalize_result(err_result("vec value must be Vec<Int>", span));
+            }
             if (index->kind != ValueKind::Int)
             {
                 return finalize_result(err_result("vec index must be Int", span));
@@ -1469,6 +1485,191 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             }
 
             vec_value->vec_value->items[static_cast<std::size_t>(i)] = *value;
+            push(Value::unit_v());
+            break;
+        }
+        case OpCode::VecNewBool:
+        {
+            auto max_len_value = pop();
+            if (!max_len_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (max_len_value->kind != ValueKind::Int)
+            {
+                return finalize_result(err_result("vec max_len must be Int", span));
+            }
+
+            const auto max_len = max_len_value->int_value;
+            if (max_len < 0)
+            {
+                return finalize_result(err_result("vec max_len must be >= 0", span));
+            }
+            if (static_cast<std::size_t>(max_len) > kMaxVecCapacity)
+            {
+                return finalize_result(err_result("vec max_len too large", span));
+            }
+
+            push(Value::vec_v(static_cast<std::size_t>(max_len), VecElementKind::Bool));
+            break;
+        }
+        case OpCode::VecLenBool:
+        {
+            auto vec_value = pop();
+            if (!vec_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (vec_value->kind != ValueKind::Vec || vec_value->vec_value == nullptr)
+            {
+                return finalize_result(err_result("vec value must be Vec", span));
+            }
+            if (vec_value->vec_value->element_kind != VecElementKind::Bool)
+            {
+                return finalize_result(err_result("vec value must be Vec<Bool>", span));
+            }
+
+            push(Value::int_v(static_cast<long long>(vec_value->vec_value->items.size())));
+            break;
+        }
+        case OpCode::VecPushBool:
+        {
+            auto value = pop();
+            auto vec_value = pop();
+            if (!value.has_value() || !vec_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (vec_value->kind != ValueKind::Vec || vec_value->vec_value == nullptr)
+            {
+                return finalize_result(err_result("vec value must be Vec", span));
+            }
+            if (vec_value->vec_value->element_kind != VecElementKind::Bool)
+            {
+                return finalize_result(err_result("vec value must be Vec<Bool>", span));
+            }
+            if (value->kind != ValueKind::Bool)
+            {
+                return finalize_result(err_result("vec element must be Bool", span));
+            }
+
+            auto& items = vec_value->vec_value->items;
+            if (items.size() >= vec_value->vec_value->max_len)
+            {
+                return finalize_result(err_result("vec capacity exceeded", span));
+            }
+
+            items.push_back(*value);
+            push(Value::unit_v());
+            break;
+        }
+        case OpCode::VecGetBool:
+        {
+            auto index = pop();
+            auto vec_value = pop();
+            if (!index.has_value() || !vec_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (vec_value->kind != ValueKind::Vec || vec_value->vec_value == nullptr)
+            {
+                return finalize_result(err_result("vec value must be Vec", span));
+            }
+            if (vec_value->vec_value->element_kind != VecElementKind::Bool)
+            {
+                return finalize_result(err_result("vec value must be Vec<Bool>", span));
+            }
+            if (index->kind != ValueKind::Int)
+            {
+                return finalize_result(err_result("vec index must be Int", span));
+            }
+
+            const auto i = index->int_value;
+            if (i < 0 || static_cast<std::size_t>(i) >= vec_value->vec_value->items.size())
+            {
+                return finalize_result(err_result("vec index out of bounds", span));
+            }
+
+            push(vec_value->vec_value->items[static_cast<std::size_t>(i)]);
+            break;
+        }
+        case OpCode::VecSetBool:
+        {
+            auto value = pop();
+            auto index = pop();
+            auto vec_value = pop();
+            if (!value.has_value() || !index.has_value() || !vec_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (vec_value->kind != ValueKind::Vec || vec_value->vec_value == nullptr)
+            {
+                return finalize_result(err_result("vec value must be Vec", span));
+            }
+            if (vec_value->vec_value->element_kind != VecElementKind::Bool)
+            {
+                return finalize_result(err_result("vec value must be Vec<Bool>", span));
+            }
+            if (index->kind != ValueKind::Int)
+            {
+                return finalize_result(err_result("vec index must be Int", span));
+            }
+            if (value->kind != ValueKind::Bool)
+            {
+                return finalize_result(err_result("vec element must be Bool", span));
+            }
+
+            const auto i = index->int_value;
+            if (i < 0 || static_cast<std::size_t>(i) >= vec_value->vec_value->items.size())
+            {
+                return finalize_result(err_result("vec index out of bounds", span));
+            }
+
+            vec_value->vec_value->items[static_cast<std::size_t>(i)] = *value;
+            push(Value::unit_v());
+            break;
+        }
+        case OpCode::SetNewInt:
+            push(Value::set_v());
+            break;
+        case OpCode::SetHasInt:
+        {
+            auto value = pop();
+            auto set_value = pop();
+            if (!value.has_value() || !set_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (set_value->kind != ValueKind::Set || set_value->set_value == nullptr)
+            {
+                return finalize_result(err_result("set value must be Set", span));
+            }
+            if (value->kind != ValueKind::Int)
+            {
+                return finalize_result(err_result("set value must be Int", span));
+            }
+
+            push(Value::bool_v(set_value->set_value->items.contains(value->int_value)));
+            break;
+        }
+        case OpCode::SetInsertInt:
+        {
+            auto value = pop();
+            auto set_value = pop();
+            if (!value.has_value() || !set_value.has_value())
+            {
+                return finalize_result(err_result("stack underflow", span));
+            }
+            if (set_value->kind != ValueKind::Set || set_value->set_value == nullptr)
+            {
+                return finalize_result(err_result("set value must be Set", span));
+            }
+            if (value->kind != ValueKind::Int)
+            {
+                return finalize_result(err_result("set value must be Int", span));
+            }
+
+            set_value->set_value->items.insert(value->int_value);
             push(Value::unit_v());
             break;
         }

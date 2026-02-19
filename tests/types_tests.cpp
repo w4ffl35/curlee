@@ -59,8 +59,11 @@ int main()
     using namespace curlee::types;
 
     if (!(to_string(TypeKind::Struct) == "Struct" && to_string(TypeKind::Enum) == "Enum" &&
+            to_string(TypeKind::Vec) == "Vec" && to_string(TypeKind::Set) == "Set" &&
           to_string(Type{.kind = TypeKind::Struct, .name = "S"}) == "S" &&
-          to_string(Type{.kind = TypeKind::Enum, .name = "E"}) == "E"))
+            to_string(Type{.kind = TypeKind::Enum, .name = "E"}) == "E" &&
+            to_string(Type{.kind = TypeKind::Vec, .element_kind = TypeKind::Int}) == "Vec" &&
+            to_string(Type{.kind = TypeKind::Set, .element_kind = TypeKind::Int}) == "Set"))
     {
         fail("expected TypeKind and nominal Type stringification to work");
     }
@@ -75,7 +78,33 @@ int main()
           !(Type{.kind = TypeKind::Enum, .name = "E"} ==
             Type{.kind = TypeKind::Enum, .name = "F"}) &&
           !(Type{.kind = TypeKind::Struct, .name = "S"} ==
-            Type{.kind = TypeKind::Enum, .name = "S"})))
+                        Type{.kind = TypeKind::Enum, .name = "S"}) &&
+                    (Type{.kind = TypeKind::Vec, .element_kind = TypeKind::Int} ==
+                     Type{.kind = TypeKind::Vec, .element_kind = TypeKind::Int}) &&
+                    !(Type{.kind = TypeKind::Vec, .element_kind = TypeKind::Int} ==
+                        Type{.kind = TypeKind::Vec, .element_kind = TypeKind::Bool}) &&
+                    (Type{.kind = TypeKind::Set, .element_kind = TypeKind::Int} ==
+                     Type{.kind = TypeKind::Set, .element_kind = TypeKind::Int}) &&
+                    !(Type{.kind = TypeKind::Set, .element_kind = TypeKind::Int} ==
+                      Type{.kind = TypeKind::Set, .element_kind = TypeKind::Bool}) &&
+                    (Type{.kind = TypeKind::Vec,
+                         .element_kind = TypeKind::Struct,
+                         .element_name = "Point"} ==
+                     Type{.kind = TypeKind::Vec,
+                         .element_kind = TypeKind::Struct,
+                         .element_name = "Point"}) &&
+                    !(Type{.kind = TypeKind::Vec,
+                          .element_kind = TypeKind::Struct,
+                          .element_name = "Point"} ==
+                      Type{.kind = TypeKind::Vec,
+                          .element_kind = TypeKind::Struct,
+                          .element_name = "Other"}) &&
+                    !(Type{.kind = TypeKind::Set,
+                          .element_kind = TypeKind::Enum,
+                          .element_name = "E"} ==
+                      Type{.kind = TypeKind::Set,
+                          .element_kind = TypeKind::Enum,
+                          .element_name = "F"})))
     {
         fail("expected Type equality to respect kind and nominal name");
     }

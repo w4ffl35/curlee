@@ -79,6 +79,17 @@ static std::vector<curlee::vm::OpCode> decode_ops(const curlee::vm::Chunk& chunk
         case OpCode::EnumUnwrap:
             ip += 4;
             break;
+        case OpCode::GetField:
+            ip += 2;
+            break;
+        case OpCode::MakeStruct:
+        {
+            const std::uint16_t count_lo = chunk.code[ip + 2];
+            const std::uint16_t count_hi = chunk.code[ip + 3];
+            const std::uint16_t field_count = static_cast<std::uint16_t>(count_lo | (count_hi << 8));
+            ip += static_cast<std::size_t>(4 + 2 * field_count);
+            break;
+        }
         case OpCode::Add:
         case OpCode::Sub:
         case OpCode::Mul:
@@ -107,6 +118,14 @@ static std::vector<curlee::vm::OpCode> decode_ops(const curlee::vm::Chunk& chunk
         case OpCode::VecPush:
         case OpCode::VecGet:
         case OpCode::VecSet:
+        case OpCode::VecNewBool:
+        case OpCode::VecLenBool:
+        case OpCode::VecPushBool:
+        case OpCode::VecGetBool:
+        case OpCode::VecSetBool:
+        case OpCode::SetNewInt:
+        case OpCode::SetHasInt:
+        case OpCode::SetInsertInt:
         case OpCode::PythonCall:
             break;
         }
@@ -2306,6 +2325,34 @@ int main()
         }
     }
 
+    {
+        const std::string source =
+            "fn main() -> Int { let v: Vec = __vec_new_bool(4); __vec_push_bool(v, true); "
+            "__vec_set_bool(v, 0, false); let s: Set = __set_new_int(); __set_insert_int(s, "
+            "9); if (__set_has_int(s, 9)) { if (__vec_get_bool(v, 0)) { return 0; } return "
+            "__vec_len_bool(v); } return 0; }";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto ops = decode_ops(chunk);
+        if (!contains_op(ops, curlee::vm::OpCode::VecNewBool) ||
+            !contains_op(ops, curlee::vm::OpCode::VecLenBool) ||
+            !contains_op(ops, curlee::vm::OpCode::VecPushBool) ||
+            !contains_op(ops, curlee::vm::OpCode::VecGetBool) ||
+            !contains_op(ops, curlee::vm::OpCode::VecSetBool) ||
+            !contains_op(ops, curlee::vm::OpCode::SetNewInt) ||
+            !contains_op(ops, curlee::vm::OpCode::SetHasInt) ||
+            !contains_op(ops, curlee::vm::OpCode::SetInsertInt))
+        {
+            fail("expected __vec_*_bool/__set_*_int builtins to emit new opcodes");
+        }
+
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(1)))
+        {
+            fail("expected bool vec + int set program to evaluate to 1");
+        }
+    }
+
     // python_ffi.call(...) should lower to a PythonCall opcode.
     {
         const std::string source = "fn main() -> Int { python_ffi.call(); return 0; }";
@@ -2929,57 +2976,39 @@ int main()
     }
 
     {
-        // Unsupported expression forms should be rejected by the emitter.
-        const std::string source_member = "fn main() -> Int { let a: Int = 0; return a.b; }";
-        const auto lexed = curlee::lexer::lex(source_member);
-        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        const std::string source_member = R"(struct Point {
+    x: Int;
+    y: Int;
+}
+fn main() -> Int {
+    let p: Point = Point{x: 1, y: 2};
+    return p.x + p.y;
+})";
+
+        const auto chunk = compile_to_chunk(source_member);
+        const auto ops = decode_ops(chunk);
+        if (!contains_op(ops, curlee::vm::OpCode::MakeStruct) ||
+            !contains_op(ops, curlee::vm::OpCode::GetField))
         {
-            fail("expected lexing to succeed for member access expr case");
+            fail("expected struct literal/member access to emit struct opcodes");
         }
-        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
-        const auto parsed = curlee::parser::parse(tokens);
-        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(3)))
         {
-            fail("expected parsing to succeed for member access expr case");
-        }
-        const auto& program = std::get<curlee::parser::Program>(parsed);
-        const auto emitted = curlee::compiler::emit_bytecode(program);
-        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
-        {
-            fail("expected emission to fail for member access expr case");
-        }
-        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
-        if (diags.empty() ||
-            diags[0].message.find("member access not supported") == std::string::npos)
-        {
-            fail("expected member access diagnostic");
+            fail("expected runnable struct literal/member access to evaluate");
         }
     }
 
     {
-        const std::string source_scoped = "fn main() -> Int { return a::b; }";
-        const auto lexed = curlee::lexer::lex(source_scoped);
-        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        const std::string source_scoped =
+            "fn main() -> Int { match (a::b) { a::b => { return 7; } } return 0; }";
+
+        const auto chunk = compile_to_chunk(source_scoped);
+        const auto res = run_chunk(chunk);
+        if (!res.ok || !(res.value == curlee::vm::Value::int_v(7)))
         {
-            fail("expected lexing to succeed for scoped name expr case");
-        }
-        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
-        const auto parsed = curlee::parser::parse(tokens);
-        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
-        {
-            fail("expected parsing to succeed for scoped name expr case");
-        }
-        const auto& program = std::get<curlee::parser::Program>(parsed);
-        const auto emitted = curlee::compiler::emit_bytecode(program);
-        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
-        {
-            fail("expected emission to fail for scoped name expr case");
-        }
-        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
-        if (diags.empty() ||
-            diags[0].message.find("scoped names (::) not supported") == std::string::npos)
-        {
-            fail("expected scoped name diagnostic");
+            fail("expected scoped enum constructor expression to be runnable");
         }
     }
 
@@ -2991,6 +3020,7 @@ int main()
         using curlee::parser::Expr;
         using curlee::parser::Function;
         using curlee::parser::IntExpr;
+        using curlee::parser::MemberExpr;
         using curlee::parser::NameExpr;
         using curlee::parser::Program;
         using curlee::parser::ReturnStmt;
@@ -3069,10 +3099,26 @@ int main()
                 fail("expected emission to fail for struct literal expr case");
             }
             const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
-            if (diags.empty() ||
-                diags[0].message.find("struct literals not supported") == std::string::npos)
+            if (diags.empty() || diags[0].message.find("unknown struct") == std::string::npos)
             {
                 fail("expected struct literal diagnostic");
+            }
+        }
+
+        {
+            Expr root;
+            root.node = MemberExpr{.base = nullptr, .member = "x"};
+            const auto emitted = run_with_expr(std::move(root));
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for null member base case");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("invalid member access in runnable code") ==
+                    std::string::npos)
+            {
+                fail("expected invalid member access diagnostic");
             }
         }
 

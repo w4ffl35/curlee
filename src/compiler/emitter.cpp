@@ -29,6 +29,7 @@ using curlee::parser::ReturnStmt;
 using curlee::parser::ScopedNameExpr;
 using curlee::parser::Stmt;
 using curlee::parser::StructLiteralExpr;
+using curlee::parser::StructDecl;
 using curlee::parser::UnsafeStmt;
 using curlee::parser::WhileStmt;
 using curlee::source::Span;
@@ -49,6 +50,19 @@ static std::string join_path(const std::vector<std::string_view>& parts)
     }
     return out;
 } // GCOVR_EXCL_LINE
+
+static bool is_reserved_builtin_name(std::string_view name)
+{
+    static const std::unordered_set<std::string_view> reserved = {
+        "print",           "__read_line",      "__tty_clear",      "__fs_read_text",
+        "__fs_write_text", "__tty_write_at",   "__tty_flush",      "__rng_next_int",
+        "__vec_new_int",   "__vec_len_int",    "__vec_push_int",   "__vec_get_int",
+        "__vec_set_int",   "__vec_new_bool",   "__vec_len_bool",   "__vec_push_bool",
+        "__vec_get_bool",  "__vec_set_bool",   "__set_new_int",    "__set_has_int",
+        "__set_insert_int", // GCOVR_EXCL_LINE
+    }; // GCOVR_EXCL_LINE
+    return reserved.contains(name);
+}
 
 static bool collect_member_chain(const Expr& expr, std::vector<std::string_view>& out)
 {
@@ -113,11 +127,24 @@ class Emitter
             functions_.emplace(f.name, &f);
         }
 
+        structs_.clear();
+        for (const auto& s : program.structs)
+        {
+            if (structs_.contains(s.name))
+            {
+                diags_.push_back(error_at(s.span, "duplicate struct declaration '" +
+                                                      std::string(s.name) + "'"));
+                return diags_;
+            }
+            structs_.emplace(s.name, &s);
+        }
+
         for (const auto& f : program.functions)
         {
-            if (f.name == "print")
+            if (is_reserved_builtin_name(f.name))
             {
-                diags_.push_back(error_at(f.span, "cannot declare builtin function 'print'"));
+                diags_.push_back(error_at(f.span, "cannot declare builtin function '" +
+                                                      std::string(f.name) + "'"));
                 return diags_;
             }
         }
@@ -186,6 +213,7 @@ class Emitter
     bool current_is_main_ = false;
 
     std::unordered_map<std::string_view, const Function*> functions_;
+    std::unordered_map<std::string_view, const StructDecl*> structs_;
 
     std::unordered_set<std::string> imported_module_keys_;
     std::unordered_map<std::string_view, std::string> imported_module_aliases_;
@@ -218,6 +246,48 @@ class Emitter
     {
         chunk_.code[pos] = static_cast<std::uint8_t>(value & 0xFF);
         chunk_.code[pos + 1] = static_cast<std::uint8_t>((value >> 8) & 0xFF);
+    }
+
+    std::uint16_t emit_string_constant(std::string_view value, Span span,
+                                       std::string_view context)
+    {
+        const auto idx = chunk_.add_constant(Value::string_v(std::string(value)));
+        if (idx > std::numeric_limits<std::uint16_t>::max())
+        {
+            diags_.push_back(error_at(span, std::string(context) + " constant index overflow"));
+            return 0;
+        }
+        return static_cast<std::uint16_t>(idx);
+    }
+
+    void emit_enum_constructor(std::string_view enum_name, std::string_view variant_name,
+                               const Expr* payload_expr, Span span)
+    {
+        if (payload_expr != nullptr)
+        {
+            emit_expr(*payload_expr);
+            if (!diags_.empty())
+            {
+                return;
+            }
+        }
+
+        const auto enum_idx = emit_string_constant(enum_name, span, "enum name");
+        if (!diags_.empty())
+        {
+            return;
+        }
+        const auto variant_idx = emit_string_constant(variant_name, span, "enum variant");
+        if (!diags_.empty())
+        {
+            return;
+        }
+
+        chunk_.emit(OpCode::MakeEnum, span);
+        chunk_.emit_u16(enum_idx, span);
+        chunk_.emit_u16(variant_idx, span);
+        chunk_.code.push_back(payload_expr != nullptr ? 1 : 0);
+        chunk_.spans.push_back(span);
     }
 
     void emit_function(const Function& fn, bool is_main)
@@ -442,9 +512,90 @@ class Emitter
         patch_u16(exit_patch, static_cast<std::uint16_t>(ip()));
     }
 
-    void emit_stmt_node(const MatchStmt&, Span span)
+    void emit_stmt_node(const MatchStmt& stmt, Span)
     {
-        diags_.push_back(error_at(span, "match statements are not supported in runnable code"));
+        emit_expr(stmt.value);
+        if (!diags_.empty())
+        {
+            return;
+        }
+
+        const auto match_slot = static_cast<std::uint16_t>(local_base_ + locals_.size());
+        chunk_.emit_local(OpCode::StoreLocal, match_slot, stmt.value.span);
+
+        const auto locals_before_match = locals_;
+        std::vector<std::size_t> end_patches;
+
+        for (const auto& arm : stmt.arms)
+        {
+            locals_ = locals_before_match;
+
+            const auto enum_idx =
+                emit_string_constant(arm.pattern.enum_name, arm.pattern.span, "match enum");
+            if (!diags_.empty())
+            {
+                return;
+            }
+            const auto variant_idx =
+                emit_string_constant(arm.pattern.variant_name, arm.pattern.span, "match variant");
+            if (!diags_.empty())
+            {
+                return;
+            }
+
+            chunk_.emit_local(OpCode::LoadLocal, match_slot, arm.pattern.span);
+            chunk_.emit(OpCode::EnumIs, arm.pattern.span);
+            chunk_.emit_u16(enum_idx, arm.pattern.span);
+            chunk_.emit_u16(variant_idx, arm.pattern.span);
+
+            chunk_.emit(OpCode::JumpIfFalse, arm.pattern.span);
+            const auto next_arm_patch = emit_u16_placeholder(arm.pattern.span);
+
+            if (arm.pattern.payload_name.has_value())
+            {
+                const auto payload_slot = static_cast<std::uint16_t>(local_base_ + locals_.size());
+                const auto inserted = locals_.emplace(*arm.pattern.payload_name, payload_slot);
+                if (!inserted.second)
+                {
+                    diags_.push_back(error_at(
+                        arm.pattern.span,
+                        "duplicate match payload binding '" +
+                            std::string(*arm.pattern.payload_name) + "' in runnable code"));
+                    return;
+                }
+
+                chunk_.emit_local(OpCode::LoadLocal, match_slot, arm.pattern.span);
+                chunk_.emit(OpCode::EnumUnwrap, arm.pattern.span);
+                chunk_.emit_u16(enum_idx, arm.pattern.span);
+                chunk_.emit_u16(variant_idx, arm.pattern.span);
+                chunk_.emit_local(OpCode::StoreLocal, payload_slot, arm.pattern.span);
+            }
+
+            if (arm.body == nullptr)
+            {
+                diags_.push_back(error_at(arm.span, "match arm body missing in runnable code"));
+                return;
+            }
+
+            for (const auto& nested : arm.body->stmts)
+            {
+                emit_stmt(nested);
+                if (!diags_.empty())
+                {
+                    return;
+                }
+            }
+
+            chunk_.emit(OpCode::Jump, arm.span);
+            end_patches.push_back(emit_u16_placeholder(arm.span));
+            patch_u16(next_arm_patch, static_cast<std::uint16_t>(ip()));
+        }
+
+        locals_ = locals_before_match;
+        for (const auto patch : end_patches)
+        {
+            patch_u16(patch, static_cast<std::uint16_t>(ip()));
+        }
     }
 
     void emit_expr(const Expr& expr)
@@ -540,19 +691,141 @@ class Emitter
         chunk_.emit_local(OpCode::LoadLocal, it->second, span);
     }
 
-    void emit_expr_node(const MemberExpr&, Span span)
+    void emit_expr_node(const MemberExpr& expr, Span span)
     {
-        diags_.push_back(error_at(span, "member access not supported in emitter yet"));
+        if (expr.base == nullptr)
+        {
+            diags_.push_back(error_at(span, "invalid member access in runnable code"));
+            return;
+        }
+
+        emit_expr(*expr.base);
+        if (!diags_.empty())
+        {
+            return;
+        }
+
+        const auto field_idx = emit_string_constant(expr.member, span, "struct field");
+        if (!diags_.empty())
+        {
+            return;
+        }
+
+        chunk_.emit(OpCode::GetField, span);
+        chunk_.emit_u16(field_idx, span);
     }
 
-    void emit_expr_node(const ScopedNameExpr&, Span span)
+    void emit_expr_node(const ScopedNameExpr& expr, Span span)
     {
-        diags_.push_back(error_at(span, "scoped names (::) not supported in emitter yet"));
+        emit_enum_constructor(expr.lhs, expr.rhs, nullptr, span);
     }
 
-    void emit_expr_node(const StructLiteralExpr&, Span span)
+    void emit_expr_node(const StructLiteralExpr& expr, Span span)
     {
-        diags_.push_back(error_at(span, "struct literals not supported in emitter yet"));
+        const auto struct_it = structs_.find(expr.type_name);
+        if (struct_it == structs_.end())
+        {
+            diags_.push_back(error_at(span, "unknown struct '" + std::string(expr.type_name) +
+                                                "' in runnable code"));
+            return;
+        }
+
+        const auto* decl = struct_it->second;
+        std::unordered_map<std::string_view, const curlee::parser::StructLiteralExprField*>
+            provided_fields;
+        provided_fields.reserve(expr.fields.size());
+        for (const auto& field : expr.fields)
+        {
+            const auto [_, inserted] = provided_fields.emplace(field.name, &field);
+            if (!inserted)
+            {
+                diags_.push_back(error_at(field.span, "duplicate field '" + std::string(field.name) +
+                                                          "' in struct literal"));
+                return;
+            }
+        }
+
+        std::unordered_set<std::string_view> declared_fields;
+        declared_fields.reserve(decl->fields.size());
+        for (const auto& field : decl->fields)
+        {
+            declared_fields.insert(field.name);
+        }
+
+        for (const auto& field : expr.fields)
+        {
+            if (!declared_fields.contains(field.name))
+            {
+                diags_.push_back(error_at(field.span, "unknown field '" + std::string(field.name) +
+                                                          "' for struct '" +
+                                                      std::string(expr.type_name) + "'"));
+                return;
+            }
+        }
+
+        if (decl->fields.size() != expr.fields.size())
+        {
+            diags_.push_back(error_at(span, "struct literal for '" + std::string(expr.type_name) +
+                                                "' has incorrect field count"));
+            return;
+        }
+
+        if (decl->fields.size() > std::numeric_limits<std::uint16_t>::max())
+        {
+            diags_.push_back(
+                error_at(span, "struct field count exceeds 16-bit runnable bytecode limit"));
+            return;
+        }
+
+        for (const auto& declared : decl->fields)
+        {
+            const auto literal_field_it = provided_fields.find(declared.name);
+            // Unreachable with current invariants: we already validated that every
+            // literal field name is declared and the field counts are equal.
+            // Keeping this diagnostic as a defensive guard for future parser/AST changes.
+            // GCOVR_EXCL_START
+            if (literal_field_it == provided_fields.end())
+            {
+                diags_.push_back(error_at(span, "missing field '" + std::string(declared.name) +
+                                                    "' in struct literal for '" +
+                                                std::string(expr.type_name) + "'"));
+                return;
+            }
+            // GCOVR_EXCL_STOP
+
+            const auto* literal_field = literal_field_it->second;
+            if (literal_field->value == nullptr)
+            {
+                diags_.push_back(error_at(literal_field->span,
+                                          "missing struct field value in runnable code"));
+                return;
+            }
+
+            emit_expr(*literal_field->value);
+            if (!diags_.empty())
+            {
+                return;
+            }
+        }
+
+        const auto struct_idx = emit_string_constant(expr.type_name, span, "struct name");
+        if (!diags_.empty())
+        {
+            return;
+        }
+
+        chunk_.emit(OpCode::MakeStruct, span);
+        chunk_.emit_u16(struct_idx, span);
+        chunk_.emit_u16(static_cast<std::uint16_t>(decl->fields.size()), span);
+        for (const auto& declared : decl->fields)
+        {
+            const auto field_idx = emit_string_constant(declared.name, declared.span, "struct field");
+            if (!diags_.empty())
+            {
+                return;
+            }
+            chunk_.emit_u16(field_idx, declared.span);
+        }
     }
 
     void emit_expr_node(const curlee::parser::UnaryExpr& expr, Span span)
@@ -692,6 +965,195 @@ class Emitter
 
     void emit_expr_node(const CallExpr& expr, Span span)
     {
+        if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
+            callee_name != nullptr)
+        {
+            const auto emit_intrinsic = [&](OpCode op, std::size_t arity,
+                                            const char* display_name) -> bool
+            {
+                if (expr.args.size() != arity)
+                {
+                    diags_.push_back(error_at(span, std::string(display_name) + " expects exactly " +
+                                                        std::to_string(arity) + " argument(s)"));
+                    return true;
+                }
+                for (const auto& arg : expr.args)
+                {
+                    emit_expr(arg);
+                    if (!diags_.empty())
+                    {
+                        return true;
+                    }
+                }
+                chunk_.emit(op, span);
+                return true;
+            };
+
+            if (callee_name->name == "__read_line")
+            {
+                emit_intrinsic(OpCode::ReadLine, 1, "__read_line");
+                return;
+            }
+            if (callee_name->name == "__fs_read_text")
+            {
+                emit_intrinsic(OpCode::FsReadText, 2, "__fs_read_text");
+                return;
+            }
+            if (callee_name->name == "__fs_write_text")
+            {
+                emit_intrinsic(OpCode::FsWriteText, 3, "__fs_write_text");
+                return;
+            }
+            if (callee_name->name == "__tty_clear")
+            {
+                emit_intrinsic(OpCode::TtyClear, 1, "__tty_clear");
+                return;
+            }
+            if (callee_name->name == "__tty_write_at")
+            {
+                emit_intrinsic(OpCode::TtyWriteAt, 4, "__tty_write_at");
+                return;
+            }
+            if (callee_name->name == "__tty_flush")
+            {
+                emit_intrinsic(OpCode::TtyFlush, 1, "__tty_flush");
+                return;
+            }
+            if (callee_name->name == "__rng_next_int")
+            {
+                emit_intrinsic(OpCode::RngNextInt, 2, "__rng_next_int");
+                return;
+            }
+            if (callee_name->name == "__vec_new_int")
+            {
+                emit_intrinsic(OpCode::VecNew, 1, "__vec_new_int");
+                return;
+            }
+            if (callee_name->name == "__vec_len_int")
+            {
+                emit_intrinsic(OpCode::VecLen, 1, "__vec_len_int");
+                return;
+            }
+            if (callee_name->name == "__vec_push_int")
+            {
+                emit_intrinsic(OpCode::VecPush, 2, "__vec_push_int");
+                return;
+            }
+            if (callee_name->name == "__vec_get_int")
+            {
+                emit_intrinsic(OpCode::VecGet, 2, "__vec_get_int");
+                return;
+            }
+            if (callee_name->name == "__vec_set_int")
+            {
+                emit_intrinsic(OpCode::VecSet, 3, "__vec_set_int");
+                return;
+            }
+            if (callee_name->name == "__vec_new_bool")
+            {
+                emit_intrinsic(OpCode::VecNewBool, 1, "__vec_new_bool");
+                return;
+            }
+            if (callee_name->name == "__vec_len_bool")
+            {
+                emit_intrinsic(OpCode::VecLenBool, 1, "__vec_len_bool");
+                return;
+            }
+            if (callee_name->name == "__vec_push_bool")
+            {
+                emit_intrinsic(OpCode::VecPushBool, 2, "__vec_push_bool");
+                return;
+            }
+            if (callee_name->name == "__vec_get_bool")
+            {
+                emit_intrinsic(OpCode::VecGetBool, 2, "__vec_get_bool");
+                return;
+            }
+            if (callee_name->name == "__vec_set_bool")
+            {
+                emit_intrinsic(OpCode::VecSetBool, 3, "__vec_set_bool");
+                return;
+            }
+            if (callee_name->name == "__set_new_int")
+            {
+                emit_intrinsic(OpCode::SetNewInt, 0, "__set_new_int");
+                return;
+            }
+            if (callee_name->name == "__set_has_int")
+            {
+                emit_intrinsic(OpCode::SetHasInt, 2, "__set_has_int");
+                return;
+            }
+            if (callee_name->name == "__set_insert_int")
+            {
+                emit_intrinsic(OpCode::SetInsertInt, 2, "__set_insert_int");
+                return;
+            }
+
+            const auto emit_variant_predicate = [&](OpCode op,
+                                                    const char* display_name) -> bool
+            {
+                if (expr.args.size() != 2)
+                {
+                    diags_.push_back(error_at(span, std::string(display_name) +
+                                                        " expects exactly 2 argument(s)"));
+                    return true;
+                }
+
+                const auto* variant = std::get_if<ScopedNameExpr>(&expr.args[1].node);
+                if (variant == nullptr)
+                {
+                    diags_.push_back(error_at(
+                        span,
+                        std::string(display_name) +
+                            " expects enum variant tag as second argument"));
+                    return true;
+                }
+
+                emit_expr(expr.args[0]);
+                if (!diags_.empty())
+                {
+                    return true;
+                }
+
+                const auto enum_idx = emit_string_constant(variant->lhs, span, display_name);
+                const auto variant_idx =
+                    emit_string_constant(variant->rhs, span, display_name);
+                chunk_.emit(op, span);
+                chunk_.emit_u16(enum_idx, span);
+                chunk_.emit_u16(variant_idx, span);
+                return true;
+            };
+
+            if (callee_name->name == "variant_is")
+            {
+                emit_variant_predicate(OpCode::EnumIs, "variant_is");
+                return;
+            }
+
+            if (callee_name->name == "variant_unwrap")
+            {
+                emit_variant_predicate(OpCode::EnumUnwrap, "variant_unwrap");
+                return;
+            }
+        }
+
+        if (const auto* callee_scoped = std::get_if<ScopedNameExpr>(&expr.callee->node);
+            callee_scoped != nullptr)
+        {
+            if (expr.args.size() > 1)
+            {
+                diags_.push_back(error_at(
+                    span,
+                    "enum constructors in runnable code accept at most one payload argument"));
+                return;
+            }
+
+            const Expr* payload_expr = expr.args.empty() ? nullptr : &expr.args[0];
+            emit_enum_constructor(callee_scoped->lhs, callee_scoped->rhs, payload_expr, span);
+            return;
+        }
+
         // Builtin: print(<expr>)
         if (const auto* callee_name = std::get_if<curlee::parser::NameExpr>(&expr.callee->node);
             callee_name != nullptr && callee_name->name == "print")

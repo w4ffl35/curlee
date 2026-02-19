@@ -132,6 +132,27 @@ static void expect_roundtrip(const curlee::vm::Chunk& expected,
             break;
         case curlee::vm::ValueKind::Unit:
             break;
+        case curlee::vm::ValueKind::Struct:
+            expect_eq(a.struct_name, b.struct_name, what + ": struct name constant");
+            expect_eq(a.struct_fields.size(), b.struct_fields.size(),
+                      what + ": struct field count constant");
+            for (std::size_t j = 0; j < a.struct_fields.size(); ++j)
+            {
+                expect_eq(a.struct_fields[j].first, b.struct_fields[j].first,
+                          what + ": struct field name constant");
+                if (a.struct_fields[j].second == nullptr || b.struct_fields[j].second == nullptr)
+                {
+                    expect(a.struct_fields[j].second == nullptr &&
+                               b.struct_fields[j].second == nullptr,
+                           what + ": struct field value presence");
+                }
+                else
+                {
+                    expect(*a.struct_fields[j].second == *b.struct_fields[j].second,
+                           what + ": struct field value constant");
+                }
+            }
+            break;
         case curlee::vm::ValueKind::Enum:
             expect_eq(a.enum_name, b.enum_name, what + ": enum name constant");
             expect_eq(a.variant_name, b.variant_name, what + ": enum variant constant");
@@ -185,6 +206,9 @@ static std::vector<std::uint8_t> encode_chunk_v1(const curlee::vm::Chunk& chunk)
             break;
         case curlee::vm::ValueKind::Unit:
             append_u8(out, 3);
+            break;
+        case curlee::vm::ValueKind::Struct:
+            fail("v1 encoder does not support struct constants");
             break;
         case curlee::vm::ValueKind::Enum:
             fail("v1 encoder does not support enum constants");

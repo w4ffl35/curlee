@@ -89,6 +89,126 @@ int main(int argc, char** argv)
             fail("unexpected Unit value equality behavior");
         }
 
+        const Value p1 = Value::struct_v(
+            "Point", {{"x", Value::int_v(1)}, {"y", Value::int_v(2)}});
+        const Value p2 = Value::struct_v(
+            "Point", {{"x", Value::int_v(1)}, {"y", Value::int_v(2)}});
+        const Value p3 = Value::struct_v(
+            "Point", {{"x", Value::int_v(1)}, {"y", Value::int_v(3)}});
+        if (!(p1 == p2) || (p1 == p3))
+        {
+            fail("unexpected Struct value equality behavior");
+        }
+
+        Value p4 = p1;
+        p4.struct_fields[0].second.reset();
+        if (p1 == p4)
+        {
+            fail("expected Struct values with null/non-null field mismatch to compare unequal");
+        }
+
+        Value p5 = Value::struct_v("Point", {{"x", Value::int_v(1)}});
+        Value p6 = Value::struct_v("Point", {{"x", Value::int_v(1)}});
+        p5.struct_fields[0].second.reset();
+        p6.struct_fields[0].second.reset();
+        if (!(p5 == p6))
+        {
+            fail("expected Struct values with matching null fields to compare equal");
+        }
+
+        const Value p7 = Value::struct_v("Point", {{"a", Value::int_v(1)}});
+        const Value p8 = Value::struct_v("Point", {{"b", Value::int_v(1)}});
+        if (p7 == p8)
+        {
+            fail("expected Struct values with different field names to compare unequal");
+        }
+        if (p1 == Value::struct_v("Other", {{"x", Value::int_v(1)}, {"y", Value::int_v(2)}}))
+        {
+            fail("expected Struct values with different names to compare unequal");
+        }
+        if (p1 == Value::struct_v("Point", {{"x", Value::int_v(1)}}))
+        {
+            fail("expected Struct values with different field counts to compare unequal");
+        }
+
+        const Value e1 = Value::enum_v("Opt", "Some", Value::int_v(1));
+        const Value e2 = Value::enum_v("Opt", "Some", Value::int_v(1));
+        const Value e3 = Value::enum_v("Opt", "None");
+        const Value e4 = Value::enum_v("Other", "Some", Value::int_v(1));
+        const Value e5 = Value::enum_v("Opt", "Some", Value::int_v(2));
+        if (!(e1 == e2) || (e1 == e3) || (e1 == e4))
+        {
+            fail("unexpected Enum value equality behavior");
+        }
+        if (e1 == e5)
+        {
+            fail("expected Enum values with different payloads to compare unequal");
+        }
+
+        const Value vb1 = Value::vec_v(3, VecElementKind::Bool);
+        const Value vb2 = Value::vec_v(3, VecElementKind::Bool);
+        const Value vi = Value::vec_v(3, VecElementKind::Int);
+        Value vb3 = Value::vec_v(4, VecElementKind::Bool);
+        Value vb4 = Value::vec_v(3, VecElementKind::Bool);
+        vb4.vec_value->items.push_back(Value::bool_v(true));
+        if (!(vb1 == vb2) || (vb1 == vi))
+        {
+            fail("unexpected Vec value equality behavior");
+        }
+        if (vb1 == vb3 || vb1 == vb4)
+        {
+            fail("expected Vec max_len/items mismatches to compare unequal");
+        }
+
+        Value st1 = Value::set_v();
+        const Value st2 = Value::set_v();
+        Value st3 = Value::set_v();
+        st3.set_value->items.insert(5);
+        if (!(st1 == st2))
+        {
+            fail("unexpected Set value equality behavior");
+        }
+        if (st1 == st3)
+        {
+            fail("expected Set content mismatch to compare unequal");
+        }
+
+        Value null_vec_a;
+        null_vec_a.kind = ValueKind::Vec;
+        Value null_vec_b;
+        null_vec_b.kind = ValueKind::Vec;
+        Value non_null_vec = Value::vec_v(1, VecElementKind::Int);
+        if (!(null_vec_a == null_vec_b) || to_string(null_vec_a) != "Vec<?>(null)")
+        {
+            fail("expected null Vec defensive behavior");
+        }
+        if (null_vec_a == non_null_vec)
+        {
+            fail("expected null Vec and non-null Vec to compare unequal");
+        }
+        if (non_null_vec == null_vec_a)
+        {
+            fail("expected non-null Vec and null Vec to compare unequal");
+        }
+
+        Value null_set_a;
+        null_set_a.kind = ValueKind::Set;
+        Value null_set_b;
+        null_set_b.kind = ValueKind::Set;
+        Value non_null_set = Value::set_v();
+        if (!(null_set_a == null_set_b) || to_string(null_set_a) != "Set<Int>(null)")
+        {
+            fail("expected null Set defensive behavior");
+        }
+        if (null_set_a == non_null_set)
+        {
+            fail("expected null Set and non-null Set to compare unequal");
+        }
+        if (non_null_set == null_set_a)
+        {
+            fail("expected non-null Set and null Set to compare unequal");
+        }
+
         if (i1 == b1 || i1 == s1 || i1 == u1)
         {
             fail("expected different Value kinds to compare unequal");
@@ -109,6 +229,32 @@ int main(int argc, char** argv)
         if (to_string(Value::unit_v()) != "()")
         {
             fail("unexpected Unit to_string");
+        }
+        if (to_string(Value::struct_v("Point", {{"x", Value::int_v(1)}})) != "Point{x: 1}")
+        {
+            fail("unexpected Struct to_string");
+        }
+        if (to_string(Value::struct_v("Pair", {{"x", Value::int_v(1)}, {"y", Value::int_v(2)}})) !=
+            "Pair{x: 1, y: 2}")
+        {
+            fail("unexpected Struct to_string with multiple fields");
+        }
+        if (to_string(p5) != "Point{x: <null>}")
+        {
+            fail("unexpected Struct null-field to_string");
+        }
+        if (to_string(e3) != "Opt::None" || to_string(e1) != "Opt::Some(1)")
+        {
+            fail("unexpected Enum to_string");
+        }
+        if (to_string(vb1) != "Vec<Bool>(len=0/3)" || to_string(st1) != "Set<Int>(len=0)")
+        {
+            fail("unexpected Vec/Set to_string");
+        }
+        st1.set_value->items.insert(5);
+        if (to_string(st1) != "Set<Int>(len=1)")
+        {
+            fail("unexpected non-empty Set to_string");
         }
 
         Value unknown;
@@ -237,6 +383,1128 @@ int main(int argc, char** argv)
         chunk.emit(OpCode::Return);
 
         run_twice_deterministic(chunk, Value::string_v("ab"));
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(10));
+        chunk.emit_constant(Value::int_v(20));
+
+        const auto struct_name = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Point")));
+        const auto field_x = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("x")));
+        const auto field_y = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("y")));
+
+        chunk.emit(OpCode::MakeStruct);
+        chunk.emit_u16(struct_name);
+        chunk.emit_u16(2);
+        chunk.emit_u16(field_x);
+        chunk.emit_u16(field_y);
+        chunk.emit(OpCode::GetField);
+        chunk.emit_u16(field_x);
+        chunk.emit(OpCode::Return);
+
+        run_twice_deterministic(chunk, Value::int_v(10));
+    }
+
+    {
+        Chunk chunk;
+        const auto field_x = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("x")));
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::GetField);
+        chunk.emit_u16(field_x);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "member access expects Struct")
+        {
+            fail("expected member access expects Struct runtime error");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto struct_name = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Point")));
+        const auto field_x = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("x")));
+        const auto field_y = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("y")));
+
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::MakeStruct);
+        chunk.emit_u16(struct_name);
+        chunk.emit_u16(1);
+        chunk.emit_u16(field_x);
+        chunk.emit(OpCode::GetField);
+        chunk.emit_u16(field_y);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "unknown struct field")
+        {
+            fail("expected unknown struct field runtime error");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto field_x = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("x")));
+
+        auto malformed = Value::struct_v("Point", {{"x", Value::int_v(1)}});
+        malformed.struct_fields[0].second.reset();
+        chunk.emit_constant(std::move(malformed));
+        chunk.emit(OpCode::GetField);
+        chunk.emit_u16(field_x);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid struct field value")
+        {
+            fail("expected invalid struct field value runtime guard");
+        }
+    }
+
+    // Typed Vec/Set runtime paths (including mismatch guards).
+    {
+        Chunk chunk;
+        chunk.max_locals = 1;
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::VecNewBool);
+        chunk.emit_local(OpCode::StoreLocal, 0);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecPushBool);
+        chunk.emit(OpCode::Pop);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::VecGetBool);
+        chunk.emit(OpCode::Not);
+        chunk.emit(OpCode::Return);
+
+        run_twice_deterministic(chunk, Value::bool_v(false));
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNewBool);
+        chunk.emit(OpCode::VecLen);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec<Int>")
+        {
+            fail("expected Vec<Int> guard when using VecLen on Vec<Bool>");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNew);
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecPush);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec element must be Int")
+        {
+            fail("expected VecPush Int-element guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNewBool);
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::VecGet);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec<Int>")
+        {
+            fail("expected VecGet Int-typed vector guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNewBool);
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecPush);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec<Int>")
+        {
+            fail("expected VecPush Int-typed vector guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNewBool);
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecSet);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec<Int>")
+        {
+            fail("expected VecSet Int-typed vector guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.max_locals = 1;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNew);
+        chunk.emit_local(OpCode::StoreLocal, 0);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::int_v(7));
+        chunk.emit(OpCode::VecPush);
+        chunk.emit(OpCode::Pop);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecSet);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec element must be Int")
+        {
+            fail("expected VecSet element-kind guard after valid vec/index");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNewBool);
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecSetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec element must be Bool")
+        {
+            fail("expected VecSetBool element guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.max_locals = 1;
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::VecNewBool);
+        chunk.emit_local(OpCode::StoreLocal, 0);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecPushBool);
+        chunk.emit(OpCode::Pop);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::bool_v(false));
+        chunk.emit(OpCode::VecSetBool);
+        chunk.emit(OpCode::Pop);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::VecGetBool);
+        chunk.emit(OpCode::Return);
+
+        run_twice_deterministic(chunk, Value::bool_v(false));
+    }
+
+    {
+        Chunk chunk;
+        chunk.max_locals = 1;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::SetNewInt);
+        chunk.emit_local(OpCode::StoreLocal, 0);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::int_v(9));
+        chunk.emit(OpCode::SetInsertInt);
+        chunk.emit(OpCode::Pop);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::int_v(9));
+        chunk.emit(OpCode::SetHasInt);
+        chunk.emit(OpCode::Return);
+
+        run_twice_deterministic(chunk, Value::bool_v(true));
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::SetHasInt);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "set value must be Set")
+        {
+            fail("expected SetHasInt set-value guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::SetNewInt);
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::SetInsertInt);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "set value must be Int")
+        {
+            fail("expected SetInsertInt element guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecNewBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec max length must be Int")
+        {
+            fail("expected VecNewBool max-length type guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::VecNewBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected VecNewBool underflow guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(-1));
+        chunk.emit(OpCode::VecNewBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec max length must be >= 0")
+        {
+            fail("expected VecNewBool max-length nonnegative guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::VecNew);
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecPush);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec capacity exceeded")
+        {
+            fail("expected VecPush capacity guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::VecNewBool);
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecPushBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec capacity exceeded")
+        {
+            fail("expected VecPushBool capacity guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.max_locals = 1;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNewBool);
+        chunk.emit_local(OpCode::StoreLocal, 0);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::bool_v(false));
+        chunk.emit(OpCode::VecPushBool);
+        chunk.emit(OpCode::Pop);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::int_v(-1));
+        chunk.emit(OpCode::VecGetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec index out of bounds")
+        {
+            fail("expected VecGetBool negative-index guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.max_locals = 1;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNewBool);
+        chunk.emit_local(OpCode::StoreLocal, 0);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::bool_v(false));
+        chunk.emit(OpCode::VecPushBool);
+        chunk.emit(OpCode::Pop);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecGetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec index out of bounds")
+        {
+            fail("expected VecGetBool index-type guard");
+        }
+    }
+
+    {
+        Value null_vec;
+        null_vec.kind = ValueKind::Vec;
+
+        Chunk chunk;
+        chunk.emit_constant(std::move(null_vec));
+        chunk.emit(OpCode::VecLenBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected VecLenBool null-backing guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::VecLenBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected VecLenBool underflow guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNew);
+        chunk.emit(OpCode::VecLenBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec<Bool>")
+        {
+            fail("expected VecLenBool element-kind guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(7));
+        chunk.emit(OpCode::VecLenBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected VecLenBool non-Vec guard");
+        }
+    }
+
+    {
+        Value null_vec;
+        null_vec.kind = ValueKind::Vec;
+
+        Chunk chunk;
+        chunk.emit_constant(std::move(null_vec));
+        chunk.emit(OpCode::VecLen);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected VecLen null-backing guard");
+        }
+    }
+
+    {
+        Value null_vec;
+        null_vec.kind = ValueKind::Vec;
+
+        Chunk chunk;
+        chunk.emit_constant(std::move(null_vec));
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecPushBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected VecPushBool null-backing guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::VecPushBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected VecPushBool underflow guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecPushBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected VecPushBool one-operand underflow guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNew);
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecPushBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec<Bool>")
+        {
+            fail("expected VecPushBool element-kind guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecPushBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected VecPushBool non-Vec guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNewBool);
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecPushBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec element must be Bool")
+        {
+            fail("expected VecPushBool element-kind guard after valid vec");
+        }
+    }
+
+    {
+        Value null_vec;
+        null_vec.kind = ValueKind::Vec;
+
+        Chunk chunk;
+        chunk.emit_constant(std::move(null_vec));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::VecGetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected VecGetBool null-backing guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::VecGetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected VecGetBool underflow guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::VecGetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected VecGetBool one-operand underflow guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNew);
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::VecGetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec<Bool>")
+        {
+            fail("expected VecGetBool element-kind guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::VecGetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected VecGetBool non-Vec guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.max_locals = 1;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNewBool);
+        chunk.emit_local(OpCode::StoreLocal, 0);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::bool_v(false));
+        chunk.emit(OpCode::VecPushBool);
+        chunk.emit(OpCode::Pop);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecGetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec index out of bounds")
+        {
+            fail("expected VecGetBool upper-bound index guard");
+        }
+    }
+
+    {
+        Value null_vec;
+        null_vec.kind = ValueKind::Vec;
+
+        Chunk chunk;
+        chunk.emit_constant(std::move(null_vec));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::VecGet);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected VecGet null-backing guard");
+        }
+    }
+
+    {
+        Value null_vec;
+        null_vec.kind = ValueKind::Vec;
+
+        Chunk chunk;
+        chunk.emit_constant(std::move(null_vec));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecSetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected VecSetBool null-backing guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::VecSetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected VecSetBool underflow guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecSetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected VecSetBool one-operand underflow guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecSetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected VecSetBool two-operand underflow guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNew);
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecSetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec<Bool>")
+        {
+            fail("expected VecSetBool element-kind guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecSetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected VecSetBool non-Vec guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.max_locals = 1;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNewBool);
+        chunk.emit_local(OpCode::StoreLocal, 0);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::bool_v(false));
+        chunk.emit(OpCode::VecPushBool);
+        chunk.emit(OpCode::Pop);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecSetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec index out of bounds")
+        {
+            fail("expected VecSetBool upper-bound index guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.max_locals = 1;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNewBool);
+        chunk.emit_local(OpCode::StoreLocal, 0);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::bool_v(false));
+        chunk.emit(OpCode::VecPushBool);
+        chunk.emit(OpCode::Pop);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecSetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec index out of bounds")
+        {
+            fail("expected VecSetBool non-int index guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.max_locals = 1;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNewBool);
+        chunk.emit_local(OpCode::StoreLocal, 0);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::bool_v(false));
+        chunk.emit(OpCode::VecPushBool);
+        chunk.emit(OpCode::Pop);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::int_v(-1));
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::VecSetBool);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec index out of bounds")
+        {
+            fail("expected VecSetBool negative-index guard");
+        }
+    }
+
+    {
+        Value null_vec;
+        null_vec.kind = ValueKind::Vec;
+
+        Chunk chunk;
+        chunk.emit_constant(std::move(null_vec));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecSet);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "vec value must be Vec")
+        {
+            fail("expected VecSet null-backing guard");
+        }
+    }
+
+    {
+        Value null_set;
+        null_set.kind = ValueKind::Set;
+
+        Chunk chunk;
+        chunk.emit_constant(std::move(null_set));
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::SetHasInt);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "set value must be Set")
+        {
+            fail("expected SetHasInt null-backing guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::SetHasInt);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected SetHasInt underflow guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::SetHasInt);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected SetHasInt one-operand underflow guard");
+        }
+    }
+
+    {
+        Value null_set;
+        null_set.kind = ValueKind::Set;
+
+        Chunk chunk;
+        chunk.emit_constant(std::move(null_set));
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::SetInsertInt);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "set value must be Set")
+        {
+            fail("expected SetInsertInt null-backing guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::SetInsertInt);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "set value must be Set")
+        {
+            fail("expected SetInsertInt non-Set guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::SetInsertInt);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected SetInsertInt underflow guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::SetInsertInt);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected SetInsertInt one-operand underflow guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::SetNewInt);
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::SetHasInt);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "set value must be Int")
+        {
+            fail("expected SetHasInt element-type guard");
+        }
+    }
+
+    // Additional struct constructor operand guards.
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::MakeStruct);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid struct constructor name")
+        {
+            fail("expected invalid struct constructor name error");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::MakeStruct);
+        chunk.emit_u16(0);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid struct constructor name")
+        {
+            fail("expected invalid struct constructor name index guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto non_string_name = static_cast<std::uint16_t>(chunk.add_constant(Value::int_v(1)));
+        chunk.emit(OpCode::MakeStruct);
+        chunk.emit_u16(non_string_name);
+        chunk.emit_u16(0);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid struct constructor name")
+        {
+            fail("expected invalid struct constructor name kind guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto struct_name = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Point")));
+        chunk.emit(OpCode::MakeStruct);
+        chunk.emit_u16(struct_name);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "truncated struct constructor field count")
+        {
+            fail("expected truncated struct constructor field count error");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto struct_name = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Point")));
+        chunk.emit(OpCode::MakeStruct);
+        chunk.emit_u16(struct_name);
+        chunk.emit_u16(1);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "truncated struct constructor field names")
+        {
+            fail("expected truncated struct constructor field names error");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto struct_name = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Point")));
+        const auto non_string_field = static_cast<std::uint16_t>(chunk.add_constant(Value::int_v(1)));
+        chunk.emit(OpCode::MakeStruct);
+        chunk.emit_u16(struct_name);
+        chunk.emit_u16(1);
+        chunk.emit_u16(non_string_field);
+        chunk.emit_constant(Value::int_v(5));
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid struct constructor field name")
+        {
+            fail("expected invalid struct constructor field name error");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto struct_name = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Point")));
+        chunk.emit(OpCode::MakeStruct);
+        chunk.emit_u16(struct_name);
+        chunk.emit_u16(1);
+        chunk.emit_u16(99);
+        chunk.emit_constant(Value::int_v(5));
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid struct constructor field name")
+        {
+            fail("expected invalid struct constructor field-name index guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto struct_name = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("Point")));
+        const auto field_x = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("x")));
+        chunk.emit(OpCode::MakeStruct);
+        chunk.emit_u16(struct_name);
+        chunk.emit_u16(1);
+        chunk.emit_u16(field_x);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected stack underflow for missing struct field value");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::GetField);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid struct field name")
+        {
+            fail("expected invalid struct field name truncation error");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto non_string_field = static_cast<std::uint16_t>(chunk.add_constant(Value::int_v(1)));
+        chunk.emit_constant(Value::struct_v("Point", {{"x", Value::int_v(1)}}));
+        chunk.emit(OpCode::GetField);
+        chunk.emit_u16(non_string_field);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid struct field name")
+        {
+            fail("expected invalid struct field-name kind guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::GetField);
+        chunk.emit_u16(99);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "invalid struct field name")
+        {
+            fail("expected invalid struct field-name index guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto field_x = static_cast<std::uint16_t>(chunk.add_constant(Value::string_v("x")));
+        chunk.emit(OpCode::GetField);
+        chunk.emit_u16(field_x);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "stack underflow")
+        {
+            fail("expected GetField stack underflow with valid field operand");
+        }
     }
 
     // Stack underflow paths for common ops.
