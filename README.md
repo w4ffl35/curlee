@@ -20,6 +20,8 @@ Curlee's goal is to be a **safety harness**:
 
 This shifts trust from "I hope the generated code is safe" to "I have a proof (or the program doesn't run)".
 
+**Scope of the guarantee:** verification proves that an implementation is *consistent with its declared contract* — it does not, and cannot, prove that the contract captures what you actually meant. An agent can satisfy `ensures true` and pass every check while being wrong about your intent. Curlee does not make an agent reason better or write better logic; it makes an agent unable to ship logic that silently contradicts what it claimed to guarantee, for the class of properties expressible in the supported fragment. It is a consistency/containment check, not an intent checker.
+
 ---
 
 ## What problem does it solve?
@@ -43,6 +45,8 @@ Curlee aims to support a world where agents exchange tasks safely.
 - An agent can send another agent a *bundle* (bytecode + metadata + declared capabilities).
 - The receiver re-verifies the bundle deterministically before executing.
 - Execution is capability-scoped (no ambient authority) and resource-bounded (fuel/gas).
+
+The bundle format and `bundle build/verify/info` CLI commands are implemented and covered by unit/golden tests, but as of this writing this workflow has not been demonstrated end-to-end between two independent live agents — the "multi-agent sovereignty" story is a proven mechanism, not yet a proven use case.
 
 ---
 
@@ -98,6 +102,14 @@ The MVP logic fragment is intentionally small and decidable.
 ## Project status
 
 Curlee is in **production-readiness stabilization**.
+
+### Current state (as of 2026-07-27)
+
+- All five planned roadmap milestones (M1–M5: runtime parity, type system, verification expressivity, tooling/DX, ecosystem/distribution) are closed. The project met its own MVP completion criteria.
+- Development ran as an intensive, fully issue-gated sprint (Jan 25 – Feb 19, 2026: 285 commits, 214 issues filed, 212 closed) and has had **no commits since Feb 19, 2026**. Only a scheduled fuzz CI job has continued running since.
+- The build and test suite are verified working: a clean build from the README instructions succeeds, `curlee check`/`curlee run` behave as documented (contract violations produce a Z3 counterexample and fail the build; verified programs execute on the VM), and the test suite passes outside of environment-specific artifacts (missing optional tools, filesystem-permission tests run as root).
+- The remaining open work is tracked as GitHub issues, not roadmap gaps: raising the coverage gate to 100% post-milestone completion is the one legitimate open item.
+- The runnable language fragment remains intentionally small: `Int`/`Bool`/`String`/`Unit`, enums, structs, and a bounded `Vec<Int>`; verification contracts are limited to linear arithmetic with no function calls, quantifiers, or loop invariants. See the wiki for the exact supported fragment.
 
 Current expectations:
 
