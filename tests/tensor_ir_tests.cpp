@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <cstdlib>
 #include <curlee/compiler/tensor_ir.h>
 #include <iostream>

@@ -70,12 +70,23 @@ if(NOT Z3_FOUND)
   FetchContent_MakeAvailable(z3)
 
   if(TARGET libz3)
-    add_library(Z3::Z3 ALIAS libz3)
+    set(_curlee_z3_link_target libz3)
   elseif(TARGET z3)
-    add_library(Z3::Z3 ALIAS z3)
+    set(_curlee_z3_link_target z3)
   else()
     message(FATAL_ERROR "Z3 target not found after FetchContent")
   endif()
+
+  # Z3's CMake (4.12.x) does not propagate the C++ API header directory
+  # (src/api/c++), which is required for <z3++.h>. Wrap the real target in an
+  # imported interface target so every consumer gets both the link library and
+  # the missing include directory. This is what makes the vendored build path
+  # (used automatically when no system Z3 is installed) work out of the box.
+  add_library(Z3::Z3 INTERFACE IMPORTED)
+  set_target_properties(Z3::Z3 PROPERTIES
+    INTERFACE_LINK_LIBRARIES "${_curlee_z3_link_target}"
+    INTERFACE_INCLUDE_DIRECTORIES "${z3_SOURCE_DIR}/src/api/c++"
+  )
 endif()
 
 if(NOT TARGET Z3::Z3)
@@ -130,6 +141,7 @@ add_executable(curlee_lsp
   src/types/type_check.cpp
 )
 target_include_directories(curlee_lsp PRIVATE include)
+curlee_add_build_info(curlee_lsp)
 
 install(TARGETS curlee_lsp
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -158,7 +170,7 @@ add_test(NAME curlee_lex_reads_file COMMAND curlee lex ${CMAKE_SOURCE_DIR}/tests
 
 add_test(
   NAME curlee_check_import_success_debug
-  COMMAND ${CMAKE_COMMAND} -E env CURLEE_DEBUG_IMPORTS=1 curlee check ${CMAKE_SOURCE_DIR}/tests/fixtures/qualified_call/main.curlee
+  COMMAND ${CMAKE_COMMAND} -E env CURLEE_DEBUG_IMPORTS=1 $<TARGET_FILE:curlee> check ${CMAKE_SOURCE_DIR}/tests/fixtures/qualified_call/main.curlee
 )
 
 add_executable(curlee_line_map_tests
@@ -340,12 +352,21 @@ if(CURLEE_ENABLE_FUZZING)
   )
   target_include_directories(curlee_parser_fuzz PRIVATE include)
 
+  add_executable(curlee_bundle_fuzz
+    tests/bundle_fuzz.cpp
+    src/bundle/bundle.cpp
+  )
+  target_include_directories(curlee_bundle_fuzz PRIVATE include)
+
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(curlee_lexer_fuzz PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
     target_link_options(curlee_lexer_fuzz PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
 
     target_compile_options(curlee_parser_fuzz PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
     target_link_options(curlee_parser_fuzz PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
+
+    target_compile_options(curlee_bundle_fuzz PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
+    target_link_options(curlee_bundle_fuzz PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
 
     add_test(
       NAME curlee_lexer_fuzz_smoke
@@ -358,9 +379,16 @@ if(CURLEE_ENABLE_FUZZING)
       COMMAND curlee_parser_fuzz -seed=1 -runs=200 -max_len=4096
     )
     set_tests_properties(curlee_parser_fuzz_smoke PROPERTIES TIMEOUT 20)
+
+    add_test(
+      NAME curlee_bundle_fuzz_smoke
+      COMMAND curlee_bundle_fuzz -seed=1 -runs=200 -max_len=4096
+    )
+    set_tests_properties(curlee_bundle_fuzz_smoke PROPERTIES TIMEOUT 20)
   else()
     target_compile_definitions(curlee_lexer_fuzz PRIVATE CURLEE_FUZZER_STANDALONE)
     target_compile_definitions(curlee_parser_fuzz PRIVATE CURLEE_FUZZER_STANDALONE)
+    target_compile_definitions(curlee_bundle_fuzz PRIVATE CURLEE_FUZZER_STANDALONE)
   endif()
 endif()
 

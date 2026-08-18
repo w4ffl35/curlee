@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <cstddef>
 #include <curlee/lexer/token.h>
 #include <curlee/types/type.h>

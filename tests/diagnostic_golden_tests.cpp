@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <curlee/diag/diagnostic.h>
 #include <curlee/diag/render.h>
 #include <curlee/source/source_file.h>

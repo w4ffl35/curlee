@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <algorithm>
 #include <cassert>
 #include <cctype>

@@ -1,1 +1,0 @@
-{"kind":"diagnostic","severity":"error","message":"vec index out of bounds","file":"tests/fixtures/run_vec_index_error.curlee","span":{"start":260,"end":283},"notes":[]}

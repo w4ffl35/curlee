@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <cassert>
 #include <curlee/diag/diagnostic.h>
 #include <curlee/lexer/token.h>

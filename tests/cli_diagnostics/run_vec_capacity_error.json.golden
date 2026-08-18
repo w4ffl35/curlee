@@ -1,1 +1,0 @@
-{"kind":"diagnostic","severity":"error","message":"vec capacity exceeded","file":"tests/fixtures/run_vec_capacity_error.curlee","span":{"start":172,"end":196},"notes":[]}

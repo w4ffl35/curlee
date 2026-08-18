@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -49,9 +50,11 @@ int main(int argc, char** argv)
     const std::filesystem::path readme_path = argv[1];
     const std::string readme = slurp(readme_path);
 
-    // Positive, stable anchors.
+    // Positive, stable anchors. These must stay identity-independent: they must
+    // not reference a specific GitHub owner, so the repository can be renamed or
+    // transferred without breaking this test.
     expect_contains(readme, "No proof, no run.", "core motto");
-    expect_contains(readme, "https://github.com/w4ffl35/curlee/wiki", "wiki link");
+    expect_contains(readme, "docs/README.md", "in-repo docs link");
     expect_contains(readme, "Stability-and-Supported-Fragment", "supported fragment link");
     expect_contains(readme, "production-readiness stabilization", "status positioning");
     expect_contains(readme, "Production support matrix", "support policy anchor");

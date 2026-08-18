@@ -169,7 +169,7 @@ Curlee treats coverage as a **hard quality gate** for landing code.
 
 When writing or refactoring C++ in this repo, use the shared guide as the default set of idioms and anti-patterns:
 
-- Reference: `C++23 Best Practices for LLM Agents.md`
+- Reference: `docs/cpp23-best-practices.md`
 - Prefer value semantics, explicit ownership, and non-owning views.
 - Prefer `std::expected`-style error returns for domain failures over exceptions and out-params.
 - Prefer ranges pipelines over manual loops when it improves clarity.

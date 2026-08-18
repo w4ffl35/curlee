@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <curlee/base/expected.h>
 #include <iostream>
 #include <string>

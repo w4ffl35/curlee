@@ -43,6 +43,31 @@ jobs:
         if: matrix.preset == 'linux-release'
         run: bash scripts/smoke.sh --preset linux-release --skip-build
 
+  vendored-z3-build:
+    name: Vendored Z3 build (no system Z3)
+    runs-on: ubuntu-latest
+
+    # The FetchContent fallback path is what new contributors hit when they do
+    # NOT have libz3-dev installed. CI must prove that path works, otherwise it
+    # only ever exercises the system-Z3 setup. Do NOT install libz3-dev here.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ pkg-config
+
+      - name: Configure (force vendored Z3)
+        run: cmake --preset linux-debug -DCURLEE_USE_SYSTEM_Z3=OFF
+
+      - name: Build
+        run: cmake --build --preset linux-debug --target curlee
+
+      - name: Version smoke
+        run: ./build/linux-debug/curlee --version
+
   coverage-gate:
     name: Coverage Gate (linux-debug-coverage)
     runs-on: ubuntu-latest

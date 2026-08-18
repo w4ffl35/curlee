@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <cctype>
 #include <cstdlib>
 #include <curlee/cli/cli.h>

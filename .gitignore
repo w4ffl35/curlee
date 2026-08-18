@@ -1,5 +1,8 @@
 build/
 
+# Z3 build artifact (written to the invoking directory by the vendored Z3 build).
+.z3-trace
+
 # Local clone of the GitHub wiki (kept in-workspace for agents, not tracked).
 wiki/
 
@@ -8,3 +11,22 @@ training_data.txt
 
 # Coverage artifacts (gcov can emit these in the repo root depending on invocation).
 *.gcov
+*.gcda
+*.gcno
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+*.iml
+
+# Compiler / tooling artifacts
+*.o
+*.obj
+*.a
+*.so
+compile_commands.json
+.cache/

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <cstdint>
 #include <cstdlib>
 #include <curlee/source/span.h>

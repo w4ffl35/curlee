@@ -1,6 +1,14 @@
 # Curlee
 
-![status: production-readiness](https://img.shields.io/badge/status-production--readiness-blue)
+![status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-red)
+
+> **⚠️ PRE-ALPHA / RESEARCH SOFTWARE — NOT FOR PRODUCTION USE.**
+>
+> Curlee is an experimental language in "production-readiness stabilization". The supported
+> language fragment is small and documented in the wiki; `python_ffi` interop is stubbed; the
+> toolchain is Linux-only; and the verification pipeline is validated only against the
+> project's own test corpus. Expect breaking changes, missing features, and rough edges.
+> Contributions and experiments are welcome — production dependency is not.
 
 Curlee is an experimental **verification-first programming language** and C++23 compiler/runtime.
 
@@ -53,7 +61,7 @@ Curlee aims to support a world where agents exchange tasks safely.
 | Correctness | Tests + review + runtime errors | Compile-time contract proofs |
 | Security | Ambient authority + sandboxing | Capabilities + proofs + fuel |
 | AI-generated code | "Probably ok" | "Prove it or reject it" |
-| Interop | Big ecosystems | "Shield" legacy ecosystems via explicit `unsafe` boundaries |
+| Interop | Big ecosystems | "Shield" legacy ecosystems via explicit `unsafe` boundaries *(planned; `python_ffi` is currently stubbed)* |
 
 ---
 
@@ -138,11 +146,22 @@ At a high level:
 - `curlee check` supports imports (including aliasing and module-qualified calls) and function parameters, and verifies contracts within the MVP scope.
 - `curlee run` executes a conservative, deterministic subset on the VM after successful verification (see the wiki for the exact runnable subset).
 
+> **Python interop status:** `python_ffi` is currently **stubbed** — `python_ffi.call` is not yet implemented.
+> It is gated behind `unsafe` and the `python.ffi` capability, but the call itself is a placeholder that
+> currently accepts zero arguments. The "shield" boundary (Curlee validates contracts, Python executes
+> legacy work) is planned, not yet available.
+
 ---
 
 ## Docs
 
-User-facing documentation lives in the GitHub wiki:
+In-repo documentation:
+
+- [`docs/README.md`](docs/README.md) — index and pointers
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contributor guide
+- [`SECURITY.md`](SECURITY.md) — how to report vulnerabilities
+
+Detailed user-facing documentation (supported fragment, syntax, modules, execution model) lives in the GitHub wiki:
 
 - https://github.com/w4ffl35/curlee/wiki
 - Supported fragment + stability: https://github.com/w4ffl35/curlee/wiki/Stability-and-Supported-Fragment
@@ -226,7 +245,7 @@ This will:
 
 - Configure/build/test with the `linux-debug-coverage` preset.
 - Generate an HTML report at `build/coverage/coverage.html`.
-- Fail the run if line coverage is below the threshold (default: 100%).
+- Fail the run if line coverage is below the threshold (default: 94%; the CI gate enforces 100%).
 
 Note: the gcovr report excludes `throw` and unreachable branches by default (so branch coverage isn't dominated by exception edges). You can opt back in with:
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <curlee/cli/cli.h>
 
 int main(int argc, char** argv)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <chrono>
 #include <cstdlib>
 #include <sys/select.h>

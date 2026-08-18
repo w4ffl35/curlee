@@ -27,13 +27,13 @@ jobs:
         run: cmake --preset linux-debug -DCURLEE_ENABLE_FUZZING=ON
 
       - name: Build fuzz targets
-        run: cmake --build --preset linux-debug --target curlee_lexer_fuzz curlee_parser_fuzz
+        run: cmake --build --preset linux-debug --target curlee_lexer_fuzz curlee_parser_fuzz curlee_bundle_fuzz
 
       - name: Run bounded fuzzing
         env:
           ARTIFACT_DIR: ${{ runner.temp }}/curlee-fuzz-artifacts/
         run: |
-          mkdir -p "$ARTIFACT_DIR/lexer" "$ARTIFACT_DIR/parser"
+          mkdir -p "$ARTIFACT_DIR/lexer" "$ARTIFACT_DIR/parser" "$ARTIFACT_DIR/bundle"
 
           # Fixed seeds + fixed time budget => reduces nondeterministic flakes.
           timeout 120s ./build/linux-debug/curlee_lexer_fuzz \
@@ -43,3 +43,8 @@ jobs:
           timeout 120s ./build/linux-debug/curlee_parser_fuzz \
             -seed=1 -max_total_time=30 -max_len=4096 \
             -artifact_prefix="$ARTIFACT_DIR/parser/"
+
+          # Bundles are untrusted input (agents exchange them), so fuzz the decoder too.
+          timeout 120s ./build/linux-debug/curlee_bundle_fuzz \
+            -seed=1 -max_total_time=30 -max_len=4096 \
+            -artifact_prefix="$ARTIFACT_DIR/bundle/"

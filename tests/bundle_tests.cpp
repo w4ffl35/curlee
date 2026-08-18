@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <curlee/bundle/bundle.h>
 #include <filesystem>
 #include <fstream>

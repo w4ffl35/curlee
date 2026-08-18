@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <curlee/bundle/bundle.h>
 #include <curlee/cli/cli.h>
 #include <curlee/vm/chunk_codec.h>

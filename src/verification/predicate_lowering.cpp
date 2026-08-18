@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <curlee/verification/predicate_lowering.h>
 
 namespace curlee::verification

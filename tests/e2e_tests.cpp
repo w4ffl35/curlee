@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <algorithm>
 #include <cstdlib>
 #include <curlee/compiler/emitter.h>

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <curlee/resolver/module_loader.h>
 #include <filesystem>
 #include <iostream>

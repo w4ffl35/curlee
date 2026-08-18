@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <cerrno>
 #include <chrono>
 #include <csignal>
