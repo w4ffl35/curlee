@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.23)
 
-project(curlee VERSION 0.3.0 LANGUAGES CXX)
+project(curlee VERSION 0.3.0 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
@@ -1156,4 +1156,59 @@ if(CURLEE_ENABLE_FREESTANDING_SMOKE)
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     )
   endforeach()
+endif()
+
+# --- Freestanding runtime (runtime/rt.c + runtime/rt.h) ---
+
+# Object library so generated freestanding C can link the runtime together
+# with the same flags as generated code. Built -ffreestanding -fno-builtin
+# -nostdlib so rt.c never accidentally depends on libc; consumers add this
+# target to their link line.
+add_library(curlee_rt OBJECT
+  runtime/rt.c
+)
+target_include_directories(curlee_rt PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/runtime
+)
+target_compile_options(curlee_rt PRIVATE
+  -ffreestanding
+  -fno-builtin
+  -nostdlib
+  -Wall
+  -Wextra
+  -Wpedantic
+)
+
+# Host-visible unit tests for the mem builtins. Compile rt.c into the test
+# binary (via curlee_rt) and call the same functions the freestanding image
+# links. -fno-builtin keeps the compiler from constant-folding the calls.
+add_executable(curlee_runtime_mem_tests
+  tests/runtime_mem_tests.cpp
+)
+target_include_directories(curlee_runtime_mem_tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/runtime
+)
+target_link_libraries(curlee_runtime_mem_tests PRIVATE curlee_rt)
+target_compile_options(curlee_runtime_mem_tests PRIVATE -fno-builtin)
+add_test(NAME curlee_runtime_mem_tests COMMAND curlee_runtime_mem_tests)
+
+# Freestanding compile-smoke: rt.c compiles with
+# `gcc -ffreestanding -fno-builtin -nostdlib -c -Wall -Wextra -Wpedantic
+# -Werror`, rt.h includes cleanly from generated C, a tiny kernel links with
+# -nostdlib without defining putc (weak default), a strong override wins, and
+# the `cli; hlt` sequence is present in the disassembly.
+if(CURLEE_ENABLE_FREESTANDING_SMOKE)
+  set(_rt_smoke_workdir "${CMAKE_BINARY_DIR}/rt_smoke")
+  file(MAKE_DIRECTORY "${_rt_smoke_workdir}")
+  add_test(
+    NAME curlee_rt_compile_smoke
+    COMMAND ${CMAKE_COMMAND}
+      -Dcurlee_cc=${CURLEE_FREESTANDING_CC}
+      -Dcurlee_rt_dir=${CMAKE_CURRENT_SOURCE_DIR}/runtime
+      -Dcurlee_workdir=${_rt_smoke_workdir}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/rt_compile_smoke.cmake
+  )
+  set_tests_properties(curlee_rt_compile_smoke PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  )
 endif()
