@@ -27,6 +27,7 @@ enum class TokenKind
 
     // Keywords
     KwFn,
+    KwExtern,
     KwLet,
     KwIf,
     KwElse,
@@ -110,6 +111,8 @@ struct Token
 
     case TokenKind::KwFn:
         return "kw_fn";
+    case TokenKind::KwExtern:
+        return "kw_extern";
     case TokenKind::KwLet:
         return "kw_let";
     case TokenKind::KwIf:

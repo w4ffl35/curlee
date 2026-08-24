@@ -265,14 +265,18 @@ class Parser
                 continue;
             }
 
-            if (check(TokenKind::KwFn))
+            if (check(TokenKind::KwFn) || check(TokenKind::KwExtern))
             {
                 if (!seen_non_import)
                 {
                     first_non_import_span = peek().span;
                 }
                 seen_non_import = true;
-                auto fun = parse_function();
+
+                // `extern fn name(...) [contracts];` declares a function whose
+                // implementation is provided at link time; `fn` defines one.
+                const bool is_extern = check(TokenKind::KwExtern);
+                auto fun = parse_function(is_extern);
                 if (std::holds_alternative<curlee::diag::Diagnostic>(fun))
                 {
                     diagnostics_.push_back(std::get<curlee::diag::Diagnostic>(std::move(fun)));
@@ -284,7 +288,7 @@ class Parser
             }
 
             diagnostics_.push_back(
-                error_at(peek(), "expected 'import', 'struct', 'enum', or 'fn'"));
+                error_at(peek(), "expected 'import', 'struct', 'enum', 'fn', or 'extern fn'"));
             advance();
         }
 
@@ -977,8 +981,16 @@ class Parser
         return error_at(peek(), "expected predicate");
     }
 
-    [[nodiscard]] std::variant<Function, curlee::diag::Diagnostic> parse_function()
+    [[nodiscard]] std::variant<Function, curlee::diag::Diagnostic> parse_function(bool is_extern =
+                                                                                    false)
     {
+        if (is_extern)
+        {
+            if (auto err = consume(TokenKind::KwExtern, "expected 'extern'"); err.has_value())
+            {
+                return *err;
+            }
+        }
         if (auto err = consume(TokenKind::KwFn, "expected 'fn'"); err.has_value())
         {
             return *err;
@@ -1076,6 +1088,35 @@ class Parser
             }
         }
 
+        // Extern functions are body-less declarations: `extern fn name(...) [contracts];`.
+        // The implementation is resolved at link time by the host stub/runtime.
+        if (is_extern)
+        {
+            // The contracts block above (if present) was consumed before this point.
+            // Require a terminating semicolon; a body is an error.
+            if (auto err = consume(TokenKind::Semicolon, "expected ';' after extern declaration");
+                err.has_value())
+            {
+                return *err;
+            }
+
+            // An extern declaration has no body: synthesize an empty block so all
+            // downstream consumers (resolver/type-checker/verifier/codegen) treat it
+            // uniformly as a function whose body is empty. The is_extern flag is what
+            // distinguishes a declaration from a definition.
+            Function fn{
+                .span = span_cover(name.span, previous().span),
+                .name = name.lexeme,
+                .body = Block{.span = name.span, .stmts = {}},
+                .is_extern = true,
+                .params = std::move(params),
+                .requires_clauses = std::move(requires_clauses),
+                .ensures = std::move(ensures),
+                .return_type = return_type,
+            };
+            return fn;
+        }
+
         auto body_res = parse_block();
         if (std::holds_alternative<curlee::diag::Diagnostic>(body_res))
         {
@@ -1087,6 +1128,7 @@ class Parser
             .span = span_cover(name.span, body.span),
             .name = name.lexeme,
             .body = std::move(body),
+            .is_extern = false,
             .params = std::move(params),
             .requires_clauses = std::move(requires_clauses),
             .ensures = std::move(ensures),
@@ -2157,7 +2199,14 @@ class Dumper
 
     void dump_function(const Function& f)
     {
-        out_ << "fn " << f.name << "(";
+        if (f.is_extern)
+        {
+            out_ << "extern fn " << f.name << "(";
+        }
+        else
+        {
+            out_ << "fn " << f.name << "(";
+        }
         for (std::size_t i = 0; i < f.params.size(); ++i)
         {
             const auto& p = f.params[i];
@@ -2196,6 +2245,13 @@ class Dumper
                 out_ << ";";
             }
             out_ << " ]";
+        }
+        if (f.is_extern)
+        {
+            // Body-less declaration: dump as `extern fn ... ;` rather than a
+            // synthesized empty block.
+            out_ << " ;\n";
+            return;
         }
         out_ << " ";
         dump_block(f.body);

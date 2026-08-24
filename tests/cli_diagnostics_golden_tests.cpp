@@ -898,6 +898,8 @@ int main(int argc, char** argv)
     const fs::path rel_type_error = fs::path("tests/fixtures/check_type_error.curlee");
     const fs::path rel_struct_ok = fs::path("tests/fixtures/check_struct_ok.curlee");
     const fs::path rel_ensures_fail = fs::path("tests/fixtures/check_ensures_fail.curlee");
+    const fs::path rel_extern_assumed =
+        fs::path("tests/fixtures/check_extern_assumed.curlee");
     const fs::path rel_phys_framebuffer =
         fs::path("tests/fixtures/check_phys_framebuffer.curlee");
     const fs::path rel_phys_read_contract =
@@ -1135,6 +1137,26 @@ int main(int argc, char** argv)
         if (!run_stderr_case("check-ensures-fail",
                              {"curlee", "check", rel_ensures_fail.string()},
                              dir / "check_ensures_fail.golden",
+                             false))
+        {
+            return 1;
+        }
+
+        // Extern functions (issue #256): `curlee check` passes (exit 0) with the
+        // "extern boundary: contract assumed, not verified" Note rendered.
+        if (!run_stderr_case("check-extern-assumed",
+                             {"curlee", "check", rel_extern_assumed.string()},
+                             dir / "check_extern_assumed.golden",
+                             true))
+        {
+            return 1;
+        }
+
+        // `curlee run` on a program containing extern functions is rejected by
+        // the VM with a clear diagnostic (non-zero exit).
+        if (!run_stderr_case("run-extern-vm-reject",
+                             {"curlee", "run", rel_extern_assumed.string()},
+                             dir / "run_extern_vm_reject.golden",
                              false))
         {
             return 1;

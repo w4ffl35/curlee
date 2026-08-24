@@ -194,6 +194,15 @@ Diagnostic error_at(Span span, std::string message)
     return d;
 }
 
+Diagnostic note_at(Span span, std::string message)
+{
+    Diagnostic d;
+    d.severity = Severity::Note;
+    d.message = std::move(message);
+    d.span = span;
+    return d;
+}
+
 /**
  * @brief True if the phys address lexeme is a plain constant literal.
  *
@@ -256,18 +265,37 @@ class Verifier
             check_function(f);
         }
 
-        if (!diags_.empty())
+        // Note-severity diagnostics are non-fatal: they document trust transfers
+        // (e.g. extern boundaries) without failing verification. Errors and
+        // warnings fail as before.
+        std::vector<Diagnostic> errors;
+        notes_.clear();
+        for (const auto& d : diags_)
         {
-            return diags_;
+            if (d.severity == Severity::Note)
+            {
+                notes_.push_back(d);
+            }
+            else
+            {
+                errors.push_back(d);
+            }
+        }
+        if (!errors.empty())
+        {
+            return errors;
         }
         return Verified{};
     }
+
+    [[nodiscard]] const std::vector<Diagnostic>& notes() const { return notes_; }
 
   private:
     const curlee::types::TypeInfo& type_info_;
     Solver solver_;
     LoweringContext lower_ctx_;
     std::vector<Diagnostic> diags_;
+    std::vector<Diagnostic> notes_;
     std::vector<z3::expr> facts_;
     std::vector<ScopeState> scopes_;
     std::unordered_map<std::string_view, FunctionSig> functions_;
@@ -1475,6 +1503,25 @@ class Verifier
             return;
         }
 
+        // Extern functions are a trusted boundary: the implementation is
+        // provided at link time by the host stub/runtime, so their contracts
+        // are ASSUMED, not verified. Emit a Note so the trust transfer is
+        // explicit ("never silently drop a contract"), and do not attempt to
+        // prove requires/ensures against a body that does not exist.
+        if (f.is_extern)
+        {
+            Diagnostic d = note_at(f.span, "extern boundary: contract assumed, not verified");
+            if (!f.requires_clauses.empty() || !f.ensures.empty())
+            {
+                d.notes.push_back(
+                    Related{.message = "extern declaration carries contracts that are "
+                                       "assumed without proof",
+                            .span = f.span});
+            }
+            diags_.push_back(std::move(d));
+            return;
+        }
+
         current_function_ = sig_it->second;
         lower_ctx_.result_int.reset();
         lower_ctx_.result_bool.reset();
@@ -1534,10 +1581,18 @@ class Verifier
 } // namespace
 
 VerificationResult verify(const curlee::parser::Program& program,
-                          const curlee::types::TypeInfo& type_info)
+                          const curlee::types::TypeInfo& type_info,
+                          std::vector<curlee::diag::Diagnostic>* out_notes)
 {
     Verifier verifier(type_info);
-    return verifier.run(program);
+    auto result = verifier.run(program);
+    // Surface the (non-fatal) Note diagnostics to the caller so the CLI can
+    // render them while still exiting 0.
+    if (out_notes != nullptr)
+    {
+        *out_notes = std::move(verifier.notes());
+    }
+    return result;
 }
 
 } // namespace curlee::verification

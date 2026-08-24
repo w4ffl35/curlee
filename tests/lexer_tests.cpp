@@ -40,7 +40,7 @@ int main()
         constexpr TokenKind all_kinds[] = {
             TokenKind::Eof,           TokenKind::Identifier, TokenKind::IntLiteral,
             TokenKind::PhysAddrLiteral, TokenKind::StringLiteral, TokenKind::KwFn,
-            TokenKind::KwLet,
+            TokenKind::KwExtern,      TokenKind::KwLet,
             TokenKind::KwIf,          TokenKind::KwElse,     TokenKind::KwWhile,
             TokenKind::KwReturn,      TokenKind::KwTrue,     TokenKind::KwFalse,
             TokenKind::KwRequires,    TokenKind::KwEnsures,  TokenKind::KwWhere,
@@ -555,6 +555,40 @@ int main()
         {
             fail("unexpected diagnostic message for unterminated block comment ending with '*'");
         }
+    }
+
+    // `extern` is a keyword (issue #256): lexes as KwExtern, not an identifier.
+    {
+        const std::string src = "extern";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for extern keyword");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::KwExtern, "extern");
+        expect_token(toks, 1, TokenKind::Eof, "");
+    }
+
+    {
+        const std::string src = "extern fn putc(c: Int) -> Unit;";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for extern fn declaration");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::KwExtern, "extern");
+        expect_token(toks, 1, TokenKind::KwFn, "fn");
+        expect_token(toks, 2, TokenKind::Identifier, "putc");
+    }
+
+    // to_string(KwExtern) must be stable and non-"unknown".
+    if (to_string(TokenKind::KwExtern) != "kw_extern")
+    {
+        fail("expected KwExtern to stringify to 'kw_extern'");
     }
 
     std::cout << "OK\n";

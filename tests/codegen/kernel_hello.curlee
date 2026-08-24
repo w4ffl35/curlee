@@ -1,0 +1,12 @@
+// Minimal bootable kernel fixture for `curlee build --link` (issue #256).
+// Uses the runtime's weak curlee_putc so the image links without a host
+// driver, then halts via curlee_halt after main returns.
+extern fn curlee_putc(c: Int) -> Unit;
+extern fn curlee_halt() -> Unit;
+
+fn main() -> Unit {
+  curlee_putc(72); // 'H'
+  curlee_putc(105); // 'i'
+  curlee_halt();
+  return;
+}

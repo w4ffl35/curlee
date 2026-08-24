@@ -99,7 +99,10 @@ void print_usage(std::ostream& out)
         out << "  curlee run [--fuel <n>] [--seed <n>] [--profile] [--profile-format <text|json>] "
             "[--bundle <file.bundle>] [--cap <capability>]... <file.curlee>\n";
         out << "  curlee <lex|parse|check|run|build> [--diag-format <text|json>] ...\n";
-        out << "  curlee build [--target freestanding-c] [-o out.c] <entry.curlee>\n";
+        out << "  curlee build [--target freestanding-c] [--link] [-o out] <entry.curlee>\n";
+        out << "    --link: produce a bootable kernel ELF (kernel.elf) by compiling the\n";
+        out << "            emitted C + runtime/crt0.S and linking with runtime/linker.ld\n";
+        out << "            (requires a C compiler and ld; x86-64 multiboot2 image)\n";
         out << "  curlee fmt [--check] <file>\n";
     out << "  curlee bundle build [--root <dir>] [--stdlib-root <dir>] [--cap <capability>]... "
            "<entry.curlee> <out.bundle>\n";
@@ -700,6 +703,11 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
 
     std::optional<types::TypeInfo> last_type_info;
 
+    // Non-fatal Note diagnostics produced by verification (e.g. the "extern
+    // boundary: contract assumed, not verified" notice). These are rendered but
+    // never cause the command to fail.
+    std::vector<diag::Diagnostic> verify_notes;
+
     // Function name -> owning source file path, populated during the import
     // merge. Used to render codegen diagnostics (whose spans are plain byte
     // offsets without file identity) against the correct file.
@@ -1070,7 +1078,13 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
 
         const auto& type_info = std::get<types::TypeInfo>(typed);
         last_type_info = type_info;
-        const auto verified = verification::verify(program, type_info);
+
+        // Collect non-fatal Notes (extern boundaries) so they render without
+        // failing the command; `verify` still returns Verified{} when the only
+        // diagnostics are Notes.
+        verify_notes.clear();
+        const auto verified = verification::verify(program, type_info, &verify_notes);
+
         if (std::holds_alternative<std::vector<diag::Diagnostic>>(verified))
         {
             std::vector<diag::Diagnostic> filtered;
@@ -1080,6 +1094,13 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                 {
                     continue;
                 }
+                // Defense in depth: Notes never fail a command, regardless of
+                // producer.
+                if (d.severity == diag::Severity::Note)
+                {
+                    verify_notes.push_back(d);
+                    continue;
+                }
                 filtered.push_back(d);
             }
             if (!filtered.empty())
@@ -1087,6 +1108,13 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                 render_diags(filtered, file);
                 return false;
             }
+        }
+
+        // Render non-fatal Notes to stderr (like diagnostics) but keep the
+        // command successful.
+        if (!verify_notes.empty())
+        {
+            emit_diagnostics(std::cerr, verify_notes, file, diag_format);
         }
 
         return true;
@@ -1734,14 +1762,19 @@ int cmd_fmt(const std::string& path, bool check)
     return kExitOk;
 }
 
-// `curlee build [--target freestanding-c] [-o out.c] <entry.curlee>`
+// `curlee build [--target freestanding-c] [--link] [-o out] <entry.curlee>`
 //
-// Runs the full check pipeline (including verification) and emits freestanding
-// C. On verification or codegen failure prints diagnostics and exits non-zero
+// Runs the full check pipeline (including verification) and either emits
+// freestanding C (default) or, with --link, produces a bootable kernel ELF:
+//
+//   verify -> codegen to C -> cc -ffreestanding -fno-builtin -nostdlib -c ->
+//   assemble crt0.S -> ld -nostdlib -T runtime/linker.ld -> kernel.elf
+//
+// On verification or codegen failure prints diagnostics and exits non-zero
 // without writing an output file.
 int cmd_build(const std::string& entry_path, const std::string& output_path,
               const std::vector<std::filesystem::path>& stdlib_roots, bool to_stdout,
-              DiagOutputFormat diag_format)
+              bool link, DiagOutputFormat diag_format)
 {
     std::string c_source;
     const int rc = cmd_read_only("build", entry_path, empty_caps(), kDefaultFuel,
@@ -1752,20 +1785,183 @@ int cmd_build(const std::string& entry_path, const std::string& output_path,
         return rc;
     }
 
-    if (to_stdout)
+    if (!link)
     {
-        std::cout << c_source;
+        if (to_stdout)
+        {
+            std::cout << c_source;
+            return kExitOk;
+        }
+
+        std::ofstream out(output_path, std::ios::binary | std::ios::trunc);
+        if (!out)
+        {
+            std::cerr << "error: build failed: cannot open output file: " << output_path << "\n";
+            return kExitError;
+        }
+        out << c_source;
+        out.close();
+
+        std::cout << "curlee build: wrote " << output_path << "\n";
         return kExitOk;
     }
 
-    std::ofstream out(output_path, std::ios::binary | std::ios::trunc);
-    if (!out)
+    if (to_stdout)
     {
-        std::cerr << "error: build failed: cannot open output file: " << output_path << "\n";
+        std::cerr << "error: curlee build --link requires an output file (-o <kernel.elf>)\n";
         return kExitError;
     }
-    out << c_source;
-    out.close();
+
+    namespace fs = std::filesystem;
+
+    // Escape a path for a POSIX shell command line.
+    auto shell_quote = [](const std::string& s)
+    {
+        if (s.find_first_of(" \t\n'\"\\$&;|<>()*?[]`~!#") == std::string::npos)
+        {
+            return s;
+        }
+        std::string out = "'";
+        for (const char c : s)
+        {
+            if (c == '\'')
+            {
+                out += "'\\''";
+            }
+            else
+            {
+                out.push_back(c);
+            }
+        }
+        out += "'";
+        return out;
+    };
+
+    auto run_shell = [](const std::string& cmd) { return std::system(cmd.c_str()) == 0; };
+
+    // Locate a runtime file (crt0.S / linker.ld / rt.c). Prefers the
+    // compile-time CURLEE_RUNTIME_DIR; falls back to a relative `runtime/`
+    // next to the binary.
+    auto runtime_file = [&](std::string_view name) -> fs::path
+    {
+        std::error_code ec;
+#ifdef CURLEE_RUNTIME_DIR
+        fs::path from_build = fs::path(CURLEE_RUNTIME_DIR) / name;
+        if (fs::exists(from_build, ec))
+        {
+            return from_build;
+        }
+#endif
+        return fs::path("runtime") / name;
+    };
+
+    const fs::path crt0 = runtime_file("crt0.S");
+    const fs::path linker_script = runtime_file("linker.ld");
+    const fs::path rt_c = runtime_file("rt.c");
+    if (!fs::exists(crt0))
+    {
+        std::cerr << "error: build --link: boot stub not found: " << crt0.string() << "\n";
+        return kExitError;
+    }
+    if (!fs::exists(linker_script))
+    {
+        std::cerr << "error: build --link: linker script not found: "
+                  << linker_script.string() << "\n";
+        return kExitError;
+    }
+
+    // Scratch files live next to the output (same filesystem).
+    fs::path workdir = fs::path(output_path).parent_path();
+    if (workdir.empty())
+    {
+        workdir = ".";
+    }
+    const fs::path kernel_c = workdir / "curlee_kernel.c";
+    const fs::path kernel_o = workdir / "curlee_kernel.o";
+    const fs::path crt0_o = workdir / "curlee_crt0.o";
+    const fs::path rt_o = workdir / "curlee_rt.o";
+
+    auto fail = [&](const std::string& msg)
+    {
+        std::cerr << "error: build --link: " << msg << "\n";
+        std::error_code ec;
+        fs::remove(kernel_c, ec);
+        fs::remove(kernel_o, ec);
+        fs::remove(crt0_o, ec);
+        fs::remove(rt_o, ec);
+        return kExitError;
+    };
+
+    {
+        std::ofstream out(kernel_c, std::ios::binary | std::ios::trunc);
+        if (!out)
+        {
+            return fail("cannot open scratch file " + kernel_c.string());
+        }
+        out << c_source;
+        out.close();
+    }
+
+    const std::string cc = std::getenv("CC") != nullptr ? std::getenv("CC") : "cc";
+    const std::string as = std::getenv("AS") != nullptr ? std::getenv("AS") : "cc";
+    const std::string ld = std::getenv("LD") != nullptr ? std::getenv("LD") : "ld";
+    const fs::path rt_dir = runtime_file("rt.h").parent_path();
+
+    // 1. Compile the generated kernel C freestanding.
+    {
+        const std::string cmd = shell_quote(cc) +
+                                " -ffreestanding -fno-builtin -nostdlib -std=c11 "
+                                "-I" + shell_quote(rt_dir.string()) + " -c " +
+                                shell_quote(kernel_c.string()) + " -o " +
+                                shell_quote(kernel_o.string());
+        if (!run_shell(cmd))
+        {
+            return fail("C compile of generated kernel failed");
+        }
+    }
+
+    // 2. Compile the freestanding runtime (rt.c) when present.
+    if (fs::exists(rt_c))
+    {
+        const std::string cmd = shell_quote(cc) +
+                                " -ffreestanding -fno-builtin -nostdlib -std=c11 "
+                                "-I" + shell_quote(rt_dir.string()) + " -c " +
+                                shell_quote(rt_c.string()) + " -o " +
+                                shell_quote(rt_o.string());
+        if (!run_shell(cmd))
+        {
+            return fail("C compile of runtime failed");
+        }
+    }
+
+    // 3. Assemble the boot stub (crt0.S).
+    {
+        const std::string cmd = shell_quote(as) +
+                                " -ffreestanding -fno-builtin -nostdlib -c " +
+                                shell_quote(crt0.string()) + " -o " +
+                                shell_quote(crt0_o.string());
+        if (!run_shell(cmd))
+        {
+            return fail("assembly of boot stub failed");
+        }
+    }
+
+    // 4. Link with the linker script into a bootable ELF.
+    {
+        std::string objs = shell_quote(kernel_o.string());
+        if (fs::exists(rt_o))
+        {
+            objs += " " + shell_quote(rt_o.string());
+        }
+        objs += " " + shell_quote(crt0_o.string());
+        const std::string cmd = shell_quote(ld) + " -nostdlib -static -T " +
+                                shell_quote(linker_script.string()) + " " + objs + " -o " +
+                                shell_quote(output_path);
+        if (!run_shell(cmd))
+        {
+            return fail("link of kernel ELF failed");
+        }
+    }
 
     std::cout << "curlee build: wrote " << output_path << "\n";
     return kExitOk;
@@ -1891,6 +2087,8 @@ int run(int argc, char** argv)
         std::string target = "freestanding-c";
         std::string output = "out.c";
         bool to_stdout = false;
+        bool link = false;
+        bool output_explicit = false;
         auto stdlib_roots = load_stdlib_roots_from_env();
         std::optional<std::filesystem::path> root;
         std::vector<std::string> positional;
@@ -1944,6 +2142,15 @@ int run(int argc, char** argv)
                 continue;
             }
 
+            // `--link` produces a bootable kernel ELF (verify -> codegen -> cc
+            // -> assemble crt0.S -> ld -T linker.ld) instead of plain C.
+            if (a == "--link")
+            {
+                link = true;
+                ++i;
+                continue;
+            }
+
             if (a == "-o" || a == "--output")
             {
                 if (i + 1 >= args.size())
@@ -1954,6 +2161,7 @@ int run(int argc, char** argv)
                 }
                 output = std::string(args[i + 1]);
                 to_stdout = (output == "-");
+                output_explicit = true;
                 i += 2;
                 continue;
             }
@@ -1969,6 +2177,7 @@ int run(int argc, char** argv)
                 }
                 output = std::string(value);
                 to_stdout = (output == "-");
+                output_explicit = true;
                 ++i;
                 continue;
             }
@@ -2041,7 +2250,7 @@ int run(int argc, char** argv)
         if (positional.size() != 1)
         {
             std::cerr << "error: expected curlee build [--target freestanding-c] "
-                         "[-o out.c] <entry.curlee>\n\n";
+                         "[-o out] <entry.curlee>\n\n";
             print_usage(std::cerr);
             return kExitUsage;
         }
@@ -2054,13 +2263,23 @@ int run(int argc, char** argv)
             return kExitUsage;
         }
 
+        // `--link` produces a kernel ELF: it needs an explicit output path so
+        // the user cannot accidentally overwrite a default `out.c` with an ELF.
+        if (link && !output_explicit)
+        {
+            std::cerr << "error: curlee build --link requires an output file "
+                         "(-o <kernel.elf>)\n\n";
+            print_usage(std::cerr);
+            return kExitUsage;
+        }
+
         std::string entry_path = positional[0];
         if (root.has_value() && !std::filesystem::path(entry_path).is_absolute())
         {
             entry_path = (*root / entry_path).string();
         }
 
-        return cmd_build(entry_path, output, stdlib_roots, to_stdout, diag_format);
+        return cmd_build(entry_path, output, stdlib_roots, to_stdout, link, diag_format);
     }
 
     if (cmd == "fmt")

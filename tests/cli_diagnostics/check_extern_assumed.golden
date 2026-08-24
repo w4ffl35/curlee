@@ -1,0 +1,9 @@
+tests/fixtures/check_extern_assumed.curlee:1:11: note: extern boundary: contract assumed, not verified
+  |
+  | extern fn boot_setup() -> Unit
+  |           ^
+note: extern declaration carries contracts that are assumed without proof
+tests/fixtures/check_extern_assumed.curlee:3:11: note: extern boundary: contract assumed, not verified
+  |
+  | extern fn putc(c: Int) -> Unit;
+  |           ^^^^^^^^^^^^^^^^^^^^^

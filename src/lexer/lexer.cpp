@@ -286,6 +286,10 @@ class Lexer
         {
             return TokenKind::KwFn;
         }
+        if (lexeme == "extern")
+        {
+            return TokenKind::KwExtern;
+        }
         if (lexeme == "let")
         {
             return TokenKind::KwLet;

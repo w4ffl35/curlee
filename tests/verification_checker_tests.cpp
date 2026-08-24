@@ -985,6 +985,65 @@ int main()
         }
     }
 
+    // Extern functions (issue #256): an extern declaration with non-trivial
+    // contracts is a trusted boundary — the contracts are ASSUMED (a Note is
+    // emitted), never proven against the (empty) body, and verification still
+    // succeeds.
+    {
+        const std::string source = R"(
+extern fn f(x: Int) -> Int [ requires x > 0; ensures result > 0; ];
+fn main() -> Unit { return; }
+)";
+        auto program = parse_program_or_fail(source, "extern with non-trivial contracts");
+        const auto typed = curlee::types::type_check(program);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(typed))
+        {
+            fail("expected type checking to succeed for extern with contracts");
+        }
+        const auto& type_info = std::get<curlee::types::TypeInfo>(typed);
+
+        std::vector<curlee::diag::Diagnostic> notes;
+        const auto verified = curlee::verification::verify(program, type_info, &notes);
+
+        // Verification must SUCCEED: the extern contract is assumed, not proven.
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected extern with non-trivial contracts to verify (assumed)");
+        }
+
+        // The trust transfer must be surfaced as a Note.
+        if (!has_message_substr(notes, "extern boundary: contract assumed, not verified"))
+        {
+            fail("expected extern boundary Note diagnostic");
+        }
+    }
+
+    // Extern fn without contracts still gets the boundary Note.
+    {
+        const std::string source = R"(
+extern fn putc(c: Int) -> Unit;
+fn main() -> Unit { return; }
+)";
+        auto program = parse_program_or_fail(source, "extern without contracts");
+        const auto typed = curlee::types::type_check(program);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(typed))
+        {
+            fail("expected type checking to succeed for extern without contracts");
+        }
+        const auto& type_info = std::get<curlee::types::TypeInfo>(typed);
+
+        std::vector<curlee::diag::Diagnostic> notes;
+        const auto verified = curlee::verification::verify(program, type_info, &notes);
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected extern without contracts to verify");
+        }
+        if (!has_message_substr(notes, "extern boundary: contract assumed, not verified"))
+        {
+            fail("expected extern boundary Note for body-less extern");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

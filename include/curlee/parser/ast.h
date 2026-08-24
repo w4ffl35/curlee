@@ -300,6 +300,12 @@ struct Function
     std::string_view name;
     Block body;
 
+    // True when this is an `extern fn` declaration (no body; the implementation
+    // is provided at link time by a host stub/runtime). Extern functions are a
+    // trusted boundary: their contracts are assumed, not verified, and the VM
+    // cannot execute them (freestanding build --link only).
+    bool is_extern = false;
+
     struct Param
     {
         curlee::source::Span span;

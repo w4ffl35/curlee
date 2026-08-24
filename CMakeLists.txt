@@ -32,6 +32,7 @@ function(curlee_add_build_info target)
     CURLEE_VERSION=\"${CURLEE_SEMVER}\"
     CURLEE_GIT_SHA=\"${CURLEE_GIT_SHA}\"
     CURLEE_BUILD_TYPE=\"${CURLEE_BUILD_TYPE_DEF}\"
+    CURLEE_RUNTIME_DIR=\"${CMAKE_SOURCE_DIR}/runtime\"
   )
 endfunction()
 
@@ -1140,7 +1141,7 @@ if(CURLEE_ENABLE_FREESTANDING_SMOKE)
 
   # Each smoke test writes its emitted .c into its own subdirectory to avoid
   # races when ctest runs tests in parallel.
-  foreach(_fixture arith control_flow while_loop struct_fixture enum_match match_stmt phys_mem phys_param empty_union_enum forward_ref unit_empty match_unit_arms mixed_payload_enum phys_param_forward while_loop_unit multi_function)
+  foreach(_fixture arith control_flow while_loop struct_fixture enum_match match_stmt phys_mem phys_param empty_union_enum forward_ref unit_empty match_unit_arms mixed_payload_enum phys_param_forward while_loop_unit multi_function extern_fn)
     set(_fixture_workdir "${CMAKE_BINARY_DIR}/codegen_smoke_${_fixture}")
     file(MAKE_DIRECTORY "${_fixture_workdir}")
     add_test(
@@ -1156,6 +1157,23 @@ if(CURLEE_ENABLE_FREESTANDING_SMOKE)
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     )
   endforeach()
+
+  # Link-boot smoke (issue #256): `curlee build --link` must produce a bootable
+  # x86-64 ELF whose entry is _start with the linker symbols present. Requires
+  # objdump/readelf/nm (from binutils, which accompany the C compiler).
+  set(_link_workdir "${CMAKE_BINARY_DIR}/linker_boot_smoke")
+  file(MAKE_DIRECTORY "${_link_workdir}")
+  add_test(
+    NAME curlee_linker_boot_smoke
+    COMMAND ${CMAKE_COMMAND}
+      -Dcurlee_binary=$<TARGET_FILE:curlee>
+      -Dcurlee_fixture=${CMAKE_SOURCE_DIR}/tests/codegen/kernel_hello.curlee
+      -Dcurlee_outdir=${_link_workdir}
+      -P ${CMAKE_SOURCE_DIR}/cmake/linker_boot_smoke.cmake
+  )
+  set_tests_properties(curlee_linker_boot_smoke PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  )
 endif()
 
 # --- Freestanding runtime (runtime/rt.c + runtime/rt.h) ---

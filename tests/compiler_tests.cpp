@@ -3286,6 +3286,45 @@ fn main() -> Int {
         }
     }
 
+    // Extern functions (issue #256): `curlee run` (bytecode emission) must
+    // reject a program containing an extern fn with a clear diagnostic; it must
+    // NOT silently emit an empty-body no-op for the extern.
+    {
+        const std::string source = R"(
+extern fn putc(c: Int) -> Unit;
+fn main() -> Unit {
+  putc(65);
+  return;
+}
+)";
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for extern rejection test");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for extern rejection test");
+        }
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected bytecode emission to fail for extern fn program");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+        if (diags.empty() ||
+            diags[0].message.find(
+                "extern functions are not supported by the VM; use curlee build --link") ==
+                std::string::npos)
+        {
+            fail("expected VM rejection diagnostic for extern fn program");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

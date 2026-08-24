@@ -740,6 +740,21 @@ int main()
         expect_contains(err, "error: unknown command: wat", "stderr");
     }
 
+    // build --link requires an output file (issue #256): -o must be given.
+    {
+        const fs::path extern_fixture =
+            find_repo_relative(fs::path("tests") / "codegen" / "extern_fn.curlee");
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "build", "--link", extern_fixture.string()}, out, err);
+        if (rc == 0)
+        {
+            fail("expected build --link without -o to fail");
+        }
+        expect_contains(err, "requires an output file", "stderr");
+    }
+
     std::cout << "OK\n";
     return 0;
 }

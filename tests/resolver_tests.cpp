@@ -838,6 +838,64 @@ fn main(v: E) -> Unit {
         }
     }
 
+    // Extern functions (issue #256): an extern declaration must register in the
+    // function table (callable) and must not collide with a body'd function.
+    {
+        // Duplicate: extern `putc` collides with a body'd `putc`.
+        const std::string src = R"(
+extern fn putc(c: Int) -> Unit;
+fn putc(c: Int) -> Unit { return; }
+fn main() -> Unit { return; }
+)";
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_extern_dup.curlee");
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
+        {
+            fail("expected duplicate function error for extern-vs-body collision");
+        }
+        bool found = false;
+        for (const auto& d : std::get<std::vector<diag::Diagnostic>>(res))
+        {
+            if (d.message.find("duplicate function") != std::string::npos)
+            {
+                found = true;
+            }
+        }
+        if (!found)
+        {
+            fail("expected 'duplicate function' diagnostic for extern-vs-body collision");
+        }
+    }
+
+    {
+        // Two extern declarations of the same name are also duplicates.
+        const std::string src = R"(
+extern fn putc(c: Int) -> Unit;
+extern fn putc(c: Int) -> Unit;
+fn main() -> Unit { return; }
+)";
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_extern_dup2.curlee");
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
+        {
+            fail("expected duplicate function error for two extern declarations");
+        }
+    }
+
+    {
+        // Extern fn + a main that calls it resolves cleanly.
+        const std::string src = R"(
+extern fn putc(c: Int) -> Unit;
+fn main() -> Unit {
+  putc(65);
+  return;
+}
+)";
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_extern_ok.curlee");
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for extern fn call");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

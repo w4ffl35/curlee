@@ -292,8 +292,14 @@ class CEmitter
         emit_forward_decls();
 
         // Function definitions in declaration order (deterministic golden output).
+        // Extern functions have no definition: they were already declared via
+        // emit_forward_decls (extern ... ;) and the symbol resolves at link time.
         for (const auto& f : program.functions)
         {
+            if (f.is_extern)
+            {
+                continue;
+            }
             emit_function(f, f.name == "main");
             if (!diags_.empty())
             {
@@ -504,6 +510,17 @@ class CEmitter
         for (const auto& f : program_->functions)
         {
             const std::string ret = return_c_type(f);
+            if (f.is_extern)
+            {
+                // Extern functions are provided by the host at link time. Emit
+                // a plain `extern` C declaration with the identifier verbatim
+                // (no curlee_ mangle, no `static`): the symbol must match the
+                // boot stub / host implementation exactly.
+                writer_.line("extern " + ret + " " + std::string(f.name) + "(" +
+                             params_c_list(f) + ");");
+                continue;
+            }
+
             const std::string name = f.name == "main" ? "curlee_main" : mangle_name(f.name);
             // Internal functions get static linkage; the declaration must match
             // the definition's linkage (static declaration after a non-static
@@ -1635,7 +1652,11 @@ class CEmitter
             return "0";
         }
 
-        std::string out = mangle_name(callee_fn_name) + "(";
+        // Extern callees resolve at link time to the verbatim symbol (no
+        // curlee_ mangle); internal functions use the mangled name.
+        std::string out = (callee->is_extern ? std::string(callee_fn_name)
+                                             : mangle_name(callee_fn_name)) +
+                          "(";
         bool first_arg = true;
         for (std::size_t i = 0; i < expr.args.size(); ++i)
         {

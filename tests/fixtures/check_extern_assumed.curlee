@@ -1,0 +1,9 @@
+extern fn boot_setup() -> Unit
+  [ requires true; ensures true; ];
+extern fn putc(c: Int) -> Unit;
+
+fn main() -> Unit {
+  boot_setup();
+  putc(65);
+  return;
+}

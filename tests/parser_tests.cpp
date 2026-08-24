@@ -1641,7 +1641,7 @@ fn main() -> Unit {
 
     // Top-level declaration error.
     expect_parse_error_contains("let x: Int = 1;\n",
-                                "expected 'import', 'struct', 'enum', or 'fn'");
+                                "expected 'import', 'struct', 'enum'");
 
     // Import declaration errors.
     expect_parse_error_contains("import ;\n", "expected module name after 'import'");
@@ -1761,6 +1761,107 @@ fn f(x Int) -> { return 0; }
         {
             fail("expected multiple diagnostics for multi-error program");
         }
+    }
+
+    // Extern function declarations (issue #256).
+    {
+        const std::string src = R"(
+extern fn putc(c: Int) -> Unit;
+fn main() -> Unit { return; }
+)";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on extern program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on extern program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        if (prog.functions.size() != 2)
+        {
+            fail("expected 2 functions (extern putc + main)");
+        }
+        const auto& extern_fn = prog.functions[0];
+        if (!extern_fn.is_extern)
+        {
+            fail("expected first function to be marked is_extern");
+        }
+        if (extern_fn.name != "putc")
+        {
+            fail("expected extern function name 'putc'");
+        }
+        if (extern_fn.params.size() != 1 || extern_fn.params[0].name != "c")
+        {
+            fail("expected extern fn putc to have one param 'c'");
+        }
+        // Extern declarations have no body.
+        if (!extern_fn.body.stmts.empty())
+        {
+            fail("expected extern function to have an empty synthesized body");
+        }
+        // The dump must render the declaration as `extern fn ... ;`.
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("extern fn putc(c: Int) -> Unit ;") == std::string::npos)
+        {
+            std::cerr << "dump was:\n" << dumped << "\n";
+            fail("dump missing 'extern fn putc(c: Int) -> Unit ;'");
+        }
+    }
+
+    // Extern fn with contracts: parses and remains extern, and the contracts
+    // are preserved (they are ASSUMED, not verified, downstream).
+    {
+        const std::string src = R"(
+extern fn boot_setup() -> Unit
+  [ requires true; ensures true; ];
+fn main() -> Unit { return; }
+)";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on extern-with-contracts program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on extern-with-contracts program");
+        }
+        const auto& prog = std::get<parser::Program>(parsed);
+        const auto& extern_fn = prog.functions[0];
+        if (!extern_fn.is_extern)
+        {
+            fail("expected extern fn with contracts to be is_extern");
+        }
+        if (extern_fn.requires_clauses.size() != 1 || extern_fn.ensures.size() != 1)
+        {
+            fail("expected extern fn to preserve requires/ensures clauses");
+        }
+    }
+
+    // An extern fn with a body is an error.
+    {
+        const std::string src = R"(
+extern fn f() -> Unit { return; }
+fn main() -> Unit { return; }
+)";
+        expect_parse_error_contains(src, "expected ';' after extern declaration");
+    }
+
+    // `extern` without `fn` is an error.
+    {
+        const std::string src = R"(
+extern f() -> Unit;
+fn main() -> Unit { return; }
+)";
+        expect_parse_error_contains(src, "expected 'fn'");
     }
 
     std::cout << "OK\n";

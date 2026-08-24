@@ -150,6 +150,20 @@ class Emitter
             }
         }
 
+        // Extern functions have no VM implementation: their bodies are provided
+        // at link time by the host boot stub/runtime (curlee build --link only).
+        // Reject before emitting any bytecode so a program containing an extern
+        // can never silently run it as an empty-body no-op.
+        for (const auto& f : program.functions)
+        {
+            if (f.is_extern)
+            {
+                diags_.push_back(error_at(
+                    f.span, "extern functions are not supported by the VM; use curlee build --link"));
+                return diags_;
+            }
+        }
+
         const Function* entry = find_main(program);
         if (entry == nullptr)
         {
