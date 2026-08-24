@@ -1011,8 +1011,9 @@ class Verifier
                 // cannot be proven - fail loudly instead of silently skipping.
                 if (arg_is_opaque)
                 {
-                    const Span span = call.args.empty() ? Span{} : call.args[0].span;
-                    reject_opaque_read_contract(span,
+                    // arg_is_opaque is only set when an argument was scanned, so args is
+                    // guaranteed non-empty here (the ternary fallback was dead code).
+                    reject_opaque_read_contract(call.args[0].span,
                                                 "cannot prove call contract on opaque MMIO read argument");
                 }
                 return;
