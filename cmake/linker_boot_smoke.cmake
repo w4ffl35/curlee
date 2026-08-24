@@ -109,6 +109,14 @@ foreach(_sec ".text" ".bss" ".stack")
   endif()
 endforeach()
 
+# 3b. The PVH ELF note (.note.Xen) must be present: qemu -kernel requires it
+# to boot an uncompressed 64-bit ELF (multiboot2 alone is NOT supported by the
+# qemu -kernel loader). This is the regression guard for the qemu boot smoke.
+if(NOT _re_s_out MATCHES "\.note\.Xen")
+  message(FATAL_ERROR
+    "readelf -S missing .note.Xen (PVH note required for qemu -kernel boot):\n${_re_s_out}")
+endif()
+
 execute_process(
   COMMAND "${curlee_readelf}" -s "${_kernel_elf}"
   RESULT_VARIABLE _re_sym_rc

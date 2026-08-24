@@ -96,20 +96,56 @@ void print_usage(std::ostream& out)
     out << "  curlee lex <file.curlee>\n";
     out << "  curlee parse <file.curlee>\n";
     out << "  curlee check <file.curlee>\n";
-        out << "  curlee run [--fuel <n>] [--seed <n>] [--profile] [--profile-format <text|json>] "
-            "[--bundle <file.bundle>] [--cap <capability>]... <file.curlee>\n";
-        out << "  curlee <lex|parse|check|run|build> [--diag-format <text|json>] ...\n";
-        out << "  curlee build [--target freestanding-c] [--link] [-o out] <entry.curlee>\n";
-        out << "    --link: produce a bootable kernel ELF (kernel.elf) by compiling the\n";
-        out << "            emitted C + runtime/crt0.S and linking with runtime/linker.ld\n";
-        out << "            (requires a C compiler and ld; x86-64 multiboot2 image)\n";
-        out << "  curlee fmt [--check] <file>\n";
+    out << "  curlee run [--fuel <n>] [--seed <n>] [--profile] [--profile-format <text|json>] "
+           "[--bundle <file.bundle>] [--cap <capability>]... <file.curlee>\n";
+    out << "  curlee <lex|parse|check|run|build> [--diag-format <text|json>] ...\n";
+    out << "  curlee build [--target freestanding-c] [--link] [-o out] <entry.curlee>\n";
+    out << "    --target freestanding-c: emit freestanding C for the verified program\n";
+    out << "      (the only supported target; no hosted builtins: no print, no String,\n";
+    out << "      no Vec. The verification gate applies: no proof, no build).\n";
+    out << "    --link: produce a bootable kernel ELF (kernel.elf) by compiling the\n";
+    out << "            emitted C + runtime/crt0.S and linking with runtime/linker.ld\n";
+    out << "            (requires a C compiler and ld; x86-64 multiboot2 image)\n";
+    out << "    -o <path>: output path (default out.c; --link requires -o).\n";
+    out << "  curlee run --cap phys.mem <file.curlee>  # phys.mem is freestanding-only\n";
+    out << "    phys.mem: grants Phys<T> read()/write() MMIO access. Phys programs are\n";
+    out << "    rejected by the VM (freestanding-only); use `curlee build` instead.\n";
+    out << "  curlee fmt [--check] <file>\n";
     out << "  curlee bundle build [--root <dir>] [--stdlib-root <dir>] [--cap <capability>]... "
            "<entry.curlee> <out.bundle>\n";
     out << "  curlee bundle verify <file.bundle>\n";
     out << "  curlee bundle info <file.bundle>\n";
     out << "  curlee deps lock [--root <dir>] [--stdlib-root <dir>] <entry.curlee> <deps.lock>\n";
     out << "  curlee deps verify [--root <dir>] [--stdlib-root <dir>] <entry.curlee> <deps.lock>\n";
+}
+
+void print_build_usage(std::ostream& out)
+{
+    out << "curlee build: emit a verified program as freestanding C (or a bootable kernel ELF).\n\n";
+    out << "usage:\n";
+    out << "  curlee build [--target freestanding-c] [-o <path>] <entry.curlee>\n";
+    out << "  curlee build [--target freestanding-c] --link -o <kernel.elf> <entry.curlee>\n\n";
+    out << "The full check pipeline runs first (lex -> parse -> resolve -> type-check -> verify).\n";
+    out << "The verification gate applies: no proof, no build (nothing is emitted on failure).\n\n";
+    out << "flags:\n";
+    out << "  --target <target>   codegen target; the only supported value is `freestanding-c`\n";
+    out << "                      (default). Other targets are rejected.\n";
+    out << "  --link              additionally compile the emitted C with\n";
+    out << "                      `cc -ffreestanding -fno-builtin -nostdlib -c`, assemble\n";
+    out << "                      runtime/crt0.S, and link with runtime/linker.ld into a\n";
+    out << "                      bootable x86-64 multiboot2 kernel ELF. Requires -o.\n";
+    out << "  -o <path>           output path (default: out.c). `-o -` writes the C to stdout.\n";
+    out << "  --root <dir>        resolve the entry file relative to <dir>.\n";
+    out << "  --stdlib-root <dir> additional stdlib search root (repeatable).\n\n";
+    out << "freestanding subset (no hosted builtins):\n";
+    out << "  - Supported: Int, Bool, U8/U16/U32/U64 arithmetic, structs/enums (storable\n";
+    out << "    payloads only), match, if/else, while, verified contracts, extern fn,\n";
+    out << "    Phys<T> + read()/write() under `unsafe` with `cap phys.mem`.\n";
+    out << "  - Rejected: print, String, Vec, python_ffi, and all hosted builtins; Phys/Unit\n";
+    out << "    cannot be stored (struct fields, enum payloads), returned, or used as\n";
+    out << "    parameters.\n";
+    out << "  - The VM never runs freestanding programs (`curlee run` rejects Phys/extern\n";
+    out << "    bodies); `curlee build` is the execution path.\n";
 }
 
 // GCOVR_EXCL_START
@@ -526,6 +562,16 @@ bool write_dependency_lockfile(const std::string& path, const DependencyLockfile
 
 bool is_v1_forbidden_capability(std::string_view cap)
 {
+    // v1 capability surface decision (issue #257): only the Python-interop
+    // capabilities are v1-forbidden (python_ffi is stubbed, so python.ffi and
+    // python.sandbox are rejected at compile/check/bundle time).
+    //
+    // `phys.mem` is intentionally NOT v1-forbidden: it is a real freestanding
+    // capability (Phys<T> read()/write() MMIO access, used by the
+    // freestanding-c build target). It cannot be executed by the VM (Phys is
+    // freestanding-only), but that is enforced by the front-end/emitter, not
+    // by the capability gate. Declaring `cap phys.mem` in a bundle manifest is
+    // therefore allowed (it is not a python interop capability).
     return cap == "python.ffi" || cap == "python.sandbox";
 }
 
@@ -2100,7 +2146,7 @@ int run(int argc, char** argv)
             // `curlee build --help` prints the build usage and exits 0.
             if (a == "--help" || a == "-h")
             {
-                print_usage(std::cout);
+                print_build_usage(std::cout);
                 return kExitOk;
             }
 

@@ -171,8 +171,11 @@ if(NOT _odt_rc EQUAL 0)
 endif()
 
 # A weak-binding curlee_putc in the final symbol table means the strong host
-# override did not win; that is a failure.
-if(_odt_out MATCHES "[ \t]w[ \t]+.*curlee_putc")
+# override did not win; that is a failure. The regex is anchored to the line
+# for curlee_putc specifically: curlee_halt/curlee_panic are also weak
+# (overridable), so an unanchored `w .* curlee_putc` would false-positive on
+# their symbol-table lines.
+if(_odt_out MATCHES "\n[0-9a-fA-F]+ w[^\n]*curlee_putc")
   message(FATAL_ERROR
     "curlee_putc resolved weak; strong host override did not win:\n${_odt_out}")
 endif()

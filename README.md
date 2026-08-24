@@ -78,6 +78,10 @@ flowchart LR
   T --> V[Verifier Z3]
   V -->|only after verification succeeds| C[Bytecode Compiler]
   C --> M[Deterministic VM fuel bounded]
+  V -->|no proof, no build| F[Freestanding C codegen]
+  F -->|curlee build --link| K[crt0.S + linker.ld + cc/ld]
+  K --> E[kernel.elf]
+  E --> Q[(qemu / multiboot2 boot)]
 ```
 
 ### Contracts and proof obligations
@@ -150,6 +154,32 @@ At a high level:
 > It is gated behind `unsafe` and the `python.ffi` capability, but the call itself is a placeholder that
 > currently accepts zero arguments. The "shield" boundary (Curlee validates contracts, Python executes
 > legacy work) is planned, not yet available.
+
+### Freestanding targets (kernel)
+
+Curlee can also emit a verified program as **freestanding C** and, with `--link`, link it into a
+bootable **x86-64 multiboot2 kernel ELF**:
+
+- `curlee build <entry.curlee>` — verify, then emit freestanding C (default `out.c`).
+- `curlee build --link -o kernel.elf <entry.curlee>` — emit C, compile it with
+  `gcc -ffreestanding -fno-builtin -nostdlib -c`, assemble `runtime/crt0.S`, and link with
+  `runtime/linker.ld` into `kernel.elf`.
+- The **verification gate applies**: no proof, no build (nothing is emitted on failure).
+- The freestanding target is **Linux/x86-64 only** and has **no hosted builtins** (no `print`,
+  no `String`, no `Vec`). Physical memory access uses `Phys<T>` + `read()`/`write()` under
+  `unsafe` and requires the `phys.mem` capability.
+- The VM never runs freestanding programs (`curlee run` rejects `Phys`/`extern` bodies);
+  `curlee build` is the freestanding execution path.
+
+End-to-end hello-kernel walkthrough:
+
+```bash
+./build/linux-debug/curlee build --link -o kernel.elf tests/codegen/kernel_hello.curlee
+qemu-system-x86_64 -kernel kernel.elf   # boots (PVH note), prints 'Hi' via curlee_putc, halts
+```
+
+The kernel carries both a multiboot2 header (for GRUB) and a PVH ELF note (required by QEMU's
+`-kernel` loader for uncompressed 64-bit ELF images).
 
 ---
 

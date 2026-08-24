@@ -48,7 +48,7 @@ int memcmp(const void* a, const void* b, size_t n)
     return 0;
 }
 
-CURLEE_RT_NORETURN void curlee_halt(void)
+CURLEE_RT_WEAK CURLEE_RT_NORETURN void curlee_halt(void)
 {
 #if defined(__x86_64__) || defined(__i386__)
     // x86-64 (and i386): disable interrupts and halt. The loop is intentional:

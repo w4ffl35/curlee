@@ -11,10 +11,30 @@
 //   3. Call curlee_main (the codegen entry point; see codegen.cpp).
 //   4. On return, disable interrupts and halt forever (deterministic exit).
 //
-// An optional multiboot2 header (magic 0xE85250D6) is included so qemu
-// `-kernel kernel.elf` boots the image directly.
+// An optional multiboot2 header (magic 0xE85250D6) is included for GRUB.
+//
+// QEMU's `-kernel` loader does NOT support multiboot2: it requires a PVH ELF
+// note (XEN_ELFNOTE_PHYS32_ENTRY) to boot an uncompressed 64-bit ELF. The
+// .note.Xen section below supplies that note (see docs/specs/pvh.rst in QEMU);
+// QEMU enters the kernel in 64-bit long mode with identity-mapped paging, so
+// the plain .code64 code below runs directly.
 
 .code64
+// PVH ELF note: XEN_ELFNOTE_PHYS32_ENTRY (type 18), entry = _start.
+.section .note.Xen, "a", @note
+.balign 4
+.long 2f - 1f                  // namesz
+.long 4f - 3f                  // descsz
+.long 18                       // XEN_ELFNOTE_PHYS32_ENTRY
+1:
+.asciz "Xen"
+2:
+.balign 4
+3:
+.long _start                   // physical entry point (< 4 GiB)
+4:
+.balign 4
+
 .section .multiboot2, "a"
 .align 8
 multiboot2_header:

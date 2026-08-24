@@ -1174,6 +1174,18 @@ if(CURLEE_ENABLE_FREESTANDING_SMOKE)
   set_tests_properties(curlee_linker_boot_smoke PROPERTIES
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
   )
+
+  # Freestanding CI flow (issue #257): codegen -> gcc -ffreestanding -c ->
+  # link -> entry/PVH check -> qemu boot smoke (skips visibly if qemu missing).
+  # Uses the same script the `freestanding` CI job runs, so local `ctest` and
+  # CI stay in sync.
+  add_test(
+    NAME curlee_freestanding_ci
+    COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/freestanding_ci.sh --preset linux-debug
+  )
+  set_tests_properties(curlee_freestanding_ci PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  )
 endif()
 
 # --- Freestanding runtime (runtime/rt.c + runtime/rt.h) ---

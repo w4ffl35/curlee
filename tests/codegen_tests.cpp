@@ -256,7 +256,9 @@ int main(int argc, char** argv)
                       "parameter 'u' of function 'f': type 'Unit' is not supported "
                       "in freestanding target");
 
-    // `curlee build --help` exits 0 and prints the build usage line.
+    // `curlee build --help` exits 0 and prints the build usage line
+    // (issue #257: the build subcommand must be documented, including the
+    // freestanding subset and the verification gate).
     {
         std::string out;
         std::string err;
@@ -268,6 +270,38 @@ int main(int argc, char** argv)
         if (out.find("curlee build") == std::string::npos)
         {
             fail("expected build --help to show build usage");
+        }
+        if (out.find("--link") == std::string::npos)
+        {
+            fail("expected build --help to document --link");
+        }
+        if (out.find("freestanding") == std::string::npos)
+        {
+            fail("expected build --help to document the freestanding target");
+        }
+        if (out.find("no proof, no build") == std::string::npos)
+        {
+            fail("expected build --help to document the verification gate");
+        }
+    }
+
+    // Top-level `curlee --help` must document `build`, `phys.mem`, and the
+    // freestanding-only restriction (issue #257 acceptance criteria).
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli({"curlee", "--help"}, out, err);
+        if (rc != 0)
+        {
+            fail("expected --help to exit 0");
+        }
+        if (out.find("curlee build") == std::string::npos)
+        {
+            fail("expected --help to document the build subcommand");
+        }
+        if (out.find("phys.mem") == std::string::npos)
+        {
+            fail("expected --help to document the phys.mem capability");
         }
     }
 

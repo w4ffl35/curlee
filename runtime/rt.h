@@ -47,8 +47,8 @@ extern "C"
     void* memcpy(void* dst, const void* src, size_t n) CURLEE_RT_NOEXCEPT;
     int memcmp(const void* a, const void* b, size_t n) CURLEE_RT_NOEXCEPT;
 
-    CURLEE_RT_NORETURN void curlee_halt(void);
-    CURLEE_RT_NORETURN void curlee_panic(const char* msg);
+    CURLEE_RT_NORETURN void curlee_halt(void) CURLEE_RT_WEAK;
+    CURLEE_RT_NORETURN void curlee_panic(const char* msg) CURLEE_RT_WEAK;
 
     CURLEE_RT_WEAK void curlee_putc(char c);
 

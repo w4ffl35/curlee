@@ -43,6 +43,39 @@ jobs:
         if: matrix.preset == 'linux-release'
         run: bash scripts/smoke.sh --preset linux-release --skip-build
 
+  freestanding:
+    # Issue #257: CI must exercise the freestanding path so it does not rot:
+    # build curlee -> codegen -> gcc -ffreestanding -fno-builtin -nostdlib -c ->
+    # link -> (qemu boot when available, skipped visibly otherwise).
+    name: Freestanding target (codegen + link + boot)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ gcc libz3-dev pkg-config binutils
+          # qemu is only needed for the optional boot smoke; its absence must not
+          # fail the job (the boot step skips visibly). Installing when available
+          # means the CI runner exercises it.
+          sudo apt-get install -y qemu-system-x86 || echo "::warning::qemu-system-x86 unavailable; boot smoke will be skipped"
+
+      - name: Configure (linux-debug)
+        run: cmake --preset linux-debug
+
+      - name: Build curlee
+        run: cmake --build --preset linux-debug
+
+      # Run the shared freestanding CI script (codegen -> gcc -ffreestanding -c ->
+      # link + entry/PVH check -> qemu boot smoke that skips visibly if qemu is
+      # absent). Reusing the script keeps CI and local `ctest` (curlee_freestanding_ci)
+      # exactly in sync — no inline duplication to drift.
+      - name: Freestanding CI flow (shared script)
+        run: bash scripts/freestanding_ci.sh --preset linux-debug
+
   vendored-z3-build:
     name: Vendored Z3 build (no system Z3)
     runs-on: ubuntu-latest

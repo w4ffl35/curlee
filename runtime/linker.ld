@@ -24,6 +24,10 @@ SECTIONS
         *(.text .text.*)
     }
 
+    .note.Xen : {
+        KEEP(*(.note.Xen))
+    }
+
     .rodata : {
         *(.rodata .rodata.*)
     }
