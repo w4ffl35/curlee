@@ -1478,7 +1478,8 @@ fn main(v: E) -> Unit {
             "variant_is expects enum variant tag as second argument");
 
         expect_diag(
-            run_tc("enum E { A(Int); } enum F { A(Int); } fn main() -> Bool { let e: E = E::A(1); return variant_is(e, F::A); }"),
+            run_tc("enum E { A(Int); } enum F { A(Int); } fn main() -> Bool { "
+                   "let e: E = E::A(1); return variant_is(e, F::A); }"),
             "variant_is enum mismatch between value and variant tag");
 
         expect_diag(
@@ -1489,7 +1490,8 @@ fn main(v: E) -> Unit {
                     "variant_unwrap expects exactly 2 argument");
 
         expect_diag(
-            run_tc("enum E { A(Int); } enum F { A(Int); } fn main() -> Int { let e: E = E::A(1); return variant_unwrap(e, F::A); }"),
+            run_tc("enum E { A(Int); } enum F { A(Int); } fn main() -> Int { "
+                   "let e: E = E::A(1); return variant_unwrap(e, F::A); }"),
             "variant_unwrap enum mismatch between value and variant tag");
 
         expect_diag(
