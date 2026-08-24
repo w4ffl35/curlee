@@ -1458,6 +1458,645 @@ int main()
     }
 
     {
+        // is_phys_address_literal: empty lexeme -> false (line 208).
+        if (curlee::verification::is_phys_address_literal(""))
+        {
+            fail("expected is_phys_address_literal(empty) to be false");
+        }
+        if (!curlee::verification::is_phys_address_literal("0xFD00_0000"))
+        {
+            fail("expected is_phys_address_literal(hex) to be true");
+        }
+        if (!curlee::verification::is_phys_address_literal("4096"))
+        {
+            fail("expected is_phys_address_literal(decimal) to be true");
+        }
+        if (curlee::verification::is_phys_address_literal("base"))
+        {
+            fail("expected is_phys_address_literal(name) to be false");
+        }
+
+        // phys_sort cache-hit path (line 464).
+        const curlee::source::Span s_cov{.start = 0, .end = 1};
+        v.phys_sorts_.clear();
+        const auto& s1 = v.phys_sort("U32");
+        const auto& s2 = v.phys_sort("U32");
+        if (s1.id() != s2.id())
+        {
+            fail("expected phys_sort to return the same cached sort");
+        }
+        v.phys_sorts_.clear();
+
+        // phys_read_fn cache-hit path (line 464): calling twice returns the cached decl.
+        v.phys_read_fns_.clear();
+        const auto& rf1 = v.phys_read_fn("U32");
+        const auto& rf2 = v.phys_read_fn("U32");
+        if (rf1.id() != rf2.id())
+        {
+            fail("expected phys_read_fn to return the same cached decl");
+        }
+        v.phys_read_fns_.clear();
+
+        // phys_write_fn cache-hit path (line 464): calling twice returns the cached decl.
+        v.phys_write_fns_.clear();
+        const auto& wf1 = v.phys_write_fn("U32");
+        const auto& wf2 = v.phys_write_fn("U32");
+        if (wf1.id() != wf2.id())
+        {
+            fail("expected phys_write_fn to return the same cached decl");
+        }
+        v.phys_write_fns_.clear();
+
+        // lookup_phys_var not-found path (line 481).
+        if (v.lookup_phys_var("no_such_phys_var").has_value())
+        {
+            fail("expected lookup_phys_var(unknown) to be nullopt");
+        }
+    }
+
+    {
+        // pred_mentions_opaque_read recursion paths (unary/binary/group with opaque names).
+        const curlee::source::Span s{.start = 0, .end = 1};
+        v.opaque_read_vars_.insert("op");
+
+        auto p_unary = make_pred(
+            s, curlee::parser::PredUnary{
+                   .op = curlee::lexer::TokenKind::Bang,
+                   .rhs = make_pred_ptr(make_pred(s, curlee::parser::PredName{.name = "op"}))});
+        if (!v.pred_mentions_opaque_read(p_unary))
+        {
+            fail("expected pred_mentions_opaque_read(!op) to be true");
+        }
+        auto p_unary_plain = make_pred(
+            s, curlee::parser::PredUnary{
+                   .op = curlee::lexer::TokenKind::Bang,
+                   .rhs = make_pred_ptr(make_pred(s, curlee::parser::PredName{.name = "x"}))});
+        if (v.pred_mentions_opaque_read(p_unary_plain))
+        {
+            fail("expected pred_mentions_opaque_read(!x) to be false");
+        }
+        auto p_bin_lhs = make_pred(
+            s, curlee::parser::PredBinary{
+                   .op = curlee::lexer::TokenKind::Greater,
+                   .lhs = make_pred_ptr(make_pred(s, curlee::parser::PredName{.name = "op"})),
+                   .rhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "0"}))});
+        if (!v.pred_mentions_opaque_read(p_bin_lhs))
+        {
+            fail("expected pred_mentions_opaque_read(op > 0) to be true");
+        }
+        auto p_bin_rhs = make_pred(
+            s, curlee::parser::PredBinary{
+                   .op = curlee::lexer::TokenKind::Greater,
+                   .lhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "0"})),
+                   .rhs = make_pred_ptr(make_pred(s, curlee::parser::PredName{.name = "op"}))});
+        if (!v.pred_mentions_opaque_read(p_bin_rhs))
+        {
+            fail("expected pred_mentions_opaque_read(0 < op) to be true");
+        }
+        auto p_group = make_pred(
+            s, curlee::parser::PredGroup{
+                   .inner = make_pred_ptr(make_pred(s, curlee::parser::PredName{.name = "op"}))});
+        if (!v.pred_mentions_opaque_read(p_group))
+        {
+            fail("expected pred_mentions_opaque_read((op)) to be true");
+        }
+        v.opaque_read_vars_.clear();
+    }
+
+    {
+        // base_phys_element_kind paths: NameExpr not a phys var, direct PhysExpr, and default.
+        const curlee::source::Span s{.start = 0, .end = 1};
+        v.phys_vars_.insert_or_assign("fb_base", std::string_view("U32"));
+
+        curlee::parser::Expr name_ok;
+        name_ok.span = s;
+        name_ok.node = curlee::parser::NameExpr{.name = "fb_base"};
+        if (v.base_phys_element_kind(name_ok) != "U32")
+        {
+            fail("expected base_phys_element_kind(NameExpr phys) to return element kind");
+        }
+
+        curlee::parser::Expr name_missing;
+        name_missing.span = s;
+        name_missing.node = curlee::parser::NameExpr{.name = "no_such"};
+        if (!v.base_phys_element_kind(name_missing).empty())
+        {
+            fail("expected base_phys_element_kind(NameExpr non-phys) to be empty");
+        }
+
+        curlee::parser::Expr phys_direct;
+        phys_direct.span = s;
+        phys_direct.node =
+            curlee::parser::PhysExpr{.element_kind = "U16", .lexeme = "0x1000"};
+        if (v.base_phys_element_kind(phys_direct) != "U16")
+        {
+            fail("expected base_phys_element_kind(PhysExpr) to return element kind");
+        }
+
+        curlee::parser::Expr other;
+        other.span = s;
+        other.node = curlee::parser::IntExpr{.lexeme = "1"};
+        if (!v.base_phys_element_kind(other).empty())
+        {
+            fail("expected base_phys_element_kind(IntExpr) to be empty");
+        }
+        v.phys_vars_.erase("fb_base");
+    }
+
+    {
+        // lower_expr(PhysExpr) with an unsupported element kind (lines 825-826).
+        const curlee::source::Span s{.start = 0, .end = 1};
+        curlee::parser::Expr e_phys_badkind;
+        e_phys_badkind.span = s;
+        e_phys_badkind.node =
+            curlee::parser::PhysExpr{.element_kind = "String", .lexeme = "0x1000"};
+        auto r_badkind = v.lower_expr(e_phys_badkind);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(r_badkind))
+        {
+            fail("expected lower_expr(PhysExpr String kind) to error");
+        }
+
+        // lower_expr(PhysReadExpr) on a non-Phys base (line 852).
+        v.phys_vars_.insert_or_assign("fb_cov", std::string_view("U32"));
+        curlee::parser::Expr read_int_base;
+        read_int_base.span = s;
+        read_int_base.node = curlee::parser::IntExpr{.lexeme = "5"};
+        curlee::parser::Expr e_read_int;
+        e_read_int.span = s;
+        e_read_int.node = curlee::parser::PhysReadExpr{
+            .base = make_expr_ptr(std::move(read_int_base))};
+        auto r_read_int = v.lower_expr(e_read_int);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(r_read_int))
+        {
+            fail("expected lower_expr(PhysReadExpr on Int base) to error");
+        }
+
+        // lower_expr(PhysReadExpr) where element kind cannot be resolved (line 857): a
+        // GroupExpr wrapping a Phys name lowers to Phys kind, but base_phys_element_kind
+        // cannot extract the element kind through the group.
+        curlee::parser::Expr read_g_base;
+        read_g_base.span = s;
+        read_g_base.node = curlee::parser::NameExpr{.name = "fb_cov"};
+        curlee::parser::Expr read_group;
+        read_group.span = s;
+        read_group.node = curlee::parser::GroupExpr{.inner = make_expr_ptr(std::move(read_g_base))};
+        curlee::parser::Expr e_read_unk;
+        e_read_unk.span = s;
+        e_read_unk.node = curlee::parser::PhysReadExpr{
+            .base = make_expr_ptr(std::move(read_group))};
+        auto r_read_unk = v.lower_expr(e_read_unk);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(r_read_unk))
+        {
+            fail("expected lower_expr(PhysReadExpr unresolved kind) to error");
+        }
+
+        // lower_expr(PhysWriteExpr) on a non-Phys base (line 877).
+        curlee::parser::Expr write_int_base;
+        write_int_base.span = s;
+        write_int_base.node = curlee::parser::IntExpr{.lexeme = "5"};
+        curlee::parser::Expr write_val;
+        write_val.span = s;
+        write_val.node = curlee::parser::IntExpr{.lexeme = "1"};
+        curlee::parser::Expr e_write_int;
+        e_write_int.span = s;
+        e_write_int.node = curlee::parser::PhysWriteExpr{
+            .base = make_expr_ptr(std::move(write_int_base)),
+            .value = make_expr_ptr(std::move(write_val))};
+        auto r_write_int = v.lower_expr(e_write_int);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(r_write_int))
+        {
+            fail("expected lower_expr(PhysWriteExpr on Int base) to error");
+        }
+
+        // lower_expr(PhysWriteExpr) where the value lowering fails (line 882).
+        curlee::parser::Expr write_ok_base;
+        write_ok_base.span = s;
+        write_ok_base.node = curlee::parser::NameExpr{.name = "fb_cov"};
+        curlee::parser::Expr write_bad_val;
+        write_bad_val.span = s;
+        write_bad_val.node = curlee::parser::StringExpr{.lexeme = "\"x\""};
+        curlee::parser::Expr e_write_badval;
+        e_write_badval.span = s;
+        e_write_badval.node = curlee::parser::PhysWriteExpr{
+            .base = make_expr_ptr(std::move(write_ok_base)),
+            .value = make_expr_ptr(std::move(write_bad_val))};
+        auto r_write_badval = v.lower_expr(e_write_badval);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(r_write_badval))
+        {
+            fail("expected lower_expr(PhysWriteExpr bad value) to error");
+        }
+
+        // lower_expr(PhysWriteExpr) where element kind cannot be resolved (line 888): a
+        // GroupExpr-wrapped Phys name lowers to Phys kind but has no resolvable element kind.
+        curlee::parser::Expr write_g_base;
+        write_g_base.span = s;
+        write_g_base.node = curlee::parser::NameExpr{.name = "fb_cov"};
+        curlee::parser::Expr write_group;
+        write_group.span = s;
+        write_group.node = curlee::parser::GroupExpr{.inner = make_expr_ptr(std::move(write_g_base))};
+        curlee::parser::Expr write_val2;
+        write_val2.span = s;
+        write_val2.node = curlee::parser::IntExpr{.lexeme = "1"};
+        curlee::parser::Expr e_write_unk;
+        e_write_unk.span = s;
+        e_write_unk.node = curlee::parser::PhysWriteExpr{
+            .base = make_expr_ptr(std::move(write_group)),
+            .value = make_expr_ptr(std::move(write_val2))};
+        auto r_write_unk = v.lower_expr(e_write_unk);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(r_write_unk))
+        {
+            fail("expected lower_expr(PhysWriteExpr unresolved kind) to error");
+        }
+        v.phys_vars_.erase("fb_cov");
+    }
+
+    {
+        // check_function: Phys<T> parameter registration (line 1497).
+        const curlee::source::Span s{.start = 0, .end = 1};
+        curlee::parser::Function f;
+        f.name = "phys_param_fn";
+        f.return_type = curlee::parser::TypeName{.span = s, .name = "Int"};
+        f.params.push_back(curlee::parser::Function::Param{
+            .span = s,
+            .name = "fb",
+            .type = curlee::parser::TypeName{.span = s, .name = "Phys", .type_arg = std::string_view("U32")},
+            .refinement = std::nullopt});
+        curlee::verification::FunctionSig sig;
+        sig.decl = &f;
+        sig.params = {curlee::types::TypeKind::Phys};
+        sig.result = curlee::types::TypeKind::Int;
+        v.functions_.insert_or_assign("phys_param_fn", sig);
+        // Exercise check_function's Phys-param registration branch. The scope is popped on
+        // return, so verify the branch ran by checking the parameter is registered while the
+        // body would be processed - here we just confirm the call does not emit a diagnostic
+        // for the Phys param and completes cleanly.
+        const std::size_t diags_before = v.diags_.size();
+        v.check_function(f);
+        if (v.diags_.size() != diags_before)
+        {
+            fail("expected check_function with Phys param to complete without diagnostics");
+        }
+        v.functions_.erase("phys_param_fn");
+    }
+
+    {
+        // Helper coverage: expr_is_opaque_read recursion paths and pred_mentions_result.
+        const curlee::source::Span s{.start = 0, .end = 1};
+        v.opaque_read_vars_.insert("opaque_v");
+
+        // PhysReadExpr is opaque.
+        curlee::parser::Expr base_none;
+        base_none.span = s;
+        base_none.node = curlee::parser::PhysReadExpr{.base = nullptr};
+        if (!v.expr_is_opaque_read(base_none))
+        {
+            fail("expected expr_is_opaque_read(PhysReadExpr) to be true");
+        }
+
+        // NameExpr bound to an opaque read is opaque.
+        curlee::parser::Expr name_opaque;
+        name_opaque.span = s;
+        name_opaque.node = curlee::parser::NameExpr{.name = "opaque_v"};
+        if (!v.expr_is_opaque_read(name_opaque))
+        {
+            fail("expected expr_is_opaque_read(NameExpr opaque) to be true");
+        }
+
+        // Plain Int expr is not opaque.
+        curlee::parser::Expr int_plain;
+        int_plain.span = s;
+        int_plain.node = curlee::parser::IntExpr{.lexeme = "1"};
+        if (v.expr_is_opaque_read(int_plain))
+        {
+            fail("expected expr_is_opaque_read(IntExpr) to be false");
+        }
+
+        // GroupExpr wrapping an opaque name.
+        curlee::parser::Expr group_inner;
+        group_inner.span = s;
+        group_inner.node = curlee::parser::NameExpr{.name = "opaque_v"};
+        curlee::parser::Expr group;
+        group.span = s;
+        group.node = curlee::parser::GroupExpr{.inner = make_expr_ptr(std::move(group_inner))};
+        if (!v.expr_is_opaque_read(group))
+        {
+            fail("expected expr_is_opaque_read(GroupExpr opaque) to be true");
+        }
+
+        // GroupExpr with null inner.
+        curlee::parser::Expr group_null;
+        group_null.span = s;
+        group_null.node = curlee::parser::GroupExpr{.inner = nullptr};
+        if (v.expr_is_opaque_read(group_null))
+        {
+            fail("expected expr_is_opaque_read(GroupExpr null) to be false");
+        }
+
+        // UnaryExpr wrapping an opaque name.
+        curlee::parser::Expr unary_inner;
+        unary_inner.span = s;
+        unary_inner.node = curlee::parser::NameExpr{.name = "opaque_v"};
+        curlee::parser::Expr unary;
+        unary.span = s;
+        unary.node = curlee::parser::UnaryExpr{.op = curlee::lexer::TokenKind::Bang,
+                                               .rhs = make_expr_ptr(std::move(unary_inner))};
+        if (!v.expr_is_opaque_read(unary))
+        {
+            fail("expected expr_is_opaque_read(UnaryExpr opaque) to be true");
+        }
+
+        // UnaryExpr with null rhs.
+        curlee::parser::Expr unary_null;
+        unary_null.span = s;
+        unary_null.node = curlee::parser::UnaryExpr{.op = curlee::lexer::TokenKind::Bang,
+                                                    .rhs = nullptr};
+        if (v.expr_is_opaque_read(unary_null))
+        {
+            fail("expected expr_is_opaque_read(UnaryExpr null) to be false");
+        }
+
+        // BinaryExpr with opaque lhs / plain rhs.
+        curlee::parser::Expr bin_lhs;
+        bin_lhs.span = s;
+        bin_lhs.node = curlee::parser::NameExpr{.name = "opaque_v"};
+        curlee::parser::Expr bin_rhs;
+        bin_rhs.span = s;
+        bin_rhs.node = curlee::parser::IntExpr{.lexeme = "1"};
+        curlee::parser::Expr bin;
+        bin.span = s;
+        bin.node = curlee::parser::BinaryExpr{.op = curlee::lexer::TokenKind::Plus,
+                                              .lhs = make_expr_ptr(std::move(bin_lhs)),
+                                              .rhs = make_expr_ptr(std::move(bin_rhs))};
+        if (!v.expr_is_opaque_read(bin))
+        {
+            fail("expected expr_is_opaque_read(BinaryExpr opaque lhs) to be true");
+        }
+
+        // BinaryExpr with plain lhs / opaque rhs.
+        curlee::parser::Expr bin2_lhs;
+        bin2_lhs.span = s;
+        bin2_lhs.node = curlee::parser::IntExpr{.lexeme = "1"};
+        curlee::parser::Expr bin2_rhs;
+        bin2_rhs.span = s;
+        bin2_rhs.node = curlee::parser::NameExpr{.name = "opaque_v"};
+        curlee::parser::Expr bin2;
+        bin2.span = s;
+        bin2.node = curlee::parser::BinaryExpr{.op = curlee::lexer::TokenKind::Plus,
+                                               .lhs = make_expr_ptr(std::move(bin2_lhs)),
+                                               .rhs = make_expr_ptr(std::move(bin2_rhs))};
+        if (!v.expr_is_opaque_read(bin2))
+        {
+            fail("expected expr_is_opaque_read(BinaryExpr opaque rhs) to be true");
+        }
+
+        // BinaryExpr with null lhs.
+        curlee::parser::Expr bin3_rhs;
+        bin3_rhs.span = s;
+        bin3_rhs.node = curlee::parser::IntExpr{.lexeme = "1"};
+        curlee::parser::Expr bin3;
+        bin3.span = s;
+        bin3.node = curlee::parser::BinaryExpr{.op = curlee::lexer::TokenKind::Plus,
+                                               .lhs = nullptr,
+                                               .rhs = make_expr_ptr(std::move(bin3_rhs))};
+        if (v.expr_is_opaque_read(bin3))
+        {
+            fail("expected expr_is_opaque_read(BinaryExpr null lhs) to be false");
+        }
+
+        // pred_mentions_result: true for `result > 0`, false for `x > 0`.
+        auto p_result = make_pred(
+            s, curlee::parser::PredBinary{
+                   .op = curlee::lexer::TokenKind::Greater,
+                   .lhs = make_pred_ptr(make_pred(s, curlee::parser::PredName{.name = "result"})),
+                   .rhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "0"}))});
+        if (!v.pred_mentions_result(p_result))
+        {
+            fail("expected pred_mentions_result(result > 0) to be true");
+        }
+        auto p_x = make_pred(
+            s, curlee::parser::PredBinary{
+                   .op = curlee::lexer::TokenKind::Greater,
+                   .lhs = make_pred_ptr(make_pred(s, curlee::parser::PredName{.name = "x"})),
+                   .rhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "0"}))});
+        if (v.pred_mentions_result(p_x))
+        {
+            fail("expected pred_mentions_result(x > 0) to be false");
+        }
+        // pred_mentions_result: result on the rhs of a binary predicate (line 558).
+        auto p_result_rhs = make_pred(
+            s, curlee::parser::PredBinary{
+                   .op = curlee::lexer::TokenKind::Less,
+                   .lhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "0"})),
+                   .rhs = make_pred_ptr(make_pred(s, curlee::parser::PredName{.name = "result"}))});
+        if (!v.pred_mentions_result(p_result_rhs))
+        {
+            fail("expected pred_mentions_result(0 < result) to be true");
+        }
+        // pred_mentions_result: unary/group recursion paths.
+        auto p_not_result = make_pred(
+            s, curlee::parser::PredUnary{
+                   .op = curlee::lexer::TokenKind::Bang,
+                   .rhs = make_pred_ptr(
+                       make_pred(s, curlee::parser::PredName{.name = "result"}))});
+        if (!v.pred_mentions_result(p_not_result))
+        {
+            fail("expected pred_mentions_result(!result) to be true");
+        }
+        auto p_group_result = make_pred(
+            s, curlee::parser::PredGroup{
+                   .inner = make_pred_ptr(
+                       make_pred(s, curlee::parser::PredName{.name = "result"}))});
+        if (!v.pred_mentions_result(p_group_result))
+        {
+            fail("expected pred_mentions_result((result)) to be true");
+        }
+
+        v.opaque_read_vars_.clear();
+    }
+
+    {
+        // reject_opaque_read_contract / add_opaque_read_note: emit diagnostic with the note.
+        const curlee::source::Span s{.start = 0, .end = 1};
+        const std::size_t before = v.diags_.size();
+        v.reject_opaque_read_contract(s, "cannot prove opaque");
+        if (v.diags_.size() != before + 1)
+        {
+            fail("expected reject_opaque_read_contract to emit one diagnostic");
+        }
+        bool saw_note = false;
+        for (const auto& n : v.diags_.back().notes)
+        {
+            if (n.message.find("MMIO read is opaque") != std::string::npos)
+            {
+                saw_note = true;
+            }
+        }
+        if (!saw_note)
+        {
+            fail("expected reject_opaque_read_contract to attach the opaque note");
+        }
+    }
+
+    {
+        // add_fact: opaque-read mention is rejected unconditionally (before lowering).
+        const curlee::source::Span s{.start = 0, .end = 1};
+        v.opaque_read_vars_.insert("opaque_fact");
+        auto pred_opaque = make_pred(
+            s, curlee::parser::PredBinary{
+                   .op = curlee::lexer::TokenKind::Greater,
+                   .lhs = make_pred_ptr(
+                       make_pred(s, curlee::parser::PredName{.name = "opaque_fact"})),
+                   .rhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "0"}))});
+        const std::size_t before = v.diags_.size();
+        v.add_fact(pred_opaque);
+        if (v.diags_.size() == before)
+        {
+            fail("expected add_fact to reject an opaque-read fact");
+        }
+        if (v.diags_.back().message.find("opaque MMIO read") == std::string::npos)
+        {
+            fail("expected add_fact opaque diagnostic message");
+        }
+        v.opaque_read_vars_.clear();
+    }
+
+    {
+        // check_call: opaque argument to a callee with an unsigned param is rejected before
+        // the Int/Bool-only gate (review gap #1).
+        const curlee::source::Span s{.start = 0, .end = 1};
+        curlee::parser::Function decl;
+        decl.name = "opaque_consume";
+        decl.return_type = curlee::parser::TypeName{.span = s, .name = "Int"};
+        decl.params.push_back(curlee::parser::Function::Param{
+            .span = s,
+            .name = "x",
+            .type = curlee::parser::TypeName{.span = s, .name = "U32"},
+            .refinement = std::nullopt});
+        curlee::verification::FunctionSig sig;
+        sig.decl = &decl;
+        sig.params = {curlee::types::TypeKind::U32};
+        sig.result = curlee::types::TypeKind::Int;
+        v.functions_.insert_or_assign("opaque_consume", sig);
+
+        curlee::parser::Expr arg;
+        arg.span = s;
+        arg.node = curlee::parser::PhysReadExpr{.base = nullptr};
+        curlee::parser::CallExpr call;
+        call.callee = make_expr_ptr(make_expr(s, curlee::parser::NameExpr{.name = "opaque_consume"}));
+        call.args.push_back(std::move(arg));
+        const std::size_t before = v.diags_.size();
+        v.check_call(call);
+        bool saw = false;
+        for (std::size_t i = before; i < v.diags_.size(); ++i)
+        {
+            if (v.diags_[i].message.find("opaque MMIO read") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected check_call to reject opaque read argument on unsigned param");
+        }
+        v.functions_.erase("opaque_consume");
+    }
+
+    {
+        // check_call: the requires-loop guard rejects a requires clause that mentions an
+        // opaque read name (line 1071). The callee's requires references a name that the
+        // caller has marked opaque.
+        const curlee::source::Span s{.start = 0, .end = 1};
+        curlee::parser::Function decl;
+        decl.name = "opaque_req_callee";
+        decl.return_type = curlee::parser::TypeName{.span = s, .name = "Int"};
+        decl.params.push_back(curlee::parser::Function::Param{
+            .span = s,
+            .name = "x",
+            .type = curlee::parser::TypeName{.span = s, .name = "Int"},
+            .refinement = std::nullopt});
+        decl.requires_clauses.push_back(make_pred(
+            s, curlee::parser::PredBinary{
+                   .op = curlee::lexer::TokenKind::Greater,
+                   .lhs = make_pred_ptr(make_pred(s, curlee::parser::PredName{.name = "x"})),
+                   .rhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "0"}))}));
+        curlee::verification::FunctionSig sig;
+        sig.decl = &decl;
+        sig.params = {curlee::types::TypeKind::Int};
+        sig.result = curlee::types::TypeKind::Int;
+        v.functions_.insert_or_assign("opaque_req_callee", sig);
+
+        // Mark `x` opaque in the caller scope so the requires clause `x > 0` triggers the
+        // unconditional rejection in the requires loop.
+        v.opaque_read_vars_.insert("x");
+        curlee::parser::Expr arg;
+        arg.span = s;
+        arg.node = curlee::parser::IntExpr{.lexeme = "1"};
+        curlee::parser::CallExpr call;
+        call.callee =
+            make_expr_ptr(make_expr(s, curlee::parser::NameExpr{.name = "opaque_req_callee"}));
+        call.args.push_back(std::move(arg));
+        const std::size_t before = v.diags_.size();
+        v.check_call(call);
+        bool saw = false;
+        for (std::size_t i = before; i < v.diags_.size(); ++i)
+        {
+            if (v.diags_[i].message.find("opaque MMIO read") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected check_call requires-loop guard to reject opaque-read requires");
+        }
+        v.opaque_read_vars_.erase("x");
+        v.functions_.erase("opaque_req_callee");
+    }
+
+    {
+        // check_return: ensures mentioning `result` is rejected when the returned value is an
+        // opaque read (review gap #2).
+        const curlee::source::Span s{.start = 0, .end = 1};
+        curlee::parser::Function f;
+        f.name = "opaque_ret";
+        f.return_type = curlee::parser::TypeName{.span = s, .name = "U32"};
+        f.ensures.push_back(make_pred(
+            s, curlee::parser::PredBinary{
+                   .op = curlee::lexer::TokenKind::Greater,
+                   .lhs = make_pred_ptr(make_pred(s, curlee::parser::PredName{.name = "result"})),
+                   .rhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "0"}))}));
+        curlee::verification::FunctionSig sig;
+        sig.decl = &f;
+        sig.result = curlee::types::TypeKind::U32;
+        v.current_function_ = sig;
+
+        // The read() must lower successfully, so register a phys var as its base.
+        v.phys_vars_.insert_or_assign("reg_ret", std::string_view("U32"));
+        curlee::parser::Expr read_base;
+        read_base.span = s;
+        read_base.node = curlee::parser::NameExpr{.name = "reg_ret"};
+        curlee::parser::ReturnStmt r;
+        r.value = make_expr(s, curlee::parser::PhysReadExpr{
+                                  .base = make_expr_ptr(std::move(read_base))});
+        const std::size_t before = v.diags_.size();
+        v.check_return(r, curlee::types::TypeKind::U32);
+        v.phys_vars_.erase("reg_ret");
+        bool saw = false;
+        for (std::size_t i = before; i < v.diags_.size(); ++i)
+        {
+            if (v.diags_[i].message.find("opaque MMIO read") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected check_return to reject ensures on opaque read result");
+        }
+        v.current_function_ = std::nullopt;
+    }
+
+    {
         // check_stmt_node(IfStmt/WhileStmt): cover cond_fact + else branch.
         const curlee::source::Span s{.start = 0, .end = 1};
 
