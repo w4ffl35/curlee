@@ -1,0 +1,5 @@
+tests/fixtures/check_phys_read_contract.curlee:4:22: error: cannot prove refinement on opaque MMIO read value
+  |
+  |     let v: U32 where v > 0 = reg.read();
+  |                      ^^^^^
+note: MMIO read is opaque; cannot prove this contract

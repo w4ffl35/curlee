@@ -1,0 +1,13 @@
+fn consume(x: U32) -> Int [
+  requires x > 0;
+] {
+  return 0;
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let reg: Phys<U32> = phys<U32>(0xFE00_0000);
+    let v: U32 = reg.read();
+    return consume(v);
+  }
+}
