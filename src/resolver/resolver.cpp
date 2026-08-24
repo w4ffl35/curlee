@@ -582,6 +582,31 @@ class Resolver
 
     void resolve_expr_node(const GroupExpr& e, Span) { resolve_expr(*e.inner); }
 
+    void resolve_expr_node(const curlee::parser::PhysExpr&, Span)
+    {
+        // `phys<U>(literal)` contains no variable references.
+    }
+
+    void resolve_expr_node(const curlee::parser::PhysReadExpr& e, Span)
+    {
+        if (e.base != nullptr)
+        {
+            resolve_expr(*e.base);
+        }
+    }
+
+    void resolve_expr_node(const curlee::parser::PhysWriteExpr& e, Span)
+    {
+        if (e.base != nullptr)
+        {
+            resolve_expr(*e.base);
+        }
+        if (e.value != nullptr)
+        {
+            resolve_expr(*e.value);
+        }
+    }
+
     void resolve_expr_node(const ScopedNameExpr&, Span)
     {
         // `Enum::Variant` is not a variable reference; do not call use_name().

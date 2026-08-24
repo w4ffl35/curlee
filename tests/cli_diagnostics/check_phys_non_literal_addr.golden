@@ -1,0 +1,4 @@
+tests/fixtures/check_phys_non_literal_addr.curlee:4:35: error: phys() expects an integer literal address
+  |
+  |     let fb: Phys<U32> = phys<U32>(base + 4);
+  |                                   ^^^^

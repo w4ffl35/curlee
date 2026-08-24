@@ -1,0 +1,7 @@
+fn main() -> Unit {
+  unsafe {
+    let fb: Phys<U32> = phys<U32>(0xFD00_0000);
+    let v: U32 = fb.read();
+  }
+  return;
+}

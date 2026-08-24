@@ -336,6 +336,42 @@ class Checker
             return Type{.kind = TypeKind::Capability, .name = name.name};
         }
 
+        // Physical memory pointer type: `Phys<U8|U16|U32|U64>`.
+        if (name.name == "Phys")
+        {
+            if (!name.type_arg.has_value())
+            {
+                error_at(name.span, "Phys requires an element type argument (Phys<U8|U16|U32|U64>)");
+                return std::nullopt;
+            }
+            const std::string_view elem = *name.type_arg;
+            TypeKind elem_kind;
+            if (elem == "U8")
+            {
+                elem_kind = TypeKind::U8;
+            }
+            else if (elem == "U16")
+            {
+                elem_kind = TypeKind::U16;
+            }
+            else if (elem == "U32")
+            {
+                elem_kind = TypeKind::U32;
+            }
+            else if (elem == "U64")
+            {
+                elem_kind = TypeKind::U64;
+            }
+            else
+            {
+                error_at(name.span, "unsupported Phys element kind '" + std::string(elem) +
+                                        "' (expected U8, U16, U32 or U64)");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Phys, .name = "Phys", .element_kind = elem_kind,
+                        .element_name = elem};
+        }
+
         const auto t = core_type_from_name(name.name);
         if (!t.has_value())
         {
@@ -1455,6 +1491,147 @@ class Checker
         }
 
         return sig.result;
+    }
+
+    [[nodiscard]] std::optional<Type> check_expr_node(const curlee::parser::PhysExpr& e, Span span)
+    {
+        // Rule (1): the address must be a compile-time integer literal (decimal or hex).
+        const std::string_view lexeme = e.lexeme;
+        bool is_literal = !lexeme.empty();
+        if (is_literal)
+        {
+            for (std::size_t i = 0; i < lexeme.size(); ++i)
+            {
+                const char c = lexeme[i];
+                const bool is_digit = (c >= '0' && c <= '9');
+                const bool is_hex_digit = (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+                const bool is_hex_marker =
+                    (c == 'x' || c == 'X') && i == 1 && lexeme[0] == '0';
+                if (!is_digit && c != '_' && !is_hex_digit && !is_hex_marker)
+                {
+                    is_literal = false;
+                    break;
+                }
+            }
+        }
+        if (!is_literal)
+        {
+            error_at(span, "physical address must be a constant literal");
+            return std::nullopt;
+        }
+
+        TypeKind elem_kind;
+        if (e.element_kind == "U8")
+        {
+            elem_kind = TypeKind::U8;
+        }
+        else if (e.element_kind == "U16")
+        {
+            elem_kind = TypeKind::U16;
+        }
+        else if (e.element_kind == "U32")
+        {
+            elem_kind = TypeKind::U32;
+        }
+        else if (e.element_kind == "U64")
+        {
+            elem_kind = TypeKind::U64;
+        }
+        else
+        {
+            error_at(span, "unsupported Phys element kind '" + std::string(e.element_kind) +
+                               "' (expected U8, U16, U32 or U64)");
+            return std::nullopt;
+        }
+
+        return Type{.kind = TypeKind::Phys,
+                    .name = "Phys",
+                    .element_kind = elem_kind,
+                    .element_name = e.element_kind};
+    }
+
+    [[nodiscard]] std::optional<Type> check_expr_node(const curlee::parser::PhysReadExpr& e,
+                                                      Span span)
+    {
+        // Rules (2)+(3): read() only inside `unsafe` and requires `cap phys.mem`.
+        if (unsafe_depth_ == 0)
+        {
+            error_at(span, "physical memory access requires an unsafe block");
+            return std::nullopt;
+        }
+        require_capability("phys.mem", span);
+
+        if (e.base == nullptr) // GCOVR_EXCL_LINE
+        {
+            return std::nullopt; // GCOVR_EXCL_LINE
+        }
+        const auto base_t = check_expr(*e.base);
+        if (!base_t.has_value())
+        {
+            return std::nullopt;
+        }
+        if (base_t->kind != TypeKind::Phys)
+        {
+            error_at(span, "read() can only be called on a Phys<T> value");
+            return std::nullopt;
+        }
+        if (!base_t->element_kind.has_value()) // GCOVR_EXCL_LINE
+        {
+            return std::nullopt; // GCOVR_EXCL_LINE
+        }
+        // read() returns the element kind T.
+        return Type{.kind = *base_t->element_kind, .name = base_t->element_name};
+    }
+
+    [[nodiscard]] std::optional<Type> check_expr_node(const curlee::parser::PhysWriteExpr& e,
+                                                      Span span)
+    {
+        // Rules (2)+(3): write(v) only inside `unsafe` and requires `cap phys.mem`.
+        if (unsafe_depth_ == 0)
+        {
+            error_at(span, "physical memory access requires an unsafe block");
+            return std::nullopt;
+        }
+        require_capability("phys.mem", span);
+
+        if (e.base == nullptr || e.value == nullptr) // GCOVR_EXCL_LINE
+        {
+            return std::nullopt; // GCOVR_EXCL_LINE
+        }
+        const auto base_t = check_expr(*e.base);
+        if (!base_t.has_value())
+        {
+            return std::nullopt;
+        }
+        if (base_t->kind != TypeKind::Phys)
+        {
+            error_at(span, "write() can only be called on a Phys<T> value");
+            return std::nullopt;
+        }
+        if (!base_t->element_kind.has_value()) // GCOVR_EXCL_LINE
+        {
+            return std::nullopt; // GCOVR_EXCL_LINE
+        }
+        const auto value_t = check_expr(*e.value);
+        if (!value_t.has_value())
+        {
+            return std::nullopt;
+        }
+        // Accept Int literals when writing to unsigned element kinds (e.g. `fb.write(0xFF8800)`
+        // on Phys<U32>): the physical address space is little-endian byte-oriented and the
+        // compiler range-checks at the freestanding target. Exact unsigned types must still match.
+        const Type elem_type{.kind = *base_t->element_kind, .name = base_t->element_name};
+        const bool int_literal_for_unsigned =
+            (*value_t).kind == TypeKind::Int &&
+            (*base_t->element_kind == TypeKind::U8 || *base_t->element_kind == TypeKind::U16 ||
+             *base_t->element_kind == TypeKind::U32 || *base_t->element_kind == TypeKind::U64);
+        if (*value_t != elem_type && !int_literal_for_unsigned)
+        {
+            error_at(span, "write() value type mismatch: expected " +
+                               std::string(base_t->element_name) + ", got " +
+                               std::string(to_string(*value_t)));
+        }
+        return Type{.kind = TypeKind::Unit};
     }
 
     [[nodiscard]] std::optional<Type> check_expr_node(const GroupExpr& e, Span)

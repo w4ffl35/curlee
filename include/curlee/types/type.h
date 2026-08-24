@@ -26,6 +26,15 @@ enum class TypeKind
     Set,
     Struct,
     Enum,
+
+    // Unsigned fixed-width integer types (Phys element kinds).
+    U8,
+    U16,
+    U32,
+    U64,
+
+    // Physical memory pointer type (element kind stored in element_kind/element_name).
+    Phys,
 };
 
 /**
@@ -59,6 +68,10 @@ struct Type
         return a.element_kind == b.element_kind && a.element_name == b.element_name;
     }
     if (a.kind == TypeKind::Set)
+    {
+        return a.element_kind == b.element_kind && a.element_name == b.element_name;
+    }
+    if (a.kind == TypeKind::Phys)
     {
         return a.element_kind == b.element_kind && a.element_name == b.element_name;
     }
@@ -112,6 +125,16 @@ struct CapabilityType
         return "Struct";
     case TypeKind::Enum:
         return "Enum";
+    case TypeKind::U8:
+        return "U8";
+    case TypeKind::U16:
+        return "U16";
+    case TypeKind::U32:
+        return "U32";
+    case TypeKind::U64:
+        return "U64";
+    case TypeKind::Phys:
+        return "Phys";
     }
     return "<unknown>";
 }
@@ -129,6 +152,11 @@ struct CapabilityType
     if (t.kind == TypeKind::Set)
     {
         return "Set";
+    }
+    if (t.kind == TypeKind::Phys)
+    {
+        // Phys<U32> style display.
+        return "Phys";
     }
     return to_string(t.kind);
 }
@@ -151,6 +179,22 @@ struct CapabilityType
     if (name == "Unit")
     {
         return Type{.kind = TypeKind::Unit};
+    }
+    if (name == "U8")
+    {
+        return Type{.kind = TypeKind::U8};
+    }
+    if (name == "U16")
+    {
+        return Type{.kind = TypeKind::U16};
+    }
+    if (name == "U32")
+    {
+        return Type{.kind = TypeKind::U32};
+    }
+    if (name == "U64")
+    {
+        return Type{.kind = TypeKind::U64};
     }
     return std::nullopt;
 }

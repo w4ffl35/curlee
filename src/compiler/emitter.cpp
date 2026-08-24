@@ -1273,6 +1273,21 @@ class Emitter
     }
 
     void emit_expr_node(const curlee::parser::GroupExpr& expr, Span) { emit_expr(*expr.inner); }
+
+    void emit_expr_node(const curlee::parser::PhysExpr&, Span span)
+    {
+        diags_.push_back(error_at(span, "Phys is freestanding-only and not supported in the VM"));
+    }
+
+    void emit_expr_node(const curlee::parser::PhysReadExpr&, Span span)
+    {
+        diags_.push_back(error_at(span, "Phys is freestanding-only and not supported in the VM"));
+    }
+
+    void emit_expr_node(const curlee::parser::PhysWriteExpr&, Span span)
+    {
+        diags_.push_back(error_at(span, "Phys is freestanding-only and not supported in the VM"));
+    }
 };
 
 } // namespace

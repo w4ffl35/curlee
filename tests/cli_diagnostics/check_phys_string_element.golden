@@ -1,0 +1,4 @@
+tests/fixtures/check_phys_string_element.curlee:3:13: error: unsupported Phys element kind 'String' (expected U8, U16, U32 or U64)
+  |
+  |     let fb: Phys<String> = phys<String>(0xFD00_0000);
+  |             ^^^^^^^^^^^^

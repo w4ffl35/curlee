@@ -277,6 +277,13 @@ class Verifier
             return TypeKind::Unit;
         }
 
+        // Physical memory pointers are freestanding-only; verification treats them as
+        // uninterpreted (opaque) values, matching the trusted-deref follow-up issue.
+        if (name.name == "Phys")
+        {
+            return TypeKind::Unit;
+        }
+
         auto t = curlee::types::core_type_from_name(name.name);
         if (!t.has_value())
         {
@@ -742,6 +749,24 @@ class Verifier
                 else if constexpr (std::is_same_v<Node, curlee::parser::GroupExpr>)
                 {
                     check_expr_for_calls(*node.inner);
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PhysReadExpr>)
+                {
+                    if (node.base)
+                    {
+                        check_expr_for_calls(*node.base);
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PhysWriteExpr>)
+                {
+                    if (node.base)
+                    {
+                        check_expr_for_calls(*node.base);
+                    }
+                    if (node.value)
+                    {
+                        check_expr_for_calls(*node.value);
+                    }
                 }
                 else
                 {

@@ -52,9 +52,28 @@ class Lexer
             if (std::isdigit(static_cast<unsigned char>(c)) != 0)
             {
                 advance();
-                while (!is_at_end() && (std::isdigit(static_cast<unsigned char>(peek())) != 0))
+                // Hex literal: 0x followed by hex digits.
+                bool is_hex = false;
+                if (c == '0' && (peek() == 'x' || peek() == 'X'))
                 {
+                    is_hex = true;
                     advance();
+                    if (is_at_end() || std::isxdigit(static_cast<unsigned char>(peek())) == 0)
+                    {
+                        return make_error(start, pos_, "invalid hex literal");
+                    }
+                }
+                while (!is_at_end())
+                {
+                    const char ch = peek();
+                    if (std::isdigit(static_cast<unsigned char>(ch)) != 0 ||
+                        (is_hex && (std::isxdigit(static_cast<unsigned char>(ch)) != 0)) ||
+                        ch == '_')
+                    {
+                        advance();
+                        continue;
+                    }
+                    break;
                 }
                 tokens.push_back(make_token(TokenKind::IntLiteral, start, pos_));
                 continue;
@@ -323,6 +342,10 @@ class Lexer
         if (lexeme == "match")
         {
             return TokenKind::KwMatch;
+        }
+        if (lexeme == "phys")
+        {
+            return TokenKind::KwPhys;
         }
         return TokenKind::Identifier;
     }

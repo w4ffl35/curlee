@@ -164,6 +164,28 @@ struct GroupExpr
     std::unique_ptr<Expr> inner;
 };
 
+/** @brief Physical memory address literal expression: `phys<U>(literal)`. */
+struct PhysExpr
+{
+    // Element kind as spelled in source (e.g. "U32").
+    std::string_view element_kind;
+    // The address literal lexeme (decimal or hex, underscores preserved).
+    std::string_view lexeme;
+};
+
+/** @brief Typed physical memory read: `phys_value.read()`. */
+struct PhysReadExpr
+{
+    std::unique_ptr<Expr> base;
+};
+
+/** @brief Typed physical memory write: `phys_value.write(v)`. */
+struct PhysWriteExpr
+{
+    std::unique_ptr<Expr> base;
+    std::unique_ptr<Expr> value;
+};
+
 /**
  * @brief A general expression node with id, span and variant payload.
  */
@@ -172,7 +194,8 @@ struct Expr
     std::size_t id = 0;
     curlee::source::Span span;
     std::variant<IntExpr, BoolExpr, StringExpr, NameExpr, UnaryExpr, BinaryExpr, CallExpr,
-                 MemberExpr, GroupExpr, ScopedNameExpr, StructLiteralExpr>
+                 MemberExpr, GroupExpr, ScopedNameExpr, StructLiteralExpr, PhysExpr,
+                 PhysReadExpr, PhysWriteExpr>
         node;
 };
 

@@ -819,6 +819,25 @@ fn main(v: E) -> Unit {
         }
     }
 
+    {
+        // Phys<T> nodes must not crash the resolver: `phys<U32>(lit)`, `.read()`, `.write(v)`
+        // contain no unresolved variable references.
+        const std::string src = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let fb: Phys<U32> = phys<U32>(0xFD00_0000);
+    fb.write(0xFF8800);
+    let v: U32 = fb.read();
+  }
+  return;
+})";
+
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_phys_mem.curlee");
+        if (!std::holds_alternative<resolver::Resolution>(res))
+        {
+            fail("expected resolver success for Phys nodes");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

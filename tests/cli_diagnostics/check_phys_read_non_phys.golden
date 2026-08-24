@@ -1,0 +1,4 @@
+tests/fixtures/check_phys_read_non_phys.curlee:4:18: error: read() can only be called on a Phys<T> value
+  |
+  |     let y: Int = x.read();
+  |                  ^^^^^^^^

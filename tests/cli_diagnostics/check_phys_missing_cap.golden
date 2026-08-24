@@ -1,0 +1,4 @@
+tests/fixtures/check_phys_missing_cap.curlee:4:18: error: missing capability value 'phys.mem' (add a parameter of type cap phys.mem)
+  |
+  |     let v: U32 = fb.read();
+  |                  ^^^^^^^^^

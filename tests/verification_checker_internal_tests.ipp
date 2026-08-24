@@ -24,13 +24,8 @@ static void fail(const std::string& msg)
 #include "../src/verification/checker.cpp"
 #undef private
 
-static curlee::parser::Expr make_expr(
-    curlee::source::Span span,
-    std::variant<curlee::parser::IntExpr, curlee::parser::BoolExpr, curlee::parser::StringExpr,
-                 curlee::parser::NameExpr, curlee::parser::UnaryExpr, curlee::parser::BinaryExpr,
-                 curlee::parser::CallExpr, curlee::parser::MemberExpr, curlee::parser::GroupExpr,
-                 curlee::parser::ScopedNameExpr, curlee::parser::StructLiteralExpr>
-        node)
+static curlee::parser::Expr make_expr(curlee::source::Span span,
+                                      decltype(curlee::parser::Expr::node) node)
 {
     curlee::parser::Expr e;
     e.span = span;
