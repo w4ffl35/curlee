@@ -39,21 +39,23 @@ int main()
     {
         constexpr TokenKind all_kinds[] = {
             TokenKind::Eof,           TokenKind::Identifier, TokenKind::IntLiteral,
-            TokenKind::StringLiteral, TokenKind::KwFn,       TokenKind::KwLet,
+            TokenKind::PhysAddrLiteral, TokenKind::StringLiteral, TokenKind::KwFn,
+            TokenKind::KwLet,
             TokenKind::KwIf,          TokenKind::KwElse,     TokenKind::KwWhile,
             TokenKind::KwReturn,      TokenKind::KwTrue,     TokenKind::KwFalse,
             TokenKind::KwRequires,    TokenKind::KwEnsures,  TokenKind::KwWhere,
             TokenKind::KwUnsafe,      TokenKind::KwCap,      TokenKind::KwImport,
-            TokenKind::KwAs,          TokenKind::KwStruct,   TokenKind::KwEnum,
-            TokenKind::KwMatch,       TokenKind::LParen,     TokenKind::RParen,
-            TokenKind::LBrace,        TokenKind::RBrace,     TokenKind::LBracket,
-            TokenKind::RBracket,      TokenKind::Semicolon,  TokenKind::Comma,
-            TokenKind::Colon,         TokenKind::ColonColon, TokenKind::Dot,
-            TokenKind::Arrow,         TokenKind::Equal,      TokenKind::EqualEqual,
-            TokenKind::Bang,          TokenKind::BangEqual,  TokenKind::Less,
-            TokenKind::LessEqual,     TokenKind::Greater,    TokenKind::GreaterEqual,
-            TokenKind::Plus,          TokenKind::Minus,      TokenKind::Star,
-            TokenKind::Slash,         TokenKind::AndAnd,     TokenKind::OrOr,
+            TokenKind::KwAs,          TokenKind::KwPhys,     TokenKind::KwStruct,
+            TokenKind::KwEnum,        TokenKind::KwMatch,    TokenKind::LParen,
+            TokenKind::RParen,        TokenKind::LBrace,     TokenKind::RBrace,
+            TokenKind::LBracket,      TokenKind::RBracket,   TokenKind::Semicolon,
+            TokenKind::Comma,         TokenKind::Colon,      TokenKind::ColonColon,
+            TokenKind::Dot,           TokenKind::Arrow,      TokenKind::Equal,
+            TokenKind::EqualEqual,    TokenKind::Bang,       TokenKind::BangEqual,
+            TokenKind::Less,          TokenKind::LessEqual,  TokenKind::Greater,
+            TokenKind::GreaterEqual,  TokenKind::Plus,       TokenKind::Minus,
+            TokenKind::Star,          TokenKind::Slash,      TokenKind::AndAnd,
+            TokenKind::OrOr,
         };
 
         for (const auto kind : all_kinds)
@@ -81,6 +83,49 @@ int main()
         const auto& toks = std::get<std::vector<Token>>(res);
         expect_token(toks, 0, TokenKind::KwMatch, "match");
         expect_token(toks, 1, TokenKind::Eof, "");
+    }
+
+    {
+        const std::string src = "phys<U32>(0xFD00_0000)";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for phys literal");
+        }
+
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::KwPhys, "phys");
+        expect_token(toks, 1, TokenKind::Less, "<");
+        expect_token(toks, 2, TokenKind::Identifier, "U32");
+        expect_token(toks, 3, TokenKind::Greater, ">");
+        expect_token(toks, 4, TokenKind::LParen, "(");
+        expect_token(toks, 5, TokenKind::PhysAddrLiteral, "0xFD00_0000");
+        expect_token(toks, 6, TokenKind::RParen, ")");
+        expect_token(toks, 7, TokenKind::Eof, "");
+    }
+
+    {
+        // Hex/underscore forms lex as a distinct token kind; a plain decimal stays IntLiteral.
+        const std::string src = "0xFF 1_000 42";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for mixed literal forms");
+        }
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::PhysAddrLiteral, "0xFF");
+        expect_token(toks, 1, TokenKind::PhysAddrLiteral, "1_000");
+        expect_token(toks, 2, TokenKind::IntLiteral, "42");
+        expect_token(toks, 3, TokenKind::Eof, "");
+    }
+
+    {
+        const std::string src = "0x1F 0Xff 42 0x";
+        const auto res = lex(src);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(res))
+        {
+            fail("expected error for dangling '0x'");
+        }
     }
 
     {

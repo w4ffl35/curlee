@@ -2836,6 +2836,214 @@ int main()
         }
     }
 
+    // Phys<T>: TypeKind stringification and equality for the new kinds.
+    {
+        if (to_string(TypeKind::U8) != "U8" || to_string(TypeKind::U16) != "U16" ||
+            to_string(TypeKind::U32) != "U32" || to_string(TypeKind::U64) != "U64" ||
+            to_string(TypeKind::Phys) != "Phys")
+        {
+            fail("expected unsigned and Phys TypeKind stringification to work");
+        }
+
+        const Type phys_u32{.kind = TypeKind::Phys,
+                            .name = "Phys",
+                            .element_kind = TypeKind::U32,
+                            .element_name = "U32"};
+        const Type phys_u32_same{.kind = TypeKind::Phys,
+                                 .name = "Phys",
+                                 .element_kind = TypeKind::U32,
+                                 .element_name = "U32"};
+        const Type phys_u8{.kind = TypeKind::Phys,
+                           .name = "Phys",
+                           .element_kind = TypeKind::U8,
+                           .element_name = "U8"};
+        if (!(phys_u32 == phys_u32_same) || (phys_u32 == phys_u8))
+        {
+            fail("expected Phys equality to respect element kind");
+        }
+    }
+
+    // Phys<T>: core_type_from_name recognizes the unsigned types.
+    {
+        if (core_type_from_name("U8") != Type{.kind = TypeKind::U8})
+        {
+            fail("expected U8 core type");
+        }
+        if (core_type_from_name("U16") != Type{.kind = TypeKind::U16})
+        {
+            fail("expected U16 core type");
+        }
+        if (core_type_from_name("U32") != Type{.kind = TypeKind::U32})
+        {
+            fail("expected U32 core type");
+        }
+        if (core_type_from_name("U64") != Type{.kind = TypeKind::U64})
+        {
+            fail("expected U64 core type");
+        }
+    }
+
+    // Phys<T>: positive fixture passes type checking (unsafe + cap phys.mem).
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let fb: Phys<U32> = phys<U32>(0xFD00_0000);
+    fb.write(0xFF8800);
+    let v: U32 = fb.read();
+  }
+  return;
+}
+)";
+        (void)type_check_should_succeed(source, "phys positive fixture");
+    }
+
+    // Phys<T>: read/write outside `unsafe` fails.
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  let fb: Phys<U32> = phys<U32>(0xFD00_0000);
+  let v: U32 = fb.read();
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys read outside unsafe");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("requires an unsafe block") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected unsafe-block diagnostic for phys read");
+        }
+    }
+
+    // Phys<T>: missing `cap phys.mem` parameter fails.
+    {
+        const std::string source = R"(fn main() -> Unit {
+  unsafe {
+    let fb: Phys<U32> = phys<U32>(0xFD00_0000);
+    let v: U32 = fb.read();
+  }
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys missing cap");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("phys.mem") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected missing phys.mem capability diagnostic");
+        }
+    }
+
+    // Phys<T>: non-literal address fails.
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let fb: Phys<U32> = phys<U32>(0xFD00_0000 + 4);
+  }
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys non-literal address");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("physical address must be a constant literal") != std::string::npos ||
+                d.message.find("phys() expects an integer literal address") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected constant-literal diagnostic for phys address");
+        }
+    }
+
+    // Phys<T>: arithmetic on Phys<T> fails.
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let fb: Phys<U32> = phys<U32>(0xFD00_0000);
+    let x: Int = fb + 1;
+  }
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys arithmetic");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("'+' expects") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected arithmetic-on-Phys diagnostic");
+        }
+    }
+
+    // Phys<T>: unsupported element kind (Phys<String>) fails.
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let fb: Phys<String> = phys<String>(0xFD00_0000);
+  }
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys string element");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("unsupported Phys element kind") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected unsupported Phys element kind diagnostic");
+        }
+    }
+
+    // Phys<T>: read() on a non-Phys value fails.
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let x: Int = 5;
+    let y: Int = x.read();
+  }
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys read on non-phys");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("read() can only be called on a Phys<T> value") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected read-on-non-Phys diagnostic");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

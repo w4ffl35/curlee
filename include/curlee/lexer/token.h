@@ -19,6 +19,10 @@ enum class TokenKind
 
     Identifier,
     IntLiteral,
+    // Physical address literal: hex (0x...) or underscore-separated decimal/hex form,
+    // only valid inside `phys<U>(...)`. Kept distinct from IntLiteral so generic
+    // expression consumers (emitter, verifier) never see non-decimal lexemes.
+    PhysAddrLiteral,
     StringLiteral,
 
     // Keywords
@@ -40,6 +44,7 @@ enum class TokenKind
     KwCap,
     KwImport,
     KwAs,
+    KwPhys,
 
     KwStruct,
     KwEnum,
@@ -98,6 +103,8 @@ struct Token
         return "identifier";
     case TokenKind::IntLiteral:
         return "int";
+    case TokenKind::PhysAddrLiteral:
+        return "phys_addr";
     case TokenKind::StringLiteral:
         return "string";
 
@@ -134,6 +141,8 @@ struct Token
         return "kw_import";
     case TokenKind::KwAs:
         return "kw_as";
+    case TokenKind::KwPhys:
+        return "kw_phys";
 
     case TokenKind::KwStruct:
         return "kw_struct";

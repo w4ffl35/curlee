@@ -534,6 +534,20 @@ int main()
         {
             fail("expected analyze to succeed on valid program");
         }
+
+        // Phys<T> nodes must not crash LSP analysis or produce spurious diagnostics.
+        file.contents = "fn main(pm: cap phys.mem) -> Unit { unsafe { let fb: Phys<U32> = "
+                        "phys<U32>(0xFD00_0000); fb.write(0xFF8800); let v: U32 = fb.read(); } "
+                        "return; }";
+        const auto d_phys = collect_diagnostics(file);
+        if (!d_phys.empty())
+        {
+            fail("expected no diagnostics for valid Phys program");
+        }
+        if (!analyze(file).has_value())
+        {
+            fail("expected analyze to succeed on valid Phys program");
+        }
     }
 
     {

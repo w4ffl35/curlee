@@ -1809,6 +1809,54 @@ fn main() -> Int {
                 }
             }
         }
+
+        // Phys<T> is freestanding-only: the VM emitter must reject all three Phys nodes.
+        using curlee::parser::PhysExpr;
+        using curlee::parser::PhysReadExpr;
+        using curlee::parser::PhysWriteExpr;
+
+        auto expect_phys_reject = [&](Expr root)
+        {
+            const auto emitted = run_with_expr(std::move(root));
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for Phys node");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("Phys is freestanding-only") == std::string::npos)
+            {
+                fail("expected freestanding-only diagnostic for Phys node");
+            }
+        };
+
+        {
+            // phys<U32>(0xFD00_0000) literal.
+            Expr root;
+            root.node = PhysExpr{.element_kind = "U32", .lexeme = "0xFD00_0000"};
+            expect_phys_reject(std::move(root));
+        }
+
+        {
+            // phys_value.read().
+            Expr base;
+            base.node = PhysExpr{.element_kind = "U32", .lexeme = "0xFD00_0000"};
+            Expr root;
+            root.node = PhysReadExpr{.base = std::make_unique<Expr>(std::move(base))};
+            expect_phys_reject(std::move(root));
+        }
+
+        {
+            // phys_value.write(v).
+            Expr base;
+            base.node = PhysExpr{.element_kind = "U32", .lexeme = "0xFD00_0000"};
+            Expr value;
+            value.node = curlee::parser::IntExpr{.lexeme = "1"};
+            Expr root;
+            root.node = PhysWriteExpr{.base = std::make_unique<Expr>(std::move(base)),
+                                      .value = std::make_unique<Expr>(std::move(value))};
+            expect_phys_reject(std::move(root));
+        }
     }
 
     {

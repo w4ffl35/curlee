@@ -1,0 +1,7 @@
+fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let base: Int = 100;
+    let fb: Phys<U32> = phys<U32>(base + 4);
+  }
+  return;
+}

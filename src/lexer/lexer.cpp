@@ -52,11 +52,41 @@ class Lexer
             if (std::isdigit(static_cast<unsigned char>(c)) != 0)
             {
                 advance();
-                while (!is_at_end() && (std::isdigit(static_cast<unsigned char>(peek())) != 0))
+                // Physical-address literals may be hex (0x...) or underscore-separated
+                // (e.g. 0xFD00_0000). They are lexed as a distinct token kind so generic
+                // expression consumers (emitter, verifier) never see non-decimal lexemes.
+                bool phys_addr_form = false;
+                if (c == '0' && (peek() == 'x' || peek() == 'X'))
                 {
+                    phys_addr_form = true;
                     advance();
+                    if (is_at_end() || std::isxdigit(static_cast<unsigned char>(peek())) == 0)
+                    {
+                        return make_error(start, pos_, "invalid hex literal");
+                    }
                 }
-                tokens.push_back(make_token(TokenKind::IntLiteral, start, pos_));
+                while (!is_at_end())
+                {
+                    const char ch = peek();
+                    const bool is_dec = std::isdigit(static_cast<unsigned char>(ch)) != 0;
+                    const bool is_hex = phys_addr_form &&
+                                        std::isxdigit(static_cast<unsigned char>(ch)) != 0;
+                    if (ch == '_')
+                    {
+                        phys_addr_form = true;
+                        advance();
+                        continue;
+                    }
+                    if (is_dec || is_hex)
+                    {
+                        advance();
+                        continue;
+                    }
+                    break;
+                }
+                tokens.push_back(make_token(phys_addr_form ? TokenKind::PhysAddrLiteral
+                                                           : TokenKind::IntLiteral,
+                                            start, pos_));
                 continue;
             }
 
@@ -323,6 +353,10 @@ class Lexer
         if (lexeme == "match")
         {
             return TokenKind::KwMatch;
+        }
+        if (lexeme == "phys")
+        {
+            return TokenKind::KwPhys;
         }
         return TokenKind::Identifier;
     }

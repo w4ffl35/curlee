@@ -898,6 +898,17 @@ int main(int argc, char** argv)
     const fs::path rel_type_error = fs::path("tests/fixtures/check_type_error.curlee");
     const fs::path rel_struct_ok = fs::path("tests/fixtures/check_struct_ok.curlee");
     const fs::path rel_ensures_fail = fs::path("tests/fixtures/check_ensures_fail.curlee");
+    const fs::path rel_phys_mem_ok = fs::path("tests/fixtures/check_phys_mem_ok.curlee");
+    const fs::path rel_phys_non_literal_addr =
+        fs::path("tests/fixtures/check_phys_non_literal_addr.curlee");
+    const fs::path rel_phys_outside_unsafe =
+        fs::path("tests/fixtures/check_phys_outside_unsafe.curlee");
+    const fs::path rel_phys_missing_cap = fs::path("tests/fixtures/check_phys_missing_cap.curlee");
+    const fs::path rel_phys_arithmetic = fs::path("tests/fixtures/check_phys_arithmetic.curlee");
+    const fs::path rel_phys_string_element =
+        fs::path("tests/fixtures/check_phys_string_element.curlee");
+    const fs::path rel_phys_read_non_phys =
+        fs::path("tests/fixtures/check_phys_read_non_phys.curlee");
     const fs::path rel_run_missing_stdout_cap = fs::path("tests/fixtures/r.curlee");
     const fs::path rel_run_missing_tty_cap = fs::path("tests/fixtures/run_missing_tty_cap.curlee");
     const fs::path rel_run_read_line = fs::path("tests/fixtures/run_read_line.curlee");
@@ -1019,6 +1030,63 @@ int main(int argc, char** argv)
                              {"curlee", "check", rel_struct_ok.string()},
                              dir / "check_struct_ok.golden",
                              true))
+        {
+            return 1;
+        }
+
+        // Front-end Phys<T> support (issue #252): positive fixture passes type checking.
+        if (!run_stderr_case("check-phys-mem-ok",
+                             {"curlee", "check", rel_phys_mem_ok.string()},
+                             dir / "check_phys_mem_ok.golden",
+                             true))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("check-phys-non-literal-addr",
+                             {"curlee", "check", rel_phys_non_literal_addr.string()},
+                             dir / "check_phys_non_literal_addr.golden",
+                             false))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("check-phys-outside-unsafe",
+                             {"curlee", "check", rel_phys_outside_unsafe.string()},
+                             dir / "check_phys_outside_unsafe.golden",
+                             false))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("check-phys-missing-cap",
+                             {"curlee", "check", rel_phys_missing_cap.string()},
+                             dir / "check_phys_missing_cap.golden",
+                             false))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("check-phys-arithmetic",
+                             {"curlee", "check", rel_phys_arithmetic.string()},
+                             dir / "check_phys_arithmetic.golden",
+                             false))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("check-phys-string-element",
+                             {"curlee", "check", rel_phys_string_element.string()},
+                             dir / "check_phys_string_element.golden",
+                             false))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("check-phys-read-non-phys",
+                             {"curlee", "check", rel_phys_read_non_phys.string()},
+                             dir / "check_phys_read_non_phys.golden",
+                             false))
         {
             return 1;
         }

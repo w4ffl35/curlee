@@ -277,6 +277,13 @@ class Verifier
             return TypeKind::Unit;
         }
 
+        // Physical memory pointers are freestanding-only; verification treats them as
+        // uninterpreted (opaque) values, matching the trusted-deref follow-up issue.
+        if (name.name == "Phys")
+        {
+            return TypeKind::Unit;
+        }
+
         auto t = curlee::types::core_type_from_name(name.name);
         if (!t.has_value())
         {
@@ -743,6 +750,24 @@ class Verifier
                 {
                     check_expr_for_calls(*node.inner);
                 }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PhysReadExpr>)
+                {
+                    if (node.base)
+                    {
+                        check_expr_for_calls(*node.base);
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PhysWriteExpr>)
+                {
+                    if (node.base)
+                    {
+                        check_expr_for_calls(*node.base);
+                    }
+                    if (node.value)
+                    {
+                        check_expr_for_calls(*node.value);
+                    }
+                }
                 else
                 {
                     (void)node;
@@ -838,11 +863,21 @@ class Verifier
             return;
         }
 
-        if (core_t->kind != TypeKind::Int && core_t->kind != TypeKind::Bool)
+        // Unsigned element kinds (U8/U16/U32/U64) are freestanding-only and treated as
+        // uninterpreted by verification, mirroring Phys<T> itself.
+        if (core_t->kind != TypeKind::Int && core_t->kind != TypeKind::Bool &&
+            !is_phys_element_kind(core_t->kind))
         {
             diags_.push_back(
                 error_at(s.type.span, "verification does not support type '" +
                                           std::string(curlee::types::to_string(*core_t)) + "'"));
+            check_expr_for_calls(s.value);
+            return;
+        }
+
+        if (is_phys_element_kind(core_t->kind))
+        {
+            // Uninterpreted: do not declare a solver variable, but still scan for calls.
             check_expr_for_calls(s.value);
             return;
         }

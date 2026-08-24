@@ -1442,6 +1442,544 @@ int main()
         }
     }
 
+    // Phys<T>: TypeKind stringification and equality for the new kinds.
+    {
+        if (to_string(TypeKind::U8) != "U8" || to_string(TypeKind::U16) != "U16" ||
+            to_string(TypeKind::U32) != "U32" || to_string(TypeKind::U64) != "U64" ||
+            to_string(TypeKind::Phys) != "Phys")
+        {
+            fail("expected unsigned and Phys TypeKind stringification to work");
+        }
+        if (to_string(Type{.kind = TypeKind::Phys,
+                          .name = "Phys",
+                          .element_kind = TypeKind::U32,
+                          .element_name = "U32"}) != "Phys")
+        {
+            fail("expected Phys Type stringification to return Phys");
+        }
+
+        const Type phys_u32{.kind = TypeKind::Phys,
+                            .name = "Phys",
+                            .element_kind = TypeKind::U32,
+                            .element_name = "U32"};
+        const Type phys_u32_same{.kind = TypeKind::Phys,
+                                 .name = "Phys",
+                                 .element_kind = TypeKind::U32,
+                                 .element_name = "U32"};
+        const Type phys_u8{.kind = TypeKind::Phys,
+                           .name = "Phys",
+                           .element_kind = TypeKind::U8,
+                           .element_name = "U8"};
+        if (!(phys_u32 == phys_u32_same) || (phys_u32 == phys_u8))
+        {
+            fail("expected Phys equality to respect element kind");
+        }
+    }
+
+    // Phys<T>: core_type_from_name and element-kind helpers.
+    {
+        if (core_type_from_name("U8") != Type{.kind = TypeKind::U8})
+        {
+            fail("expected U8 core type");
+        }
+        if (core_type_from_name("U16") != Type{.kind = TypeKind::U16})
+        {
+            fail("expected U16 core type");
+        }
+        if (core_type_from_name("U32") != Type{.kind = TypeKind::U32})
+        {
+            fail("expected U32 core type");
+        }
+        if (core_type_from_name("U64") != Type{.kind = TypeKind::U64})
+        {
+            fail("expected U64 core type");
+        }
+        if (phys_element_kind_from_name("U8") != TypeKind::U8 ||
+            phys_element_kind_from_name("U16") != TypeKind::U16 ||
+            phys_element_kind_from_name("U32") != TypeKind::U32 ||
+            phys_element_kind_from_name("U64") != TypeKind::U64 ||
+            phys_element_kind_from_name("String").has_value())
+        {
+            fail("expected phys element-kind resolution to work");
+        }
+        if (!is_phys_element_kind(TypeKind::U8) || !is_phys_element_kind(TypeKind::U64) ||
+            is_phys_element_kind(TypeKind::Int))
+        {
+            fail("expected is_phys_element_kind to be exact");
+        }
+    }
+
+    // Phys<T>: positive fixture passes type checking (unsafe + cap phys.mem).
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let fb: Phys<U32> = phys<U32>(0xFD00_0000);
+    fb.write(0xFF8800);
+    let v: U32 = fb.read();
+  }
+  return;
+}
+)";
+        (void)type_check_should_succeed(source, "phys positive fixture");
+    }
+
+    // Phys<T>: all four supported element kinds type-check.
+    {
+        for (const auto* kind : {"U8", "U16", "U32", "U64"})
+        {
+            const std::string source = std::string(R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let fb: Phys<)") + kind + R"(> = phys<)" + kind + R"(>(0x1000);
+  }
+  return;
+}
+)";
+            (void)type_check_should_succeed(source, "phys element kind " + std::string(kind));
+        }
+    }
+
+    // Phys<T>: read/write outside `unsafe` fails.
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  let fb: Phys<U32> = phys<U32>(0xFD00_0000);
+  let v: U32 = fb.read();
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys read outside unsafe");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("requires an unsafe block") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected unsafe-block diagnostic for phys read");
+        }
+    }
+
+    // Phys<T>: missing `cap phys.mem` parameter fails.
+    {
+        const std::string source = R"(fn main() -> Unit {
+  unsafe {
+    let fb: Phys<U32> = phys<U32>(0xFD00_0000);
+    let v: U32 = fb.read();
+  }
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys missing cap");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("phys.mem") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected missing phys.mem capability diagnostic");
+        }
+    }
+
+    // Phys<T>: non-literal addresses are rejected at parse time (parser requires a literal),
+    // so the type-checker constant-literal rule is defense-in-depth only. Verify the parse
+    // rejection surfaces a stable diagnostic.
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let fb: Phys<U32> = phys<U32>(100 + 4);
+  }
+  return;
+}
+)";
+        const auto lexed = curlee::lexer::lex(source);
+        const auto& toks = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(toks);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parse failure for phys non-literal address");
+        }
+        bool saw = false;
+        for (const auto& d : std::get<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            if (d.message.find("phys() expects an integer literal address") != std::string::npos ||
+                d.message.find("expected ')' after phys address") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected literal-address parse diagnostic for phys non-literal address");
+        }
+    }
+
+    // Phys<T>: arithmetic on Phys<T> fails.
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let fb: Phys<U32> = phys<U32>(0xFD00_0000);
+    let x: Int = fb + 1;
+  }
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys arithmetic");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("'+' expects") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected arithmetic-on-Phys diagnostic");
+        }
+    }
+
+    // Phys<T>: unsupported element kind (Phys<String>) fails.
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let fb: Phys<String> = phys<String>(0xFD00_0000);
+  }
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys string element");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("unsupported Phys element kind") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected unsupported Phys element kind diagnostic");
+        }
+    }
+
+    // Phys<T>: `Phys` without a type argument fails.
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let fb: Phys = phys<U32>(0xFD00_0000);
+  }
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys missing type arg");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("Phys requires an element type argument") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected missing type-argument diagnostic for Phys");
+        }
+    }
+
+    // Phys<T>: read() on a non-Phys value fails.
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let x: Int = 5;
+    let y: Int = x.read();
+  }
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys read on non-phys");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("read() can only be called on a Phys<T> value") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected read-on-non-Phys diagnostic");
+        }
+    }
+
+    // Phys<T>: write() with a wrong (non-Int) value type fails.
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let fb: Phys<U32> = phys<U32>(0xFD00_0000);
+    fb.write(true);
+  }
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys write value type mismatch");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("write() value type mismatch") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected write value type mismatch diagnostic");
+        }
+    }
+
+    // Phys<T>: write() on a non-Phys value fails.
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let x: Int = 5;
+    x.write(1);
+  }
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys write on non-phys");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("write() can only be called on a Phys<T> value") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected write-on-non-Phys diagnostic");
+        }
+    }
+
+    // Phys<T>: write() outside `unsafe` fails.
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  let fb: Phys<U32> = phys<U32>(0xFD00_0000);
+  fb.write(1);
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys write outside unsafe");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("requires an unsafe block") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected unsafe-block diagnostic for phys write");
+        }
+    }
+
+    // Phys<T>: read() on an unknown name fails type-check of the base expression
+    // (exercises the `!base_t.has_value()` guard in the read handler).
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let v: U32 = missing.read();
+  }
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys read on unknown base");
+        bool saw_unknown = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("unknown name") != std::string::npos)
+            {
+                saw_unknown = true;
+            }
+        }
+        if (!saw_unknown)
+        {
+            fail("expected unknown-name diagnostic for phys read base");
+        }
+    }
+
+    // Phys<T>: write() with an unknown value name fails type-check of the value
+    // (exercises the `!value_t.has_value()` guard in the write handler).
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let fb: Phys<U32> = phys<U32>(0xFD00_0000);
+    fb.write(missing);
+  }
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys write unknown value");
+        bool saw_unknown = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("unknown name") != std::string::npos)
+            {
+                saw_unknown = true;
+            }
+        }
+        if (!saw_unknown)
+        {
+            fail("expected unknown-name diagnostic for phys write value");
+        }
+    }
+
+    // Phys<T>: write() on an unknown base name fails type-check of the base
+    // (exercises the `!base_t.has_value()` guard in the write handler).
+    {
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    missing.write(1);
+  }
+  return;
+}
+)";
+        const auto diags = type_check_should_fail(source, "phys write unknown base");
+        bool saw_unknown = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("unknown name") != std::string::npos)
+            {
+                saw_unknown = true;
+            }
+        }
+        if (!saw_unknown)
+        {
+            fail("expected unknown-name diagnostic for phys write base");
+        }
+    }
+
+    // Phys<T>: directly-constructed AST reaches the defensive literal-validation and
+    // element-kind branches that the parser otherwise prevents (defense in depth).
+    {
+        // Bad element kind on the PhysExpr (parser accepts any identifier, so the
+        // type checker is the final gate).
+        curlee::parser::Program prog_bad_elem;
+        {
+            curlee::parser::Function f;
+            f.name = "main";
+            f.span = {};
+            f.return_type = curlee::parser::TypeName{.span = {}, .name = "Unit"};
+
+            // let fb: Phys<U32> = phys<Bad>(0x1000);
+            curlee::parser::Expr phys_expr;
+            phys_expr.span = {};
+            phys_expr.node = curlee::parser::PhysExpr{.element_kind = "Bad",
+                                                      .lexeme = "0x1000"};
+
+            curlee::parser::TypeName fb_type;
+            fb_type.span = {};
+            fb_type.name = "Phys";
+            fb_type.type_arg = "U32";
+
+            curlee::parser::LetStmt let_stmt;
+            let_stmt.name = "fb";
+            let_stmt.type = fb_type;
+            let_stmt.value = std::move(phys_expr);
+
+            curlee::parser::Stmt s;
+            s.span = {};
+            s.node = std::move(let_stmt);
+            f.body.stmts.push_back(std::move(s));
+
+            curlee::parser::Stmt ret;
+            ret.span = {};
+            ret.node = curlee::parser::ReturnStmt{.value = std::nullopt};
+            f.body.stmts.push_back(std::move(ret));
+
+            prog_bad_elem.functions.push_back(std::move(f));
+        }
+
+        const auto typed_bad = curlee::types::type_check(prog_bad_elem);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(typed_bad))
+        {
+            fail("expected type check failure for bad Phys element kind");
+        }
+        bool saw_bad_kind = false;
+        for (const auto& d : std::get<std::vector<curlee::diag::Diagnostic>>(typed_bad))
+        {
+            if (d.message.find("unsupported Phys element kind") != std::string::npos)
+            {
+                saw_bad_kind = true;
+            }
+        }
+        if (!saw_bad_kind)
+        {
+            fail("expected unsupported Phys element kind diagnostic from direct AST");
+        }
+
+        // Bad (non-literal) address lexeme reaches the constant-literal guard.
+        curlee::parser::Program prog_bad_addr;
+        {
+            curlee::parser::Function f;
+            f.name = "main";
+            f.span = {};
+            f.return_type = curlee::parser::TypeName{.span = {}, .name = "Unit"};
+
+            curlee::parser::Expr phys_expr;
+            phys_expr.span = {};
+            phys_expr.node = curlee::parser::PhysExpr{.element_kind = "U32",
+                                                      .lexeme = "base + 4"};
+
+            curlee::parser::TypeName fb_type;
+            fb_type.span = {};
+            fb_type.name = "Phys";
+            fb_type.type_arg = "U32";
+
+            curlee::parser::LetStmt let_stmt;
+            let_stmt.name = "fb";
+            let_stmt.type = fb_type;
+            let_stmt.value = std::move(phys_expr);
+
+            curlee::parser::Stmt s;
+            s.span = {};
+            s.node = std::move(let_stmt);
+            f.body.stmts.push_back(std::move(s));
+
+            curlee::parser::Stmt ret;
+            ret.span = {};
+            ret.node = curlee::parser::ReturnStmt{.value = std::nullopt};
+            f.body.stmts.push_back(std::move(ret));
+
+            prog_bad_addr.functions.push_back(std::move(f));
+        }
+
+        const auto typed_addr = curlee::types::type_check(prog_bad_addr);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(typed_addr))
+        {
+            fail("expected type check failure for non-literal phys address");
+        }
+        bool saw_addr = false;
+        for (const auto& d : std::get<std::vector<curlee::diag::Diagnostic>>(typed_addr))
+        {
+            if (d.message.find("physical address must be a constant literal") != std::string::npos)
+            {
+                saw_addr = true;
+            }
+        }
+        if (!saw_addr)
+        {
+            fail("expected constant-literal diagnostic from direct AST");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

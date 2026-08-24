@@ -153,6 +153,15 @@ void assign_expr_ids(curlee::parser::Expr& expr, std::size_t& next_id)
             {
                 assign_expr_ids(*node.base, next_id);
             }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PhysReadExpr>)
+            {
+                assign_expr_ids(*node.base, next_id);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PhysWriteExpr>)
+            {
+                assign_expr_ids(*node.base, next_id);
+                assign_expr_ids(*node.value, next_id);
+            }
             else if constexpr (std::is_same_v<Node, curlee::parser::GroupExpr>)
             {
                 assign_expr_ids(*node.inner, next_id);
@@ -384,7 +393,9 @@ class Parser
         if (match(TokenKind::KwCap))
         {
             const Token kw = previous();
-            if (!check(TokenKind::Identifier))
+            // Capability names may include the `phys` keyword segment (e.g. `cap phys.mem`).
+            const bool is_ident = check(TokenKind::Identifier) || check(TokenKind::KwPhys);
+            if (!is_ident)
             {
                 return error_at(peek(), "expected capability name after 'cap'");
             }
@@ -396,7 +407,9 @@ class Parser
             while (match(TokenKind::Dot))
             {
                 const Token dot = previous();
-                if (!check(TokenKind::Identifier))
+                const bool seg_is_ident =
+                    check(TokenKind::Identifier) || check(TokenKind::KwPhys);
+                if (!seg_is_ident)
                 {
                     return error_at(peek(), "expected identifier after '.' in capability name");
                 }
@@ -416,7 +429,8 @@ class Parser
             return TypeName{.span =
                                 curlee::source::Span{.start = kw.span.start, .end = last.span.end},
                             .is_capability = true,
-                            .name = name};
+                            .name = name,
+                            .type_arg = std::nullopt};
         }
 
         if (!check(TokenKind::Identifier))
@@ -424,7 +438,28 @@ class Parser
             return error_at(peek(), "expected type name");
         }
         const Token t = advance();
-        return TypeName{.span = t.span, .is_capability = false, .name = t.lexeme};
+        if (match(TokenKind::Less))
+        {
+            if (!check(TokenKind::Identifier))
+            {
+                return error_at(peek(), "expected type name after '<'");
+            }
+            const Token arg = advance();
+            if (auto err = consume(TokenKind::Greater, "expected '>' after type argument");
+                err.has_value())
+            {
+                return *err;
+            }
+            const Token gt = previous();
+            return TypeName{.span = curlee::source::Span{.start = t.span.start, .end = gt.span.end},
+                            .is_capability = false,
+                            .name = t.lexeme,
+                            .type_arg = arg.lexeme};
+        }
+        return TypeName{.span = t.span,
+                        .is_capability = false,
+                        .name = t.lexeme,
+                        .type_arg = std::nullopt};
     }
 
     [[nodiscard]] std::variant<ImportDecl, curlee::diag::Diagnostic> parse_import()
@@ -1685,6 +1720,62 @@ class Parser
                 }
                 const Token member = advance();
 
+                // Physical memory read: `base.read()`.
+                if (member.lexeme == "read" && check(TokenKind::LParen))
+                {
+                    advance(); // consume '('
+                    if (!check(TokenKind::RParen))
+                    {
+                        return error_at(peek(), "read() expects no arguments");
+                    }
+                    const Token rparen = advance();
+                    Expr access;
+                    access.span = span_cover(expr.span, rparen.span);
+                    access.node = curlee::parser::PhysReadExpr{
+                        .base = std::make_unique<Expr>(std::move(expr))};
+                    (void)dot;
+                    expr = std::move(access);
+                    continue;
+                }
+
+                // Physical memory write: `base.write(v)`.
+                if (member.lexeme == "write" && check(TokenKind::LParen))
+                {
+                    advance(); // consume '('
+                    Expr value;
+                    if (check(TokenKind::PhysAddrLiteral))
+                    {
+                        // Hex/underscore constant: only meaningful as a phys write value,
+                        // so it is consumed here and wrapped as a constant Int expression.
+                        const Token lit = advance();
+                        value.span = lit.span;
+                        value.node = curlee::parser::IntExpr{.lexeme = lit.lexeme};
+                    }
+                    else
+                    {
+                        auto value_res = parse_expr();
+                        if (std::holds_alternative<curlee::diag::Diagnostic>(value_res))
+                        {
+                            return std::get<curlee::diag::Diagnostic>(std::move(value_res));
+                        }
+                        value = std::get<Expr>(std::move(value_res));
+                    }
+                    if (auto err = consume(TokenKind::RParen, "expected ')' after write(...)");
+                        err.has_value())
+                    {
+                        return *err;
+                    }
+                    const Token rparen = previous();
+                    Expr access;
+                    access.span = span_cover(expr.span, rparen.span);
+                    access.node = curlee::parser::PhysWriteExpr{
+                        .base = std::make_unique<Expr>(std::move(expr)),
+                        .value = std::make_unique<Expr>(std::move(value))};
+                    (void)dot;
+                    expr = std::move(access);
+                    continue;
+                }
+
                 Expr access;
                 access.span = span_cover(expr.span, member.span);
                 access.node = MemberExpr{.base = std::make_unique<Expr>(std::move(expr)),
@@ -1877,6 +1968,51 @@ class Parser
             return expr;
         }
 
+        // Physical memory literal: `phys<U>(literal)`.
+        if (match(TokenKind::KwPhys))
+        {
+            const Token kw = previous();
+            if (auto err = consume(TokenKind::Less, "expected '<' after 'phys'");
+                err.has_value())
+            {
+                return *err;
+            }
+            if (!check(TokenKind::Identifier))
+            {
+                return error_at(peek(), "expected element type after 'phys<'");
+            }
+            const Token elem = advance();
+            if (auto err = consume(TokenKind::Greater, "expected '>' after element type");
+                err.has_value())
+            {
+                return *err;
+            }
+            if (auto err = consume(TokenKind::LParen, "expected '(' after 'phys<U>'");
+                err.has_value())
+            {
+                return *err;
+            }
+            // The address must be a compile-time literal: decimal (IntLiteral) or
+            // hex/underscore form (PhysAddrLiteral). Both are constant-only.
+            if (!check(TokenKind::IntLiteral) && !check(TokenKind::PhysAddrLiteral))
+            {
+                return error_at(peek(), "phys() expects an integer literal address");
+            }
+            const Token addr = advance();
+            if (auto err = consume(TokenKind::RParen, "expected ')' after phys address");
+                err.has_value())
+            {
+                return *err;
+            }
+            const Token rparen = previous();
+
+            Expr expr;
+            expr.span = span_cover(kw.span, rparen.span);
+            expr.node = curlee::parser::PhysExpr{.element_kind = elem.lexeme,
+                                                 .lexeme = addr.lexeme};
+            return expr;
+        }
+
         if (match(TokenKind::LParen))
         {
             const Token l = previous();
@@ -1984,6 +2120,10 @@ class Dumper
             return;
         }
         out_ << t.name;
+        if (t.type_arg.has_value())
+        {
+            out_ << "<" << *t.type_arg << ">";
+        }
     }
 
     void dump_struct_decl(const StructDecl& s)
@@ -2230,6 +2370,25 @@ class Dumper
             out_ << " ";
         }
         out_ << "}";
+    }
+
+    void dump_expr_node(const PhysExpr& e)
+    {
+        out_ << "phys<" << e.element_kind << ">(" << e.lexeme << ")";
+    }
+
+    void dump_expr_node(const PhysReadExpr& e)
+    {
+        dump_expr(*e.base);
+        out_ << ".read()";
+    }
+
+    void dump_expr_node(const PhysWriteExpr& e)
+    {
+        dump_expr(*e.base);
+        out_ << ".write(";
+        dump_expr(*e.value);
+        out_ << ")";
     }
 
     void dump_pred(const Pred& p)

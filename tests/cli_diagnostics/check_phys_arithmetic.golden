@@ -1,0 +1,4 @@
+tests/fixtures/check_phys_arithmetic.curlee:4:18: error: '+' expects Int+Int or String+String
+  |
+  |     let x: Int = fb + 1;
+  |                  ^^^^^^

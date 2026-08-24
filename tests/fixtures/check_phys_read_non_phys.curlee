@@ -1,0 +1,7 @@
+fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let x: Int = 5;
+    let y: Int = x.read();
+  }
+  return;
+}

@@ -1,0 +1,4 @@
+tests/fixtures/check_phys_outside_unsafe.curlee:3:16: error: physical memory access requires an unsafe block
+  |
+  |   let v: U32 = fb.read();
+  |                ^^^^^^^^^

@@ -170,6 +170,61 @@ fn main(v: Option) -> Unit {
             "expected '}' after match arms");
     }
 
+    // Phys<T>: parse success + dump parity for phys literal, .read(), .write().
+    {
+        const std::string src = R"(fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let fb: Phys<U32> = phys<U32>(0xFD00_0000);
+    fb.write(0xFF8800);
+    let v: U32 = fb.read();
+  }
+  return;
+}
+)";
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on Phys program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on Phys program");
+        }
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("phys<U32>(0xFD00_0000)") == std::string::npos)
+        {
+            fail("dump missing phys literal rendering");
+        }
+        if (dumped.find(".write(0xFF8800)") == std::string::npos)
+        {
+            fail("dump missing phys write rendering");
+        }
+        if (dumped.find(".read()") == std::string::npos)
+        {
+            fail("dump missing phys read rendering");
+        }
+        if (dumped.find("Phys<U32>") == std::string::npos)
+        {
+            fail("dump missing Phys<U32> type rendering");
+        }
+    }
+
+    // Phys<T>: malformed forms produce deterministic diagnostics.
+    {
+        expect_parse_error_contains("fn main() -> Unit { let x: Phys<U32> = phys; return; }",
+                                    "expected '<' after 'phys'");
+        expect_parse_error_contains("fn main() -> Unit { let x: Phys<U32> = phys<; return; }",
+                                    "expected element type after 'phys<'");
+        expect_parse_error_contains("fn main() -> Unit { let x: Phys<U32> = phys<U32>; return; }",
+                                    "expected '(' after 'phys<U>'");
+        expect_parse_error_contains(
+            "fn main() -> Unit { let x: Phys<U32> = phys<U32>(base); return; }",
+            "phys() expects an integer literal address");
+    }
+
     // Struct literal: duplicate field initializer.
     {
         const std::string src = R"(struct Point { x: Int; }
