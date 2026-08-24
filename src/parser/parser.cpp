@@ -1742,12 +1742,24 @@ class Parser
                 if (member.lexeme == "write" && check(TokenKind::LParen))
                 {
                     advance(); // consume '('
-                    auto value_res = parse_expr();
-                    if (std::holds_alternative<curlee::diag::Diagnostic>(value_res))
+                    Expr value;
+                    if (check(TokenKind::PhysAddrLiteral))
                     {
-                        return std::get<curlee::diag::Diagnostic>(std::move(value_res));
+                        // Hex/underscore constant: only meaningful as a phys write value,
+                        // so it is consumed here and wrapped as a constant Int expression.
+                        const Token lit = advance();
+                        value.span = lit.span;
+                        value.node = curlee::parser::IntExpr{.lexeme = lit.lexeme};
                     }
-                    Expr value = std::get<Expr>(std::move(value_res));
+                    else
+                    {
+                        auto value_res = parse_expr();
+                        if (std::holds_alternative<curlee::diag::Diagnostic>(value_res))
+                        {
+                            return std::get<curlee::diag::Diagnostic>(std::move(value_res));
+                        }
+                        value = std::get<Expr>(std::move(value_res));
+                    }
                     if (auto err = consume(TokenKind::RParen, "expected ')' after write(...)");
                         err.has_value())
                     {
@@ -1980,7 +1992,9 @@ class Parser
             {
                 return *err;
             }
-            if (!check(TokenKind::IntLiteral))
+            // The address must be a compile-time literal: decimal (IntLiteral) or
+            // hex/underscore form (PhysAddrLiteral). Both are constant-only.
+            if (!check(TokenKind::IntLiteral) && !check(TokenKind::PhysAddrLiteral))
             {
                 return error_at(peek(), "phys() expects an integer literal address");
             }

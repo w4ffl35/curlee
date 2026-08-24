@@ -863,11 +863,21 @@ class Verifier
             return;
         }
 
-        if (core_t->kind != TypeKind::Int && core_t->kind != TypeKind::Bool)
+        // Unsigned element kinds (U8/U16/U32/U64) are freestanding-only and treated as
+        // uninterpreted by verification, mirroring Phys<T> itself.
+        if (core_t->kind != TypeKind::Int && core_t->kind != TypeKind::Bool &&
+            !is_phys_element_kind(core_t->kind))
         {
             diags_.push_back(
                 error_at(s.type.span, "verification does not support type '" +
                                           std::string(curlee::types::to_string(*core_t)) + "'"));
+            check_expr_for_calls(s.value);
+            return;
+        }
+
+        if (is_phys_element_kind(core_t->kind))
+        {
+            // Uninterpreted: do not declare a solver variable, but still scan for calls.
             check_expr_for_calls(s.value);
             return;
         }

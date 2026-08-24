@@ -345,30 +345,14 @@ class Checker
                 return std::nullopt;
             }
             const std::string_view elem = *name.type_arg;
-            TypeKind elem_kind;
-            if (elem == "U8")
-            {
-                elem_kind = TypeKind::U8;
-            }
-            else if (elem == "U16")
-            {
-                elem_kind = TypeKind::U16;
-            }
-            else if (elem == "U32")
-            {
-                elem_kind = TypeKind::U32;
-            }
-            else if (elem == "U64")
-            {
-                elem_kind = TypeKind::U64;
-            }
-            else
+            const auto elem_kind = phys_element_kind_from_name(elem);
+            if (!elem_kind.has_value())
             {
                 error_at(name.span, "unsupported Phys element kind '" + std::string(elem) +
                                         "' (expected U8, U16, U32 or U64)");
                 return std::nullopt;
             }
-            return Type{.kind = TypeKind::Phys, .name = "Phys", .element_kind = elem_kind,
+            return Type{.kind = TypeKind::Phys, .name = "Phys", .element_kind = *elem_kind,
                         .element_name = elem};
         }
 
@@ -1520,24 +1504,8 @@ class Checker
             return std::nullopt;
         }
 
-        TypeKind elem_kind;
-        if (e.element_kind == "U8")
-        {
-            elem_kind = TypeKind::U8;
-        }
-        else if (e.element_kind == "U16")
-        {
-            elem_kind = TypeKind::U16;
-        }
-        else if (e.element_kind == "U32")
-        {
-            elem_kind = TypeKind::U32;
-        }
-        else if (e.element_kind == "U64")
-        {
-            elem_kind = TypeKind::U64;
-        }
-        else
+        const auto elem_kind = phys_element_kind_from_name(e.element_kind);
+        if (!elem_kind.has_value())
         {
             error_at(span, "unsupported Phys element kind '" + std::string(e.element_kind) +
                                "' (expected U8, U16, U32 or U64)");
@@ -1546,7 +1514,7 @@ class Checker
 
         return Type{.kind = TypeKind::Phys,
                     .name = "Phys",
-                    .element_kind = elem_kind,
+                    .element_kind = *elem_kind,
                     .element_name = e.element_kind};
     }
 
@@ -1622,9 +1590,7 @@ class Checker
         // compiler range-checks at the freestanding target. Exact unsigned types must still match.
         const Type elem_type{.kind = *base_t->element_kind, .name = base_t->element_name};
         const bool int_literal_for_unsigned =
-            (*value_t).kind == TypeKind::Int &&
-            (*base_t->element_kind == TypeKind::U8 || *base_t->element_kind == TypeKind::U16 ||
-             *base_t->element_kind == TypeKind::U32 || *base_t->element_kind == TypeKind::U64);
+            (*value_t).kind == TypeKind::Int && is_phys_element_kind(*base_t->element_kind);
         if (*value_t != elem_type && !int_literal_for_unsigned)
         {
             error_at(span, "write() value type mismatch: expected " +

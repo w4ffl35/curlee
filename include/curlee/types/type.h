@@ -199,4 +199,38 @@ struct CapabilityType
     return std::nullopt;
 }
 
+/**
+ * @brief Resolve a Phys element-kind name ("U8", "U16", "U32", "U64") to a TypeKind.
+ *
+ * Returns std::nullopt for any other name. Single source of truth for the set of
+ * element kinds supported by `Phys<T>`.
+ */
+[[nodiscard]] inline std::optional<TypeKind> phys_element_kind_from_name(std::string_view name)
+{
+    if (name == "U8")
+    {
+        return TypeKind::U8;
+    }
+    if (name == "U16")
+    {
+        return TypeKind::U16;
+    }
+    if (name == "U32")
+    {
+        return TypeKind::U32;
+    }
+    if (name == "U64")
+    {
+        return TypeKind::U64;
+    }
+    return std::nullopt;
+}
+
+/** @brief True if the kind is one of the supported Phys element kinds (U8/U16/U32/U64). */
+[[nodiscard]] constexpr bool is_phys_element_kind(TypeKind kind)
+{
+    return kind == TypeKind::U8 || kind == TypeKind::U16 || kind == TypeKind::U32 ||
+           kind == TypeKind::U64;
+}
+
 } // namespace curlee::types

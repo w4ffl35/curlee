@@ -39,7 +39,8 @@ int main()
     {
         constexpr TokenKind all_kinds[] = {
             TokenKind::Eof,           TokenKind::Identifier, TokenKind::IntLiteral,
-            TokenKind::StringLiteral, TokenKind::KwFn,       TokenKind::KwLet,
+            TokenKind::PhysAddrLiteral, TokenKind::StringLiteral, TokenKind::KwFn,
+            TokenKind::KwLet,
             TokenKind::KwIf,          TokenKind::KwElse,     TokenKind::KwWhile,
             TokenKind::KwReturn,      TokenKind::KwTrue,     TokenKind::KwFalse,
             TokenKind::KwRequires,    TokenKind::KwEnsures,  TokenKind::KwWhere,
@@ -98,9 +99,24 @@ int main()
         expect_token(toks, 2, TokenKind::Identifier, "U32");
         expect_token(toks, 3, TokenKind::Greater, ">");
         expect_token(toks, 4, TokenKind::LParen, "(");
-        expect_token(toks, 5, TokenKind::IntLiteral, "0xFD00_0000");
+        expect_token(toks, 5, TokenKind::PhysAddrLiteral, "0xFD00_0000");
         expect_token(toks, 6, TokenKind::RParen, ")");
         expect_token(toks, 7, TokenKind::Eof, "");
+    }
+
+    {
+        // Hex/underscore forms lex as a distinct token kind; a plain decimal stays IntLiteral.
+        const std::string src = "0xFF 1_000 42";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for mixed literal forms");
+        }
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::PhysAddrLiteral, "0xFF");
+        expect_token(toks, 1, TokenKind::PhysAddrLiteral, "1_000");
+        expect_token(toks, 2, TokenKind::IntLiteral, "42");
+        expect_token(toks, 3, TokenKind::Eof, "");
     }
 
     {

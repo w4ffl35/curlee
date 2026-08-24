@@ -842,6 +842,30 @@ int main()
         }
     }
 
+    {
+        // Phys<T> is freestanding-only: the verifier treats it as uninterpreted (opaque)
+        // and must not error on the type or on phys/read/write expression nodes.
+        const std::string source = "fn main(pm: cap phys.mem) -> Unit [ ensures true; ] {\n"
+                                   "  unsafe {\n"
+                                   "    let fb: Phys<U32> = phys<U32>(0xFD00_0000);\n"
+                                   "    fb.write(0xFF8800);\n"
+                                   "    let v: U32 = fb.read();\n"
+                                   "  }\n"
+                                   "  return;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "Phys treated as uninterpreted in verifier");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+            for (const auto& d : diags)
+            {
+                std::cerr << "DIAG: " << d.message << "\n";
+            }
+            fail("expected verification to succeed for Phys program (uninterpreted type)");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

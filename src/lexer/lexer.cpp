@@ -52,11 +52,13 @@ class Lexer
             if (std::isdigit(static_cast<unsigned char>(c)) != 0)
             {
                 advance();
-                // Hex literal: 0x followed by hex digits.
-                bool is_hex = false;
+                // Physical-address literals may be hex (0x...) or underscore-separated
+                // (e.g. 0xFD00_0000). They are lexed as a distinct token kind so generic
+                // expression consumers (emitter, verifier) never see non-decimal lexemes.
+                bool phys_addr_form = false;
                 if (c == '0' && (peek() == 'x' || peek() == 'X'))
                 {
-                    is_hex = true;
+                    phys_addr_form = true;
                     advance();
                     if (is_at_end() || std::isxdigit(static_cast<unsigned char>(peek())) == 0)
                     {
@@ -66,16 +68,25 @@ class Lexer
                 while (!is_at_end())
                 {
                     const char ch = peek();
-                    if (std::isdigit(static_cast<unsigned char>(ch)) != 0 ||
-                        (is_hex && (std::isxdigit(static_cast<unsigned char>(ch)) != 0)) ||
-                        ch == '_')
+                    const bool is_dec = std::isdigit(static_cast<unsigned char>(ch)) != 0;
+                    const bool is_hex = phys_addr_form &&
+                                        std::isxdigit(static_cast<unsigned char>(ch)) != 0;
+                    if (ch == '_')
+                    {
+                        phys_addr_form = true;
+                        advance();
+                        continue;
+                    }
+                    if (is_dec || is_hex)
                     {
                         advance();
                         continue;
                     }
                     break;
                 }
-                tokens.push_back(make_token(TokenKind::IntLiteral, start, pos_));
+                tokens.push_back(make_token(phys_addr_form ? TokenKind::PhysAddrLiteral
+                                                           : TokenKind::IntLiteral,
+                                            start, pos_));
                 continue;
             }
 
