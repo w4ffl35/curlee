@@ -1,0 +1,5 @@
+fn main() -> Int
+  [ ensures result == 0; ]
+{
+  return 1;
+}

@@ -1,0 +1,7 @@
+fn f() {
+  return;
+}
+
+fn main() -> Int {
+  return 0;
+}

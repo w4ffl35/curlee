@@ -105,6 +105,7 @@ endif()
 add_executable(curlee
   src/main.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/bundle/bundle.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
@@ -238,6 +239,7 @@ add_executable(curlee_cli_diagnostics_golden_tests
   tests/cli_diagnostics_golden_tests.cpp
   src/bundle/bundle.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
@@ -502,6 +504,7 @@ add_executable(curlee_cli_fmt_tests
   tests/cli_fmt_tests.cpp
   src/bundle/bundle.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
@@ -527,6 +530,7 @@ add_executable(curlee_cli_bundle_tests
   tests/cli_bundle_tests.cpp
   src/bundle/bundle.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
@@ -550,6 +554,7 @@ add_executable(curlee_cli_deps_lock_tests
   tests/cli_deps_lock_tests.cpp
   src/bundle/bundle.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
@@ -573,6 +578,7 @@ add_executable(curlee_cli_bundle_golden_tests
   tests/cli_bundle_golden_tests.cpp
   src/bundle/bundle.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
@@ -596,6 +602,7 @@ add_executable(curlee_cli_version_tests
   tests/cli_version_tests.cpp
   src/bundle/bundle.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
@@ -621,6 +628,7 @@ add_executable(curlee_cli_bad_args_tests
   tests/cli_bad_args_tests.cpp
   src/bundle/bundle.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
@@ -646,6 +654,7 @@ add_executable(curlee_cli_lex_parse_error_tests
   tests/cli_lex_parse_error_tests.cpp
   src/bundle/bundle.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
@@ -671,6 +680,7 @@ add_executable(curlee_cli_check_import_error_tests
   tests/cli_check_import_error_tests.cpp
   src/bundle/bundle.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
@@ -696,6 +706,7 @@ add_executable(curlee_cli_check_import_cycle_tests
   tests/cli_check_import_cycle_tests.cpp
   src/bundle/bundle.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
@@ -721,6 +732,7 @@ add_executable(curlee_cli_check_import_depth_tests
   tests/cli_check_import_depth_tests.cpp
   src/bundle/bundle.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
@@ -746,6 +758,7 @@ add_executable(curlee_cli_check_imported_main_tests
   tests/cli_check_imported_main_tests.cpp
   src/bundle/bundle.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
@@ -771,6 +784,7 @@ add_executable(curlee_cli_check_duplicate_function_tests
   tests/cli_check_duplicate_function_tests.cpp
   src/bundle/bundle.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
@@ -796,6 +810,7 @@ add_executable(curlee_cli_check_import_order_tests
   tests/cli_check_import_order_tests.cpp
   src/bundle/bundle.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
@@ -821,6 +836,7 @@ add_executable(curlee_cli_check_import_path_tests
   tests/cli_check_import_path_tests.cpp
   src/bundle/bundle.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
@@ -855,6 +871,7 @@ add_executable(curlee_cli_fuel_tests
   tests/cli_fuel_tests.cpp
   src/bundle/bundle.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
@@ -880,6 +897,7 @@ add_executable(curlee_cli_profile_tests
   tests/cli_profile_tests.cpp
   src/bundle/bundle.cpp
   src/cli/cli.cpp
+  src/codegen/codegen.cpp
   src/compiler/emitter.cpp
   src/diag/render.cpp
   src/lexer/lexer.cpp
@@ -1071,3 +1089,71 @@ add_executable(curlee_expected_tests
 )
 target_include_directories(curlee_expected_tests PRIVATE include)
 add_test(NAME curlee_expected_tests COMMAND curlee_expected_tests)
+
+# --- Codegen (freestanding C) ---
+
+add_executable(curlee_codegen_tests
+  tests/codegen_tests.cpp
+  src/bundle/bundle.cpp
+  src/cli/cli.cpp
+  src/codegen/codegen.cpp
+  src/compiler/emitter.cpp
+  src/diag/render.cpp
+  src/lexer/lexer.cpp
+  src/parser/parser.cpp
+  src/resolver/resolver.cpp
+  src/resolver/module_loader.cpp
+  src/source/line_map.cpp
+  src/source/source_file.cpp
+  src/types/type_check.cpp
+  src/verification/checker.cpp
+  src/verification/predicate_lowering.cpp
+  src/verification/solver.cpp
+  src/vm/vm.cpp
+  src/vm/chunk_codec.cpp
+)
+target_include_directories(curlee_codegen_tests PRIVATE include)
+target_link_libraries(curlee_codegen_tests PRIVATE Z3::Z3)
+curlee_add_build_info(curlee_codegen_tests)
+
+add_test(
+  NAME curlee_codegen_tests
+  COMMAND curlee_codegen_tests ${CMAKE_SOURCE_DIR}/tests/codegen
+)
+set_tests_properties(curlee_codegen_tests PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Compile the emitted C for every positive codegen fixture with a freestanding
+# compiler. A successful `gcc -ffreestanding -fno-builtin -nostdlib -c` is the
+# primary guarantee that the emitted C is self-contained (only <stdint.h>).
+# The smoke suite is ON by default; set CURLEE_ENABLE_FREESTANDING_SMOKE=OFF
+# to skip (e.g. when no C compiler is installed). When ON, the configure fails
+# if no freestanding C compiler can be found.
+option(CURLEE_ENABLE_FREESTANDING_SMOKE "Enable freestanding C compile smoke tests" ON)
+
+if(CURLEE_ENABLE_FREESTANDING_SMOKE)
+  find_program(CURLEE_FREESTANDING_CC NAMES gcc cc)
+  if(NOT CURLEE_FREESTANDING_CC)
+    message(FATAL_ERROR
+      "CURLEE_ENABLE_FREESTANDING_SMOKE is ON but no C compiler (gcc/cc) was "
+      "found. Install one or set CURLEE_ENABLE_FREESTANDING_SMOKE=OFF.")
+  endif()
+
+  # Each smoke test writes its emitted .c into its own subdirectory to avoid
+  # races when ctest runs tests in parallel.
+  foreach(_fixture arith control_flow while_loop struct_fixture enum_match match_stmt phys_mem phys_param empty_union_enum forward_ref unit_empty match_unit_arms mixed_payload_enum phys_param_forward while_loop_unit multi_function)
+    set(_fixture_workdir "${CMAKE_BINARY_DIR}/codegen_smoke_${_fixture}")
+    file(MAKE_DIRECTORY "${_fixture_workdir}")
+    add_test(
+      NAME curlee_codegen_compile_${_fixture}
+      COMMAND ${CMAKE_COMMAND}
+        -Dcurlee_binary=$<TARGET_FILE:curlee>
+        -Dcurlee_fixture=${CMAKE_SOURCE_DIR}/tests/codegen/${_fixture}.curlee
+        -Dcurlee_cc=${CURLEE_FREESTANDING_CC}
+        -Dcurlee_workdir=${_fixture_workdir}
+        -P ${CMAKE_SOURCE_DIR}/cmake/codegen_compile_smoke.cmake
+    )
+    set_tests_properties(curlee_codegen_compile_${_fixture} PROPERTIES
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    )
+  endforeach()
+endif()

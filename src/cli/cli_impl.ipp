@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <curlee/bundle/bundle.h>
 #include <curlee/cli/cli.h>
+#include <curlee/codegen/codegen.h>
 #include <curlee/compiler/emitter.h>
 #include <curlee/diag/render.h>
 #include <curlee/lexer/lexer.h>
@@ -97,8 +98,9 @@ void print_usage(std::ostream& out)
     out << "  curlee check <file.curlee>\n";
         out << "  curlee run [--fuel <n>] [--seed <n>] [--profile] [--profile-format <text|json>] "
             "[--bundle <file.bundle>] [--cap <capability>]... <file.curlee>\n";
-        out << "  curlee <lex|parse|check|run> [--diag-format <text|json>] ...\n";
-    out << "  curlee fmt [--check] <file>\n";
+        out << "  curlee <lex|parse|check|run|build> [--diag-format <text|json>] ...\n";
+        out << "  curlee build [--target freestanding-c] [-o out.c] <entry.curlee>\n";
+        out << "  curlee fmt [--check] <file>\n";
     out << "  curlee bundle build [--root <dir>] [--stdlib-root <dir>] [--cap <capability>]... "
            "<entry.curlee> <out.bundle>\n";
     out << "  curlee bundle verify <file.bundle>\n";
@@ -665,7 +667,8 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                   const std::vector<std::filesystem::path>& stdlib_roots = {},
                   const std::optional<std::filesystem::path>& entry_dir_override = std::nullopt,
                   std::vector<curlee::bundle::ImportPin>* out_import_pins = nullptr,
-                  std::vector<std::uint8_t>* out_bytecode = nullptr)
+                  std::vector<std::uint8_t>* out_bytecode = nullptr,
+                  std::string* out_c_source = nullptr)
 {
     auto loaded = source::load_source_file(path);
     if (auto* err = std::get_if<source::LoadError>(&loaded))
@@ -676,6 +679,8 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             .message = err->message,
             .span = std::nullopt,
             .notes = {},
+            .file_path = std::nullopt,
+            .function_name = {},
         };
 
         emit_diagnostic(std::cerr, diag, pseudo_file, diag_format);
@@ -694,6 +699,11 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
     std::unordered_map<std::string, std::string> dependency_id_by_path;
 
     std::optional<types::TypeInfo> last_type_info;
+
+    // Function name -> owning source file path, populated during the import
+    // merge. Used to render codegen diagnostics (whose spans are plain byte
+    // offsets without file identity) against the correct file.
+    std::unordered_map<std::string, std::string> function_file_map_;
 
     auto run_checks = [&](parser::Program& program) -> bool
     {
@@ -780,6 +790,8 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                     .message = "import graph too deep (possible cycle)",
                     .span = std::nullopt,
                     .notes = {},
+                    .file_path = std::nullopt,
+                    .function_name = {},
                 };
                 emit_diagnostic(std::cerr, d, mod_file, diag_format);
                 return false;
@@ -821,6 +833,8 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                                                   "inside deterministic roots",
                                               .span = std::nullopt},
                             },
+                        .file_path = std::nullopt, // GCOVR_EXCL_LINE
+                        .function_name = {},       // GCOVR_EXCL_LINE
                     };
                     emit_diagnostic(std::cerr, d, stable_file, diag_format);
                     return false;
@@ -865,6 +879,8 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                         .message = "imported modules must not define 'main'",
                         .span = f.span,
                         .notes = {},
+                        .file_path = std::nullopt,
+                        .function_name = {},
                     };
                     emit_diagnostic(std::cerr, d, stable_file, diag_format);
                     visiting.erase(key);
@@ -984,6 +1000,16 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         // Merge imported module functions into the main program so callers can reference them.
         // Imports have already been checked/verified above, so we expect no new errors.
         {
+            // Record which source file each function came from, so codegen
+            // diagnostics (whose spans are plain byte offsets) can be rendered
+            // against the owning file. Entry-file functions map to the entry
+            // path.
+            function_file_map_.clear();
+            for (const auto& f : program.functions)
+            {
+                function_file_map_.emplace(std::string(f.name), file.path);
+            }
+
             std::unordered_set<std::string> seen;
             for (const auto& f : program.functions)
             {
@@ -1019,6 +1045,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                         return false;
                     }
                     seen.insert(name);
+                    function_file_map_.emplace(name, imported_files[idx]->path);
                     program.functions.push_back(std::move(f));
                 }
             }
@@ -1110,6 +1137,64 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             return kExitError;
         }
 
+        return kExitOk;
+    }
+
+    if (cmd == "build")
+    {
+        // `curlee build` runs the full lex -> parse -> resolve -> type-check ->
+        // verify pipeline and refuses to emit anything unless verification
+        // succeeds (no proof, no build).
+        parser::Program program;
+        if (!run_checks(program))
+        {
+            return kExitError;
+        }
+
+        const auto emitted = curlee::codegen::codegen_freestanding_c(program);
+        if (std::holds_alternative<std::vector<diag::Diagnostic>>(emitted))
+        {
+            // Codegen diagnostics carry the name of the function whose body
+            // produced them (spans are per-file byte offsets that collide
+            // across imported files). Resolve the owning file via the
+            // function->file map recorded during the import merge; fall back to
+            // the entry file.
+            for (auto& d : std::get<std::vector<diag::Diagnostic>>(emitted))
+            {
+                const source::SourceFile* diag_file = &file;
+                if (!d.function_name.empty())
+                {
+                    const auto it = function_file_map_.find(d.function_name);
+                    if (it != function_file_map_.end())
+                    {
+                        if (it->second == file.path)
+                        {
+                            diag_file = &file;
+                        }
+                        else
+                        {
+                            for (const auto& imported : imported_files)
+                            {
+                                if (imported->path == it->second)
+                                {
+                                    diag_file = imported.get();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                emit_diagnostic(std::cerr, d, *diag_file, diag_format);
+            }
+            return kExitError;
+        }
+
+        if (out_c_source == nullptr)
+        {
+            // GCOVR_EXCL_LINE
+            return kExitError; // GCOVR_EXCL_LINE
+        }
+        *out_c_source = std::get<std::string>(emitted);
         return kExitOk;
     }
 
@@ -1270,6 +1355,8 @@ int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entr
             .message = err->message,
             .span = std::nullopt,
             .notes = {},
+            .file_path = std::nullopt,
+            .function_name = {},
         };
 
         emit_diagnostic(std::cerr, diag, pseudo_file, diag_format);
@@ -1358,6 +1445,8 @@ int cmd_run_bundle(const curlee::bundle::Bundle& bundle, const std::string& entr
             .message = "invalid bundle bytecode: " + decode_err->message,
             .span = std::nullopt,
             .notes = {},
+            .file_path = std::nullopt,
+            .function_name = {},
         };
         emit_diagnostic(std::cerr, d, file, diag_format);
         return kExitError;
@@ -1645,6 +1734,43 @@ int cmd_fmt(const std::string& path, bool check)
     return kExitOk;
 }
 
+// `curlee build [--target freestanding-c] [-o out.c] <entry.curlee>`
+//
+// Runs the full check pipeline (including verification) and emits freestanding
+// C. On verification or codegen failure prints diagnostics and exits non-zero
+// without writing an output file.
+int cmd_build(const std::string& entry_path, const std::string& output_path,
+              const std::vector<std::filesystem::path>& stdlib_roots, bool to_stdout,
+              DiagOutputFormat diag_format)
+{
+    std::string c_source;
+    const int rc = cmd_read_only("build", entry_path, empty_caps(), kDefaultFuel,
+                                 std::nullopt, false, diag_format, {}, stdlib_roots,
+                                 std::nullopt, nullptr, nullptr, &c_source);
+    if (rc != kExitOk)
+    {
+        return rc;
+    }
+
+    if (to_stdout)
+    {
+        std::cout << c_source;
+        return kExitOk;
+    }
+
+    std::ofstream out(output_path, std::ios::binary | std::ios::trunc);
+    if (!out)
+    {
+        std::cerr << "error: build failed: cannot open output file: " << output_path << "\n";
+        return kExitError;
+    }
+    out << c_source;
+    out.close();
+
+    std::cout << "curlee build: wrote " << output_path << "\n";
+    return kExitOk;
+}
+
 std::vector<std::filesystem::path> load_stdlib_roots_from_env()
 {
     namespace fs = std::filesystem;
@@ -1758,6 +1884,183 @@ int run(int argc, char** argv)
             ++i;
         }
         args = std::move(filtered_args);
+    }
+
+    if (cmd == "build")
+    {
+        std::string target = "freestanding-c";
+        std::string output = "out.c";
+        bool to_stdout = false;
+        auto stdlib_roots = load_stdlib_roots_from_env();
+        std::optional<std::filesystem::path> root;
+        std::vector<std::string> positional;
+
+        for (std::size_t i = 0; i < args.size();)
+        {
+            const std::string_view a = args[i];
+
+            // `curlee build --help` prints the build usage and exits 0.
+            if (a == "--help" || a == "-h")
+            {
+                print_usage(std::cout);
+                return kExitOk;
+            }
+
+            // `--` ends option parsing so a file named like an option (or `-`)
+            // can be built.
+            if (a == "--")
+            {
+                for (++i; i < args.size(); ++i)
+                {
+                    positional.push_back(std::string(args[i]));
+                }
+                break;
+            }
+
+            if (a == "--target")
+            {
+                if (i + 1 >= args.size())
+                {
+                    std::cerr << "error: expected target after --target\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                target = std::string(args[i + 1]);
+                i += 2;
+                continue;
+            }
+
+            if (a.starts_with("--target="))
+            {
+                const auto value = a.substr(std::string_view("--target=").size());
+                if (value.empty())
+                {
+                    std::cerr << "error: expected target after --target=\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                target = std::string(value);
+                ++i;
+                continue;
+            }
+
+            if (a == "-o" || a == "--output")
+            {
+                if (i + 1 >= args.size())
+                {
+                    std::cerr << "error: expected path after " << a << "\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                output = std::string(args[i + 1]);
+                to_stdout = (output == "-");
+                i += 2;
+                continue;
+            }
+
+            if (a.starts_with("--output="))
+            {
+                const auto value = a.substr(std::string_view("--output=").size());
+                if (value.empty())
+                {
+                    std::cerr << "error: expected path after --output=\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                output = std::string(value);
+                to_stdout = (output == "-");
+                ++i;
+                continue;
+            }
+
+            if (a == "--root")
+            {
+                if (i + 1 >= args.size())
+                {
+                    std::cerr << "error: expected path after --root\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                root = std::filesystem::path(std::string(args[i + 1]));
+                i += 2;
+                continue;
+            }
+
+            if (a.starts_with("--root="))
+            {
+                const auto value = a.substr(std::string_view("--root=").size());
+                if (value.empty())
+                {
+                    std::cerr << "error: expected path after --root=\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                root = std::filesystem::path(std::string(value));
+                ++i;
+                continue;
+            }
+
+            if (a == "--stdlib-root")
+            {
+                if (i + 1 >= args.size())
+                {
+                    std::cerr << "error: expected path after --stdlib-root\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                stdlib_roots.push_back(std::string(args[i + 1]));
+                i += 2;
+                continue;
+            }
+
+            if (a.starts_with("--stdlib-root="))
+            {
+                const auto value = a.substr(std::string_view("--stdlib-root=").size());
+                if (value.empty())
+                {
+                    std::cerr << "error: expected path after --stdlib-root=\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                stdlib_roots.push_back(std::string(value));
+                ++i;
+                continue;
+            }
+
+            if (a.starts_with('-'))
+            {
+                std::cerr << "error: unknown option: " << a << "\n\n";
+                print_usage(std::cerr);
+                return kExitUsage;
+            }
+
+            positional.push_back(std::string(a));
+            ++i;
+        }
+
+        if (positional.size() != 1)
+        {
+            std::cerr << "error: expected curlee build [--target freestanding-c] "
+                         "[-o out.c] <entry.curlee>\n\n";
+            print_usage(std::cerr);
+            return kExitUsage;
+        }
+
+        if (target != "freestanding-c")
+        {
+            std::cerr << "error: unsupported build target: " << target
+                      << " (supported: freestanding-c)\n\n";
+            print_usage(std::cerr);
+            return kExitUsage;
+        }
+
+        std::string entry_path = positional[0];
+        if (root.has_value() && !std::filesystem::path(entry_path).is_absolute())
+        {
+            entry_path = (*root / entry_path).string();
+        }
+
+        return cmd_build(entry_path, output, stdlib_roots, to_stdout, diag_format);
     }
 
     if (cmd == "fmt")

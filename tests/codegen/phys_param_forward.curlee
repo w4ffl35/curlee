@@ -1,0 +1,20 @@
+fn b(r: Phys<U32>, pm: cap phys.mem) -> U32 {
+  unsafe {
+    let v: U32 = r.read();
+    r.write(v);
+    return r.read();
+  }
+}
+
+fn a(r: Phys<U32>, pm: cap phys.mem) -> U32 {
+  unsafe {
+    return b(r, pm);
+  }
+}
+
+fn main(pm: cap phys.mem) -> U32 {
+  unsafe {
+    let reg: Phys<U32> = phys<U32>(0x4000);
+    return a(reg, pm);
+  }
+}

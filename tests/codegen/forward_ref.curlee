@@ -1,0 +1,16 @@
+struct Wrapper {
+  color: Color;
+}
+
+enum Color {
+  Red;
+  Blue;
+}
+
+fn main() -> Int {
+  let w: Wrapper = Wrapper{color : Color::Red};
+  if (variant_is(w.color, Color::Red)) {
+    return 1;
+  }
+  return 0;
+}

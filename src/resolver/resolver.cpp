@@ -150,17 +150,12 @@ class Resolver
     static constexpr std::string_view kPythonFfiUnsupportedMessage =
         "python_ffi is not part of the Curlee v1 surface (see Python-Interop-(Future))";
 
+    // Delegate to the public curlee::resolver::is_builtin_call_name so there is
+    // a single source of truth for the builtin call surface (the freestanding
+    // codegen backend reuses the same predicate).
     static bool is_builtin_call_name(std::string_view name)
     {
-        static const std::unordered_set<std::string_view> builtins = {
-            "print",           "__read_line",      "__tty_clear",      "__fs_read_text",
-            "__fs_write_text", "__tty_write_at",   "__tty_flush",      "__rng_next_int",
-            "__vec_new_int",   "__vec_len_int",    "__vec_push_int",   "__vec_get_int",
-            "__vec_set_int",   "__vec_new_bool",   "__vec_len_bool",   "__vec_push_bool",
-            "__vec_get_bool",  "__vec_set_bool",   "__set_new_int",    "__set_has_int",
-            "__set_insert_int", "variant_is", "variant_unwrap",
-        }; // GCOVR_EXCL_LINE
-        return builtins.contains(name);
+        return curlee::resolver::is_builtin_call_name(name);
     }
 
     void resolve_imports(const curlee::parser::Program& program)
@@ -681,6 +676,19 @@ ResolveResult resolve(const curlee::parser::Program& program,
     }
     Resolver r(std::move(base), std::move(entry_dir), std::move(stdlib_roots));
     return r.run(program);
+}
+
+bool is_builtin_call_name(std::string_view name)
+{
+    static const std::unordered_set<std::string_view> builtins = {
+        "print",           "__read_line",      "__tty_clear",      "__fs_read_text",
+        "__fs_write_text", "__tty_write_at",   "__tty_flush",      "__rng_next_int",
+        "__vec_new_int",   "__vec_len_int",    "__vec_push_int",   "__vec_get_int",
+        "__vec_set_int",   "__vec_new_bool",   "__vec_len_bool",   "__vec_push_bool",
+        "__vec_get_bool",  "__vec_set_bool",   "__set_new_int",    "__set_has_int",
+        "__set_insert_int", "variant_is", "variant_unwrap",
+    };
+    return builtins.contains(name);
 }
 
 } // namespace curlee::resolver

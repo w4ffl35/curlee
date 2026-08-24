@@ -1,0 +1,7 @@
+fn f(u: Unit) -> Int {
+  return 0;
+}
+
+fn main() -> Int {
+  return 0;
+}

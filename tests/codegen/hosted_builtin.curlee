@@ -1,0 +1,4 @@
+fn main(out: cap io.stdout) -> Unit {
+  print(42);
+  return;
+}

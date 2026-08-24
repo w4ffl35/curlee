@@ -1,0 +1,8 @@
+fn main(pm: cap phys.mem) -> U32 {
+  unsafe {
+    let fb: Phys<U32> = phys<U32>(0xFD00_0000); // framebuffer base
+    fb.write(0xFF8800);                          // pixel write
+    let v: U32 = fb.read();                      // register/framebuffer read
+    return v;                                    // use v (no unused-var warning)
+  }
+}

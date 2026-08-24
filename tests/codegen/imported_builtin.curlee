@@ -1,0 +1,5 @@
+import mymod.tty;
+
+fn main(t: cap io.tty) -> Int {
+  return clear(t);
+}

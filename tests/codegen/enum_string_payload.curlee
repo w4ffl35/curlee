@@ -1,0 +1,7 @@
+enum E {
+  A(String);
+}
+
+fn main() -> Int {
+  return 0;
+}

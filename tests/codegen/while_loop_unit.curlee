@@ -1,0 +1,9 @@
+fn main() -> Unit {
+  unsafe {
+    while (true) {
+      // Kernel-style infinite loop; the verifier accepts `true` as a
+      // constant condition and the emitted C needs no fallback return.
+    }
+  }
+  return;
+}

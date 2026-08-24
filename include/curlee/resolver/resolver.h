@@ -43,6 +43,16 @@ struct Resolution
 
 using ResolveResult = std::variant<Resolution, std::vector<curlee::diag::Diagnostic>>;
 
+/**
+ * @brief True if `name` is a compiler/runtime builtin call name (print, the
+ * __* intrinsics, variant_is/variant_unwrap).
+ *
+ * This is the single source of truth for the builtin call surface. Consumers
+ * that must reject or special-case builtins (e.g. the freestanding codegen
+ * backend) reuse this instead of maintaining a second list.
+ */
+[[nodiscard]] bool is_builtin_call_name(std::string_view name);
+
 /** @brief Resolve names in `program`. */
 [[nodiscard]] ResolveResult resolve(const curlee::parser::Program& program);
 /** @brief Resolve names with an associated source file (for precise spans). */

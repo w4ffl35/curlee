@@ -1,0 +1,10 @@
+enum Mode { A; B; }
+
+fn main() -> Unit {
+  let m: Mode = Mode::A;
+  match (m) {
+    Mode::A => { return; }
+    Mode::B => { return; }
+  }
+  return;
+}

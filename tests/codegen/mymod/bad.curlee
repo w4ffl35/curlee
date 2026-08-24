@@ -1,0 +1,4 @@
+fn bad() -> Int {
+  let s: String = "hello";
+  return 0;
+}

@@ -1,0 +1,10 @@
+fn get_reg(r: Phys<U32>, pm: cap phys.mem) -> Phys<U32> {
+  return r;
+}
+
+fn main(pm: cap phys.mem) -> U32 {
+  unsafe {
+    let reg: Phys<U32> = phys<U32>(0x4000);
+    return reg.read();
+  }
+}

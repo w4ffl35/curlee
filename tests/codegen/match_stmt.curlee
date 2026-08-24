@@ -1,0 +1,15 @@
+enum Color {
+  Red;
+  Green;
+  Blue(Int);
+}
+
+fn main() -> Int {
+  let c: Color = Color::Red;
+  match (c) {
+    Color::Red => { return 1; }
+    Color::Green => { return 2; }
+    Color::Blue(v) => { return v; }
+  }
+  return 0;
+}

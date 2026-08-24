@@ -1,0 +1,9 @@
+enum Status { Ok; Err; }
+
+fn main() -> Int {
+  let s: Status = Status::Ok;
+  if (variant_is(s, Status::Ok)) {
+    return 1;
+  }
+  return 0;
+}

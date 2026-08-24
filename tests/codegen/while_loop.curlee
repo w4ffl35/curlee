@@ -1,0 +1,11 @@
+fn step(x: Int) -> Int {
+  return x + 1;
+}
+
+fn main() -> Int {
+  let i: Int = 0;
+  while (i < 3) {
+    return step(i);
+  }
+  return i;
+}

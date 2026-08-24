@@ -1,0 +1,13 @@
+enum Maybe { Nothing; Just(Int); }
+
+fn main() -> Int {
+  let n: Maybe = Maybe::Nothing;
+  let j: Maybe = Maybe::Just(41);
+  if (variant_is(j, Maybe::Just)) {
+    return variant_unwrap(j, Maybe::Just) + 1;
+  }
+  if (variant_is(n, Maybe::Nothing)) {
+    return 0;
+  }
+  return 2;
+}

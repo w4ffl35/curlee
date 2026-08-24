@@ -1,0 +1,7 @@
+fn take_str(s: String) -> Int {
+  return 0;
+}
+
+fn main() -> Int {
+  return take_str("x");
+}

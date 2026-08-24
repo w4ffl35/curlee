@@ -1,0 +1,7 @@
+enum E {
+  P(Phys<U32>);
+}
+
+fn main() -> Int {
+  return 0;
+}

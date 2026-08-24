@@ -1,0 +1,7 @@
+struct S {
+  p: Phys<U32>;
+}
+
+fn main() -> Int {
+  return 0;
+}

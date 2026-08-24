@@ -1,0 +1,4 @@
+fn clear(t: cap io.tty) -> Int {
+  __tty_clear(t);
+  return 0;
+}

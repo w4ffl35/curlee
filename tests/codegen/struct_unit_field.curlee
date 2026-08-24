@@ -1,0 +1,7 @@
+struct S {
+  u: Unit;
+}
+
+fn main() -> Int {
+  return 0;
+}

@@ -1,0 +1,5 @@
+import mymod.bad;
+
+fn main() -> Int {
+  return bad();
+}
