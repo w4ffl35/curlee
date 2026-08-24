@@ -265,6 +265,17 @@ int main()
         {
             fail("expected supported_type(cap foo) to return Unit");
         }
+
+        // supported_type: Phys<T> maps to a distinct Phys kind (opaque sort), not Unit.
+        curlee::parser::TypeName phys_tn;
+        phys_tn.span = curlee::source::Span{.start = 0, .end = 1};
+        phys_tn.name = "Phys";
+        phys_tn.type_arg = std::string_view("U32");
+        const auto phys_t = v.supported_type(phys_tn);
+        if (!phys_t.has_value() || *phys_t != curlee::types::TypeKind::Phys)
+        {
+            fail("expected supported_type(Phys) to return Phys kind");
+        }
     }
 
     {
@@ -1323,6 +1334,127 @@ int main()
         curlee::parser::ReturnStmt rs2;
         rs2.value = std::nullopt;
         v.check_stmt_node(rs2, s, curlee::types::TypeKind::Int);
+    }
+
+    {
+        // LetStmt: Phys<T> binding with a non-literal address lexeme must produce the hard
+        // "physical address must be a constant literal" diagnostic (defense-in-depth, issue
+        // #253). The front-end normally rejects these at parse time, but the verifier must not
+        // trust the AST.
+        const curlee::source::Span s{.start = 0, .end = 1};
+        curlee::parser::LetStmt ls_phys;
+        ls_phys.name = "fb_bad";
+        ls_phys.type = curlee::parser::TypeName{.span = s,
+                                                .name = "Phys",
+                                                .type_arg = std::string_view("U32")};
+        ls_phys.value = make_expr(
+            s, curlee::parser::PhysExpr{.element_kind = "U32", .lexeme = "base + 4"});
+        const std::size_t before = v.diags_.size();
+        v.check_stmt_node(ls_phys, s, curlee::types::TypeKind::Int);
+        bool saw_literal = false;
+        for (std::size_t i = before; i < v.diags_.size(); ++i)
+        {
+            if (v.diags_[i].message.find("physical address must be a constant literal") !=
+                std::string::npos)
+            {
+                saw_literal = true;
+            }
+        }
+        if (!saw_literal)
+        {
+            fail("expected non-literal phys address to be rejected by the verifier");
+        }
+
+        // lower_expr(PhysExpr) with a valid literal address should succeed and produce a
+        // Phys-typed ExprValue.
+        curlee::parser::Expr e_phys;
+        e_phys.span = s;
+        e_phys.node = curlee::parser::PhysExpr{.element_kind = "U32", .lexeme = "0xFD00_0000"};
+        auto r_phys = v.lower_expr(e_phys);
+        if (!std::holds_alternative<curlee::verification::ExprValue>(r_phys))
+        {
+            fail("expected lower_expr(PhysExpr) to succeed for literal address");
+        }
+        if (std::get<curlee::verification::ExprValue>(r_phys).kind != curlee::types::TypeKind::Phys)
+        {
+            fail("expected lower_expr(PhysExpr) to produce a Phys-typed value");
+        }
+
+        // lower_expr(PhysExpr) with a non-literal address should error.
+        curlee::parser::Expr e_phys_bad;
+        e_phys_bad.span = s;
+        e_phys_bad.node = curlee::parser::PhysExpr{.element_kind = "U32", .lexeme = "base"};
+        auto r_phys_bad = v.lower_expr(e_phys_bad);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(r_phys_bad))
+        {
+            fail("expected lower_expr(PhysExpr) to reject non-literal address");
+        }
+
+        // lower_expr(PhysReadExpr) on an unknown base should error.
+        curlee::parser::Expr e_read_base;
+        e_read_base.span = s;
+        e_read_base.node = curlee::parser::NameExpr{.name = "no_such_phys"};
+        curlee::parser::Expr e_read;
+        e_read.span = s;
+        e_read.node = curlee::parser::PhysReadExpr{.base = make_expr_ptr(std::move(e_read_base))};
+        auto r_read = v.lower_expr(e_read);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(r_read))
+        {
+            fail("expected lower_expr(PhysReadExpr) on unknown base to error");
+        }
+
+        // lower_expr(PhysWriteExpr) on an unknown base should error.
+        curlee::parser::Expr e_write_base;
+        e_write_base.span = s;
+        e_write_base.node = curlee::parser::NameExpr{.name = "no_such_phys"};
+        curlee::parser::Expr e_write_val;
+        e_write_val.span = s;
+        e_write_val.node = curlee::parser::IntExpr{.lexeme = "1"};
+        curlee::parser::Expr e_write;
+        e_write.span = s;
+        e_write.node = curlee::parser::PhysWriteExpr{
+            .base = make_expr_ptr(std::move(e_write_base)),
+            .value = make_expr_ptr(std::move(e_write_val))};
+        auto r_write = v.lower_expr(e_write);
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(r_write))
+        {
+            fail("expected lower_expr(PhysWriteExpr) on unknown base to error");
+        }
+
+        // A valid Phys read()/write() pair should lower without diagnostics once the phys var
+        // is registered.
+        v.phys_vars_.insert_or_assign("fb_good", std::string_view("U32"));
+        curlee::parser::Expr e_good_base;
+        e_good_base.span = s;
+        e_good_base.node = curlee::parser::NameExpr{.name = "fb_good"};
+        curlee::parser::Expr e_read_good;
+        e_read_good.span = s;
+        e_read_good.node = curlee::parser::PhysReadExpr{
+            .base = make_expr_ptr(std::move(e_good_base))};
+        auto r_read_good = v.lower_expr(e_read_good);
+        if (!std::holds_alternative<curlee::verification::ExprValue>(r_read_good))
+        {
+            fail("expected lower_expr(PhysReadExpr) on registered phys var to succeed");
+        }
+
+        curlee::parser::Expr e_w_base;
+        e_w_base.span = s;
+        e_w_base.node = curlee::parser::NameExpr{.name = "fb_good"};
+        curlee::parser::Expr e_w_val;
+        e_w_val.span = s;
+        e_w_val.node = curlee::parser::IntExpr{.lexeme = "1"};
+        curlee::parser::Expr e_write_good;
+        e_write_good.span = s;
+        e_write_good.node = curlee::parser::PhysWriteExpr{
+            .base = make_expr_ptr(std::move(e_w_base)),
+            .value = make_expr_ptr(std::move(e_w_val))};
+        auto r_write_good = v.lower_expr(e_write_good);
+        if (!std::holds_alternative<curlee::verification::ExprValue>(r_write_good))
+        {
+            fail("expected lower_expr(PhysWriteExpr) on registered phys var to succeed");
+        }
+
+        v.phys_vars_.clear();
     }
 
     {

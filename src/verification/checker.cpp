@@ -194,6 +194,33 @@ Diagnostic error_at(Span span, std::string message)
     return d;
 }
 
+/**
+ * @brief True if the phys address lexeme is a plain constant literal.
+ *
+ * Accepts decimal integers and hex literals (0x...) with underscore separators.
+ * This is the verifier's second-line enforcement: the front-end already rejects
+ * non-literals, but the verifier must not trust the AST (defense in depth).
+ */
+bool is_phys_address_literal(std::string_view lexeme)
+{
+    if (lexeme.empty())
+    {
+        return false;
+    }
+    for (std::size_t i = 0; i < lexeme.size(); ++i)
+    {
+        const char c = lexeme[i];
+        const bool is_digit = (c >= '0' && c <= '9');
+        const bool is_hex_digit = (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        const bool is_hex_marker = (c == 'x' || c == 'X') && i == 1 && lexeme[0] == '0';
+        if (!is_digit && c != '_' && !is_hex_digit && !is_hex_marker)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 struct FunctionSig
 {
     const Function* decl = nullptr;
@@ -205,6 +232,10 @@ struct ScopeState
 {
     std::unordered_map<std::string_view, z3::expr> int_vars;
     std::unordered_map<std::string_view, z3::expr> bool_vars;
+    // Phys<T> pointer variables, mapped to their element kind name (e.g. "U32").
+    std::unordered_map<std::string_view, std::string_view> phys_vars;
+    // Names bound from a Phys read() result (opaque values that cannot be contracted).
+    std::unordered_set<std::string_view> opaque_read_vars;
     std::size_t facts_size = 0;
 };
 
@@ -241,12 +272,19 @@ class Verifier
     std::vector<ScopeState> scopes_;
     std::unordered_map<std::string_view, FunctionSig> functions_;
 
+    // Phys<T> pointer variables (name -> element kind name), scoped like int/bool vars.
+    std::unordered_map<std::string_view, std::string_view> phys_vars_;
+    // Names bound from a Phys read() result; contracts referencing these cannot be proven.
+    std::unordered_set<std::string_view> opaque_read_vars_;
+
     void push_scope()
     {
         scopes_.emplace_back();
         auto& state = scopes_.back();
         state.int_vars = lower_ctx_.int_vars;
         state.bool_vars = lower_ctx_.bool_vars;
+        state.phys_vars = phys_vars_;
+        state.opaque_read_vars = opaque_read_vars_;
         state.facts_size = facts_.size();
     }
 
@@ -260,6 +298,8 @@ class Verifier
         scopes_.pop_back();
         lower_ctx_.int_vars = state.int_vars;
         lower_ctx_.bool_vars = state.bool_vars;
+        phys_vars_ = state.phys_vars;
+        opaque_read_vars_ = state.opaque_read_vars;
         if (facts_.size() > state.facts_size)
         {
             facts_.erase(facts_.begin() + static_cast<std::ptrdiff_t>(state.facts_size),
@@ -277,11 +317,12 @@ class Verifier
             return TypeKind::Unit;
         }
 
-        // Physical memory pointers are freestanding-only; verification treats them as
-        // uninterpreted (opaque) values, matching the trusted-deref follow-up issue.
+        // Physical memory pointers are freestanding-only. Verification models them as opaque
+        // Z3 sorts (one per element kind) with uninterpreted read/write functions, so they
+        // are a distinct TypeKind here (not Unit like capabilities).
         if (name.name == "Phys")
         {
-            return TypeKind::Unit;
+            return TypeKind::Phys;
         }
 
         auto t = curlee::types::core_type_from_name(name.name);
@@ -349,6 +390,15 @@ class Verifier
         {
             return ExprValue{it->second, TypeKind::Bool, false};
         }
+        // Phys<T> pointers are opaque values; a bare name reference lowers to a constant of
+        // the opaque sort (used as the base of read()/write()).
+        if (auto it = phys_vars_.find(name); it != phys_vars_.end())
+        {
+            const std::string const_name = std::string("phys_var_") + std::string(name);
+            const z3::sort& sort = phys_sort(it->second);
+            return ExprValue{solver_.context().constant(const_name.c_str(), sort), TypeKind::Phys,
+                             false};
+        }
         return std::nullopt;
     }
 
@@ -369,12 +419,144 @@ class Verifier
         }
     }
 
+    // One fresh opaque Z3 sort per Phys element kind (e.g. "PhysU32").
+    std::unordered_map<std::string_view, z3::sort> phys_sorts_;
+    // Uninterpreted read function per element kind: phys_read : Phys<T> -> T.
+    std::unordered_map<std::string_view, z3::func_decl> phys_read_fns_;
+    // Uninterpreted write function per element kind: phys_write : Phys<T> x T -> Unit.
+    std::unordered_map<std::string_view, z3::func_decl> phys_write_fns_;
+
+    const z3::sort& phys_sort(std::string_view element_kind)
+    {
+        auto it = phys_sorts_.find(element_kind);
+        if (it != phys_sorts_.end())
+        {
+            return it->second;
+        }
+        const std::string name = "Phys" + std::string(element_kind);
+        auto [inserted_it, _] = phys_sorts_.emplace(
+            element_kind, solver_.context().uninterpreted_sort(name.c_str()));
+        return inserted_it->second;
+    }
+
+    const z3::func_decl& phys_read_fn(std::string_view element_kind)
+    {
+        auto it = phys_read_fns_.find(element_kind);
+        if (it != phys_read_fns_.end())
+        {
+            return it->second;
+        }
+        auto& ctx = solver_.context();
+        const std::string name = "phys_read_" + std::string(element_kind);
+        // phys_read : Phys<T> -> Int. Values are opaque; no axioms constrain them.
+        const z3::sort& sort = phys_sort(element_kind);
+        auto [inserted_it, _] =
+            phys_read_fns_.emplace(element_kind, ctx.function(name.c_str(), sort, ctx.int_sort()));
+        return inserted_it->second;
+    }
+
+    const z3::func_decl& phys_write_fn(std::string_view element_kind)
+    {
+        auto it = phys_write_fns_.find(element_kind);
+        if (it != phys_write_fns_.end())
+        {
+            return it->second;
+        }
+        auto& ctx = solver_.context();
+        const std::string name = "phys_write_" + std::string(element_kind);
+        // phys_write : Phys<T> x Int -> Unit. No axioms relate it to read().
+        const z3::sort& sort = phys_sort(element_kind);
+        auto [inserted_it, _] = phys_write_fns_.emplace(
+            element_kind, ctx.function(name.c_str(), sort, ctx.int_sort(), ctx.int_sort()));
+        return inserted_it->second;
+    }
+
+    std::optional<std::string_view> lookup_phys_var(std::string_view name)
+    {
+        if (auto it = phys_vars_.find(name); it != phys_vars_.end())
+        {
+            return it->second;
+        }
+        return std::nullopt;
+    }
+
+    bool pred_mentions_opaque_read(const curlee::parser::Pred& pred) const
+    {
+        bool found = false;
+        std::visit(
+            [&](const auto& node)
+            {
+                using Node = std::decay_t<decltype(node)>;
+                if constexpr (std::is_same_v<Node, curlee::parser::PredName>)
+                {
+                    if (opaque_read_vars_.count(node.name) != 0)
+                    {
+                        found = true;
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PredUnary>)
+                {
+                    if (node.rhs != nullptr && pred_mentions_opaque_read(*node.rhs))
+                    {
+                        found = true;
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PredBinary>)
+                {
+                    if (node.lhs != nullptr && pred_mentions_opaque_read(*node.lhs))
+                    {
+                        found = true;
+                    }
+                    if (node.rhs != nullptr && pred_mentions_opaque_read(*node.rhs))
+                    {
+                        found = true;
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PredGroup>)
+                {
+                    if (node.inner != nullptr && pred_mentions_opaque_read(*node.inner))
+                    {
+                        found = true;
+                    }
+                }
+            },
+            pred.node);
+        return found;
+    }
+
+    // Resolve the element kind name of a Phys base expression: either a NameExpr bound to a
+    // Phys<T> variable, or a direct PhysExpr literal.
+    std::string_view base_phys_element_kind(const Expr& base)
+    {
+        if (const auto* name = std::get_if<NameExpr>(&base.node))
+        {
+            if (auto found = lookup_phys_var(name->name); found.has_value())
+            {
+                return *found;
+            }
+            return {};
+        }
+        if (const auto* phys = std::get_if<curlee::parser::PhysExpr>(&base.node))
+        {
+            return phys->element_kind;
+        }
+        return {};
+    }
+
     void add_fact(const curlee::parser::Pred& pred)
     {
         auto lowered = lower_predicate(pred, lower_ctx_);
         if (std::holds_alternative<Diagnostic>(lowered))
         {
-            diags_.push_back(std::get<Diagnostic>(std::move(lowered)));
+            auto d = std::get<Diagnostic>(std::move(lowered));
+            if (pred_mentions_opaque_read(pred))
+            {
+                Related note;
+                note.message = "MMIO read is opaque; cannot prove this contract";
+                note.span = std::nullopt;
+                d.notes.push_back(std::move(note));
+            }
+            diags_.push_back(std::move(d));
             return;
         }
         facts_.push_back(std::get<z3::expr>(lowered));
@@ -527,6 +709,87 @@ class Verifier
                     }
 
                     return error_at(e.span, "unsupported binary operator in expression");
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PhysExpr>)
+                {
+                    // Second-line enforcement: the address must be a constant literal.
+                    // The front-end guarantees this, but the verifier does not trust the AST.
+                    if (!is_phys_address_literal(node.lexeme))
+                    {
+                        return error_at(e.span, "physical address must be a constant literal");
+                    }
+                    const auto elem_kind =
+                        curlee::types::phys_element_kind_from_name(node.element_kind);
+                    if (!elem_kind.has_value())
+                    {
+                        return error_at(e.span, "unsupported Phys element kind '" +
+                                                    std::string(node.element_kind) + "'");
+                    }
+                    // Lower to a constant of the opaque sort. The constant name embeds the
+                    // element kind and the address lexeme so distinct addresses stay distinct.
+                    const std::string const_name = "phys_" + std::string(node.element_kind) + "_" +
+                                                   std::string(node.lexeme);
+                    const z3::sort& sort = phys_sort(node.element_kind);
+                    return ExprValue{solver_.context().constant(const_name.c_str(), sort),
+                                     TypeKind::Phys, true};
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PhysReadExpr>)
+                {
+                    // read() lowers to the uninterpreted function phys_read : Phys<T> -> T.
+                    // No axioms constrain it, so the returned value is opaque to the solver.
+                    if (node.base == nullptr) // GCOVR_EXCL_LINE
+                    {
+                        return error_at(e.span, "missing Phys base in read()"); // GCOVR_EXCL_LINE
+                    }
+                    auto base_res = lower_expr(*node.base);
+                    if (std::holds_alternative<Diagnostic>(base_res))
+                    {
+                        return std::get<Diagnostic>(base_res);
+                    }
+                    auto base = std::get<ExprValue>(base_res);
+                    if (base.kind != TypeKind::Phys)
+                    {
+                        return error_at(e.span, "read() can only be called on a Phys<T> value");
+                    }
+                    const std::string_view elem = base_phys_element_kind(*node.base);
+                    if (elem.empty())
+                    {
+                        return error_at(e.span, "cannot determine Phys element kind");
+                    }
+                    return ExprValue{phys_read_fn(elem)(base.expr), TypeKind::Int, false};
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PhysWriteExpr>)
+                {
+                    // write(v) lowers to the uninterpreted function phys_write : Phys<T> x T ->
+                    // Unit. No axioms relate it to read(), so writes are opaque too.
+                    if (node.base == nullptr || node.value == nullptr) // GCOVR_EXCL_LINE
+                    {
+                        return error_at(e.span, "missing Phys base or value in write()"); // GCOVR_EXCL_LINE
+                    }
+                    auto base_res = lower_expr(*node.base);
+                    if (std::holds_alternative<Diagnostic>(base_res))
+                    {
+                        return std::get<Diagnostic>(base_res);
+                    }
+                    auto base = std::get<ExprValue>(base_res);
+                    if (base.kind != TypeKind::Phys)
+                    {
+                        return error_at(e.span, "write() can only be called on a Phys<T> value");
+                    }
+                    auto value_res = lower_expr(*node.value);
+                    if (std::holds_alternative<Diagnostic>(value_res))
+                    {
+                        return std::get<Diagnostic>(value_res);
+                    }
+                    auto value = std::get<ExprValue>(value_res);
+                    const std::string_view elem = base_phys_element_kind(*node.base);
+                    if (elem.empty())
+                    {
+                        return error_at(e.span, "cannot determine Phys element kind");
+                    }
+                    // Unit result: represent with a dummy Bool true (Unit is not a Z3 sort).
+                    (void)phys_write_fn(elem)(base.expr, value.expr);
+                    return ExprValue{solver_.context().bool_val(true), TypeKind::Unit, false};
                 }
                 else if constexpr (std::is_same_v<Node, CallExpr>)
                 {
@@ -682,7 +945,15 @@ class Verifier
             auto lowered = lower_predicate(req, call_ctx);
             if (std::holds_alternative<Diagnostic>(lowered))
             {
-                diags_.push_back(std::get<Diagnostic>(std::move(lowered)));
+                auto d = std::get<Diagnostic>(std::move(lowered));
+                if (pred_mentions_opaque_read(req))
+                {
+                    Related note;
+                    note.message = "MMIO read is opaque; cannot prove this contract";
+                    note.span = std::nullopt;
+                    d.notes.push_back(std::move(note));
+                }
+                diags_.push_back(std::move(d));
                 continue;
             }
 
@@ -829,7 +1100,15 @@ class Verifier
             auto lowered_pred = lower_predicate(ens, ensure_ctx);
             if (std::holds_alternative<Diagnostic>(lowered_pred))
             {
-                diags_.push_back(std::get<Diagnostic>(std::move(lowered_pred)));
+                auto d = std::get<Diagnostic>(std::move(lowered_pred));
+                if (pred_mentions_opaque_read(ens))
+                {
+                    Related note;
+                    note.message = "MMIO read is opaque; cannot prove this contract";
+                    note.span = std::nullopt;
+                    d.notes.push_back(std::move(note));
+                }
+                diags_.push_back(std::move(d));
                 continue;
             }
 
@@ -849,6 +1128,29 @@ class Verifier
         // Verification scope only reasons about Int/Bool values.
         // Non-scalar bindings (e.g. structs/enums) are allowed as long as we don't
         // attach refinements to them, since we can't lower them into the solver.
+
+        // A Phys<T> binding names an opaque pointer value. Record its element kind so that
+        // read()/write() can be lowered as uninterpreted functions.
+        if (s.type.name == "Phys")
+        {
+            if (s.type.type_arg.has_value())
+            {
+                phys_vars_.insert_or_assign(s.name, *s.type.type_arg);
+            }
+            // Re-validate the address is a constant literal inside the verifier (defense in
+            // depth: the front-end enforces this, but the verifier must not trust the AST).
+            if (const auto* phys = std::get_if<curlee::parser::PhysExpr>(&s.value.node))
+            {
+                if (!is_phys_address_literal(phys->lexeme))
+                {
+                    diags_.push_back(
+                        error_at(s.value.span, "physical address must be a constant literal"));
+                }
+            }
+            check_expr_for_calls(s.value);
+            return;
+        }
+
         const auto core_t = curlee::types::core_type_from_name(s.type.name);
         if (!core_t.has_value())
         {
@@ -878,6 +1180,24 @@ class Verifier
         if (is_phys_element_kind(core_t->kind))
         {
             // Uninterpreted: do not declare a solver variable, but still scan for calls.
+            // If the value comes from a Phys read(), the binding is an opaque value that
+            // contracts cannot depend on.
+            if (std::holds_alternative<curlee::parser::PhysReadExpr>(s.value.node))
+            {
+                opaque_read_vars_.insert(s.name);
+            }
+            // A refinement on an opaque read value cannot be proven; surface it as a hard
+            // diagnostic with the opaque-value note rather than silently passing.
+            if (s.refinement.has_value() && pred_mentions_opaque_read(*s.refinement))
+            {
+                auto d = error_at(s.refinement->span,
+                                  "cannot prove refinement on opaque MMIO read value");
+                Related note;
+                note.message = "MMIO read is opaque; cannot prove this contract";
+                note.span = std::nullopt;
+                d.notes.push_back(std::move(note));
+                diags_.push_back(std::move(d));
+            }
             check_expr_for_calls(s.value);
             return;
         }
@@ -1026,6 +1346,8 @@ class Verifier
         lower_ctx_.result_bool.reset();
         lower_ctx_.int_vars.clear();
         lower_ctx_.bool_vars.clear();
+        phys_vars_.clear();
+        opaque_read_vars_.clear();
         facts_.clear();
         scopes_.clear();
 
@@ -1034,6 +1356,14 @@ class Verifier
         {
             const auto& param = f.params[i];
             const auto param_kind = sig_it->second.params[i];
+
+            // Phys<T> parameters are opaque pointers; record their element kind so that
+            // read()/write() on the parameter can be lowered.
+            if (param_kind == TypeKind::Phys && param.type.type_arg.has_value())
+            {
+                phys_vars_.insert_or_assign(param.name, *param.type.type_arg);
+            }
+
             declare_var(param.name, param_kind);
 
             if (param.refinement.has_value())

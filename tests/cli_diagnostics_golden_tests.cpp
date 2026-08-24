@@ -898,6 +898,10 @@ int main(int argc, char** argv)
     const fs::path rel_type_error = fs::path("tests/fixtures/check_type_error.curlee");
     const fs::path rel_struct_ok = fs::path("tests/fixtures/check_struct_ok.curlee");
     const fs::path rel_ensures_fail = fs::path("tests/fixtures/check_ensures_fail.curlee");
+    const fs::path rel_phys_framebuffer =
+        fs::path("tests/fixtures/check_phys_framebuffer.curlee");
+    const fs::path rel_phys_read_contract =
+        fs::path("tests/fixtures/check_phys_read_contract.curlee");
     const fs::path rel_phys_mem_ok = fs::path("tests/fixtures/check_phys_mem_ok.curlee");
     const fs::path rel_phys_non_literal_addr =
         fs::path("tests/fixtures/check_phys_non_literal_addr.curlee");
@@ -1086,6 +1090,25 @@ int main(int argc, char** argv)
         if (!run_stderr_case("check-phys-read-non-phys",
                              {"curlee", "check", rel_phys_read_non_phys.string()},
                              dir / "check_phys_read_non_phys.golden",
+                             false))
+        {
+            return 1;
+        }
+
+        // Verifier: trusted/opaque Phys<T> deref semantics (issue #253). The positive
+        // framebuffer fixture must pass with zero obligations; the read-contract fixture must
+        // fail with the opaque-value note.
+        if (!run_stderr_case("check-phys-framebuffer",
+                             {"curlee", "check", rel_phys_framebuffer.string()},
+                             dir / "check_phys_framebuffer.golden",
+                             true))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("check-phys-read-contract",
+                             {"curlee", "check", rel_phys_read_contract.string()},
+                             dir / "check_phys_read_contract.golden",
                              false))
         {
             return 1;

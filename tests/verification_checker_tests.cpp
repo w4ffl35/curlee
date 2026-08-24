@@ -866,6 +866,33 @@ int main()
         }
     }
 
+    {
+        // Phys<T> read values are opaque: a refinement on a read() result cannot be proven and
+        // must fail with the opaque-value note (issue #253, documented restriction).
+        const std::string source = "fn main(pm: cap phys.mem) -> Int {\n"
+                                   "  unsafe {\n"
+                                   "    let reg: Phys<U32> = phys<U32>(0xFE00_0000);\n"
+                                   "    let v: U32 where v > 0 = reg.read();\n"
+                                   "  }\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "Phys opaque read contract test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for opaque MMIO read contract");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "cannot prove refinement on opaque MMIO read value"))
+        {
+            fail("expected opaque-read refinement diagnostic");
+        }
+        if (!any_note_has_substr(diags, "MMIO read is opaque; cannot prove this contract"))
+        {
+            fail("expected opaque-read note attached to diagnostic");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }
