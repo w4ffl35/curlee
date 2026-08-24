@@ -1,0 +1,10 @@
+tests/fixtures/check_phys_read_requires.curlee:2:12: error: cannot prove contract on opaque MMIO read value
+  |
+  |   requires x > 0;
+  |            ^^^^^
+note: MMIO read is opaque; cannot prove this contract
+tests/fixtures/check_phys_read_requires.curlee:11:20: error: cannot prove call contract on opaque MMIO read argument
+  |
+  |     return consume(v);
+  |                    ^
+note: MMIO read is opaque; cannot prove this contract

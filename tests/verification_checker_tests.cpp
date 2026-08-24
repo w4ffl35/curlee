@@ -893,6 +893,98 @@ int main()
         }
     }
 
+    {
+        // Opaque provenance is transitive: a refinement on an alias of a read() result must
+        // also fail (review gap #3).
+        const std::string source = "fn main(pm: cap phys.mem) -> Int {\n"
+                                   "  unsafe {\n"
+                                   "    let reg: Phys<U32> = phys<U32>(0xFE00_0000);\n"
+                                   "    let v: U32 = reg.read();\n"
+                                   "    let w: U32 = v;\n"
+                                   "    let x: U32 where x > 0 = w;\n"
+                                   "  }\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "Phys opaque read transitive alias test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for transitive opaque alias refinement");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "cannot prove refinement on opaque MMIO read value"))
+        {
+            fail("expected opaque-read refinement diagnostic for transitive alias");
+        }
+        if (!any_note_has_substr(diags, "MMIO read is opaque; cannot prove this contract"))
+        {
+            fail("expected opaque-read note for transitive alias");
+        }
+    }
+
+    {
+        // An opaque read value must never silently satisfy a requires-guarded call with an
+        // unsigned parameter (review gap #1).
+        const std::string source = "fn consume(x: U32) -> Int [\n"
+                                   "  requires x > 0;\n"
+                                   "] {\n"
+                                   "  return 0;\n"
+                                   "}\n"
+                                   "fn main(pm: cap phys.mem) -> Int {\n"
+                                   "  unsafe {\n"
+                                   "    let reg: Phys<U32> = phys<U32>(0xFE00_0000);\n"
+                                   "    let v: U32 = reg.read();\n"
+                                   "    return consume(v);\n"
+                                   "  }\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "Phys opaque read requires-call test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for requires-guarded call on opaque read");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "opaque MMIO read"))
+        {
+            fail("expected opaque-read diagnostic for requires-guarded call");
+        }
+        if (!any_note_has_substr(diags, "MMIO read is opaque; cannot prove this contract"))
+        {
+            fail("expected opaque-read note for requires-guarded call");
+        }
+    }
+
+    {
+        // A function returning an opaque read value cannot satisfy `ensures result > 0`
+        // (review gap #2).
+        const std::string source = "fn read_reg(pm: cap phys.mem) -> U32 [\n"
+                                   "  ensures result > 0;\n"
+                                   "] {\n"
+                                   "  unsafe {\n"
+                                   "    let reg: Phys<U32> = phys<U32>(0xFE00_0000);\n"
+                                   "    return reg.read();\n"
+                                   "  }\n"
+                                   "}\n"
+                                   "fn main() -> Int {\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "Phys opaque read ensures-result test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected verification to fail for ensures on opaque read result");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "cannot prove ensures on opaque MMIO read result"))
+        {
+            fail("expected opaque-read ensures diagnostic");
+        }
+        if (!any_note_has_substr(diags, "MMIO read is opaque; cannot prove this contract"))
+        {
+            fail("expected opaque-read note for ensures");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

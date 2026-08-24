@@ -332,7 +332,8 @@ class Verifier
             return std::nullopt;
         }
 
-        if (t->kind == TypeKind::Int || t->kind == TypeKind::Bool || t->kind == TypeKind::Unit)
+        if (t->kind == TypeKind::Int || t->kind == TypeKind::Bool || t->kind == TypeKind::Unit ||
+            is_phys_element_kind(t->kind))
         {
             return t->kind;
         }
@@ -524,6 +525,51 @@ class Verifier
         return found;
     }
 
+    // True if a predicate mentions the special `result` symbol.
+    bool pred_mentions_result(const curlee::parser::Pred& pred) const
+    {
+        bool found = false;
+        std::visit(
+            [&](const auto& node)
+            {
+                using Node = std::decay_t<decltype(node)>;
+                if constexpr (std::is_same_v<Node, curlee::parser::PredName>)
+                {
+                    if (node.name == "result")
+                    {
+                        found = true;
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PredUnary>)
+                {
+                    if (node.rhs != nullptr && pred_mentions_result(*node.rhs))
+                    {
+                        found = true;
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PredBinary>)
+                {
+                    if (node.lhs != nullptr && pred_mentions_result(*node.lhs))
+                    {
+                        found = true;
+                    }
+                    if (node.rhs != nullptr && pred_mentions_result(*node.rhs))
+                    {
+                        found = true;
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PredGroup>)
+                {
+                    if (node.inner != nullptr && pred_mentions_result(*node.inner))
+                    {
+                        found = true;
+                    }
+                }
+            },
+            pred.node);
+        return found;
+    }
+
     // Resolve the element kind name of a Phys base expression: either a NameExpr bound to a
     // Phys<T> variable, or a direct PhysExpr literal.
     std::string_view base_phys_element_kind(const Expr& base)
@@ -543,20 +589,74 @@ class Verifier
         return {};
     }
 
+    // True if an expression derives from an opaque MMIO read, transitively. A value is opaque
+    // if it is a PhysReadExpr, or a NameExpr bound to an opaque read (directly or via aliases),
+    // or a compound expression containing one.
+    bool expr_is_opaque_read(const Expr& e) const
+    {
+        return std::visit(
+            [&](const auto& node) -> bool
+            {
+                using Node = std::decay_t<decltype(node)>;
+                if constexpr (std::is_same_v<Node, curlee::parser::PhysReadExpr>)
+                {
+                    return true;
+                }
+                else if constexpr (std::is_same_v<Node, NameExpr>)
+                {
+                    return opaque_read_vars_.count(node.name) != 0;
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::GroupExpr>)
+                {
+                    return node.inner != nullptr && expr_is_opaque_read(*node.inner);
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::UnaryExpr>)
+                {
+                    return node.rhs != nullptr && expr_is_opaque_read(*node.rhs);
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::BinaryExpr>)
+                {
+                    if (node.lhs != nullptr && expr_is_opaque_read(*node.lhs))
+                    {
+                        return true;
+                    }
+                    return node.rhs != nullptr && expr_is_opaque_read(*node.rhs);
+                }
+                return false;
+            },
+            e.node);
+    }
+
+    void add_opaque_read_note(Diagnostic& d)
+    {
+        Related note;
+        note.message = "MMIO read is opaque; cannot prove this contract";
+        note.span = std::nullopt;
+        d.notes.push_back(std::move(note));
+    }
+
+    // Hard diagnostic for a contract that mentions an opaque MMIO read value. The build must
+    // fail rather than silently accept an unprovable contract.
+    void reject_opaque_read_contract(Span span, std::string_view message)
+    {
+        auto d = error_at(span, std::string(message));
+        add_opaque_read_note(d);
+        diags_.push_back(std::move(d));
+    }
+
     void add_fact(const curlee::parser::Pred& pred)
     {
+        // Opaque MMIO read values can never satisfy a contract: reject unconditionally
+        // before attempting to lower, so no opaque-derived contract can silently pass.
+        if (pred_mentions_opaque_read(pred))
+        {
+            reject_opaque_read_contract(pred.span, "cannot prove contract on opaque MMIO read value");
+            return;
+        }
         auto lowered = lower_predicate(pred, lower_ctx_);
         if (std::holds_alternative<Diagnostic>(lowered))
         {
-            auto d = std::get<Diagnostic>(std::move(lowered));
-            if (pred_mentions_opaque_read(pred))
-            {
-                Related note;
-                note.message = "MMIO read is opaque; cannot prove this contract";
-                note.span = std::nullopt;
-                d.notes.push_back(std::move(note));
-            }
-            diags_.push_back(std::move(d));
+            diags_.push_back(std::get<Diagnostic>(std::move(lowered)));
             return;
         }
         facts_.push_back(std::get<z3::expr>(lowered));
@@ -888,11 +988,33 @@ class Verifier
             return;
         }
 
+        // An opaque MMIO read value must never flow into a contract silently. Check argument
+        // provenance before the MVP gate so that a call like consume(reg.read()) with a
+        // requires-guarded unsigned parameter is a hard error, not a silent skip.
+        bool arg_is_opaque = false;
+        for (const auto& arg : call.args)
+        {
+            if (expr_is_opaque_read(arg))
+            {
+                arg_is_opaque = true;
+                break;
+            }
+        }
+
         // MVP: only reason about calls whose arguments are entirely Int/Bool.
         for (const auto k : sig.params)
         {
             if (k != TypeKind::Int && k != TypeKind::Bool)
             {
+                // The callee has non-scalar parameters (e.g. unsigned element kinds). If an
+                // argument derives from an opaque MMIO read, any contract on that parameter
+                // cannot be proven - fail loudly instead of silently skipping.
+                if (arg_is_opaque)
+                {
+                    const Span span = call.args.empty() ? Span{} : call.args[0].span;
+                    reject_opaque_read_contract(span,
+                                                "cannot prove call contract on opaque MMIO read argument");
+                }
                 return;
             }
         }
@@ -942,18 +1064,18 @@ class Verifier
 
         for (const auto& req : sig.decl->requires_clauses)
         {
+            // A requires clause mentioning an opaque MMIO read value can never be proven;
+            // reject unconditionally before lowering.
+            if (pred_mentions_opaque_read(req))
+            {
+                reject_opaque_read_contract(req.span,
+                                            "cannot prove requires on opaque MMIO read value");
+                continue;
+            }
             auto lowered = lower_predicate(req, call_ctx);
             if (std::holds_alternative<Diagnostic>(lowered))
             {
-                auto d = std::get<Diagnostic>(std::move(lowered));
-                if (pred_mentions_opaque_read(req))
-                {
-                    Related note;
-                    note.message = "MMIO read is opaque; cannot prove this contract";
-                    note.span = std::nullopt;
-                    d.notes.push_back(std::move(note));
-                }
-                diags_.push_back(std::move(d));
+                diags_.push_back(std::get<Diagnostic>(std::move(lowered)));
                 continue;
             }
 
@@ -1073,8 +1195,30 @@ class Verifier
         }
 
         auto value = std::get<ExprValue>(lowered);
-        if (value.kind != expected_return)
+        // An opaque MMIO read lowers to an Int-typed Z3 term; accept it for unsigned element
+        // kind returns (U8/U16/U32/U64) so the ensures check can run below.
+        const bool opaque_unsigned_return =
+            is_phys_element_kind(expected_return) && value.kind == TypeKind::Int &&
+            expr_is_opaque_read(*s.value);
+        if (value.kind != expected_return && !opaque_unsigned_return)
         {
+            return;
+        }
+
+        // A function returning an opaque MMIO read value has an unprovable `result`: any
+        // ensures clause mentioning it must be rejected with the opaque note, never silently
+        // satisfied.
+        const bool result_is_opaque = expr_is_opaque_read(*s.value);
+        if (result_is_opaque)
+        {
+            for (const auto& ens : func->ensures)
+            {
+                if (pred_mentions_result(ens))
+                {
+                    reject_opaque_read_contract(ens.span,
+                                                "cannot prove ensures on opaque MMIO read result");
+                }
+            }
             return;
         }
 
@@ -1100,15 +1244,7 @@ class Verifier
             auto lowered_pred = lower_predicate(ens, ensure_ctx);
             if (std::holds_alternative<Diagnostic>(lowered_pred))
             {
-                auto d = std::get<Diagnostic>(std::move(lowered_pred));
-                if (pred_mentions_opaque_read(ens))
-                {
-                    Related note;
-                    note.message = "MMIO read is opaque; cannot prove this contract";
-                    note.span = std::nullopt;
-                    d.notes.push_back(std::move(note));
-                }
-                diags_.push_back(std::move(d));
+                diags_.push_back(std::get<Diagnostic>(std::move(lowered_pred)));
                 continue;
             }
 
@@ -1180,9 +1316,11 @@ class Verifier
         if (is_phys_element_kind(core_t->kind))
         {
             // Uninterpreted: do not declare a solver variable, but still scan for calls.
-            // If the value comes from a Phys read(), the binding is an opaque value that
-            // contracts cannot depend on.
-            if (std::holds_alternative<curlee::parser::PhysReadExpr>(s.value.node))
+            // Opaque provenance is transitive: a binding whose initializer derives from a
+            // Phys read() (directly or via an alias chain) is itself opaque and must not be
+            // contractable.
+            if (std::holds_alternative<curlee::parser::PhysReadExpr>(s.value.node) ||
+                expr_is_opaque_read(s.value))
             {
                 opaque_read_vars_.insert(s.name);
             }
@@ -1190,13 +1328,8 @@ class Verifier
             // diagnostic with the opaque-value note rather than silently passing.
             if (s.refinement.has_value() && pred_mentions_opaque_read(*s.refinement))
             {
-                auto d = error_at(s.refinement->span,
-                                  "cannot prove refinement on opaque MMIO read value");
-                Related note;
-                note.message = "MMIO read is opaque; cannot prove this contract";
-                note.span = std::nullopt;
-                d.notes.push_back(std::move(note));
-                diags_.push_back(std::move(d));
+                reject_opaque_read_contract(s.refinement->span,
+                                            "cannot prove refinement on opaque MMIO read value");
             }
             check_expr_for_calls(s.value);
             return;
@@ -1362,6 +1495,14 @@ class Verifier
             if (param_kind == TypeKind::Phys && param.type.type_arg.has_value())
             {
                 phys_vars_.insert_or_assign(param.name, *param.type.type_arg);
+            }
+
+            // Unsigned element-kind parameters are opaque: a refinement/requires on them
+            // cannot be proven, so mark them opaque to route any such contract to the hard
+            // opaque-read diagnostic.
+            if (is_phys_element_kind(param_kind))
+            {
+                opaque_read_vars_.insert(param.name);
             }
 
             declare_var(param.name, param_kind);

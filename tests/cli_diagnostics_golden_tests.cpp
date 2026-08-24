@@ -902,6 +902,8 @@ int main(int argc, char** argv)
         fs::path("tests/fixtures/check_phys_framebuffer.curlee");
     const fs::path rel_phys_read_contract =
         fs::path("tests/fixtures/check_phys_read_contract.curlee");
+    const fs::path rel_phys_read_requires =
+        fs::path("tests/fixtures/check_phys_read_requires.curlee");
     const fs::path rel_phys_mem_ok = fs::path("tests/fixtures/check_phys_mem_ok.curlee");
     const fs::path rel_phys_non_literal_addr =
         fs::path("tests/fixtures/check_phys_non_literal_addr.curlee");
@@ -1109,6 +1111,14 @@ int main(int argc, char** argv)
         if (!run_stderr_case("check-phys-read-contract",
                              {"curlee", "check", rel_phys_read_contract.string()},
                              dir / "check_phys_read_contract.golden",
+                             false))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("check-phys-read-requires",
+                             {"curlee", "check", rel_phys_read_requires.string()},
+                             dir / "check_phys_read_requires.golden",
                              false))
         {
             return 1;
