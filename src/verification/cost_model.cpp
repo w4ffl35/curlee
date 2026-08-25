@@ -37,6 +37,7 @@ using curlee::parser::NameExpr;
 using curlee::parser::PhysExpr;
 using curlee::parser::PhysReadExpr;
 using curlee::parser::PhysWriteExpr;
+using curlee::parser::PortIOExpr;
 using curlee::parser::ReturnStmt;
 using curlee::parser::ScopedNameExpr;
 using curlee::parser::Stmt;
@@ -435,6 +436,22 @@ CostResult CostModel::cost_expr(const Expr& expr, const LoweringContext& ctx,
                     return std::get<Diagnostic>(std::move(value));
                 }
                 return ctx.ctx.int_val(1) + std::get<z3::expr>(base) + std::get<z3::expr>(value);
+            }
+            else if constexpr (std::is_same_v<Node, PortIOExpr>)
+            {
+                // port_in*: constant port load (1) + the `in` instruction (1).
+                // port_out*: constant port load (1) + the `out` instruction (1)
+                // plus the value expression cost.
+                if (node.value == nullptr)
+                {
+                    return ctx.ctx.int_val(2);
+                }
+                auto value = cost_expr(*node.value, ctx, fuel_table);
+                if (std::holds_alternative<Diagnostic>(value))
+                {
+                    return std::get<Diagnostic>(std::move(value));
+                }
+                return ctx.ctx.int_val(2) + std::get<z3::expr>(value);
             }
             // Leaf nodes: flat instruction cost.
             return CostResult{ctx.ctx.int_val(static_cast<int>(leaf_instruction_cost(expr)))};
