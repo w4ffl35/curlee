@@ -1,0 +1,4 @@
+tests/fixtures/check_io_port_outside_unsafe.curlee:3:15: error: port I/O access requires an unsafe block
+  |
+  |   let v: U8 = port_inb(0x3FD);
+  |               ^^^^^^^^^^^^^^^

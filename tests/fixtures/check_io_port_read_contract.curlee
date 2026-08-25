@@ -1,0 +1,8 @@
+// Port reads are opaque: a contract cannot see through them (mirrors Phys<T>).
+// A refinement on a port_inb result must be rejected, never silently proven.
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let v: U8 where v > 0 = port_inb(0x3FD);
+  }
+  return 0;
+}

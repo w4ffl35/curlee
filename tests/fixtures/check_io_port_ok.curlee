@@ -1,0 +1,12 @@
+// COM1 serial port I/O (issue #269): mirrors putc_driver.c.
+// port_outb to the line-control register, an opaque port_inb read of the
+// line-status register, then port_outb of the byte to the transmit-hold
+// register. Verifies with zero obligations: port reads are trusted/opaque.
+fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    port_outb(0x3FB, 0x03);        // LCR: 8N1
+    let lsr: U8 = port_inb(0x3FD); // LSR (opaque read)
+    port_outb(0x3F8, lsr);         // THR: write the read byte back
+  }
+  return;
+}

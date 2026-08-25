@@ -1,0 +1,5 @@
+// Port I/O outside an unsafe block must be a hard error (mirrors Phys<T>).
+fn main(pm: cap phys.mem) -> Unit {
+  let v: U8 = port_inb(0x3FD);
+  return;
+}

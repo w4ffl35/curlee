@@ -1,0 +1,4 @@
+tests/fixtures/check_io_port_value_type.curlee:5:5: error: port I/O value type mismatch for 'port_outb': expected U8, got Bool
+  |
+  |     port_outb(0x3F8, b);
+  |     ^^^^^^^^^^^^^^^^^^^

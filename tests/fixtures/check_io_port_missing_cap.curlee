@@ -1,0 +1,7 @@
+// Port I/O without `cap phys.mem` must be a hard error (mirrors Phys<T>).
+fn main() -> Unit {
+  unsafe {
+    let v: U8 = port_inb(0x3FD);
+  }
+  return;
+}

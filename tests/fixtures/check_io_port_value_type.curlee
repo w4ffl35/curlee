@@ -1,0 +1,8 @@
+// The out* value must be of the matching unsigned width (or an Int literal).
+fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let b: Bool = true;
+    port_outb(0x3F8, b);
+  }
+  return;
+}

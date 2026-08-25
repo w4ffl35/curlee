@@ -1,0 +1,5 @@
+tests/fixtures/check_io_port_read_contract.curlee:5:21: error: cannot prove refinement on opaque port I/O read value
+  |
+  |     let v: U8 where v > 0 = port_inb(0x3FD);
+  |                     ^^^^^
+note: port I/O read is opaque; cannot prove this contract
