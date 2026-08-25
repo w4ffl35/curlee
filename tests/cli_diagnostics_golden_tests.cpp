@@ -736,8 +736,8 @@ static bool run_check_struct_ok_case(const fs::path& golden_path)
     return true;
 }
 
-bool check_text_equal(const std::string& label, const fs::path& golden_path,
-                      const std::string& got, const std::string& expected);
+bool check_text_equal(const std::string& label, const fs::path& golden_path, const std::string& got,
+                      const std::string& expected);
 
 static bool run_run_python_ffi_case(std::vector<std::string> argv_storage,
                                     const fs::path& out_golden_path,
@@ -769,8 +769,8 @@ static bool run_run_python_ffi_case(std::vector<std::string> argv_storage,
 
     if (rc != expected_exit_code)
     {
-        std::cerr << "expected exit code " << expected_exit_code << " for " << case_name
-                  << ", got " << rc << "\n";
+        std::cerr << "expected exit code " << expected_exit_code << " for " << case_name << ", got "
+                  << rc << "\n";
         return false;
     }
 
@@ -781,10 +781,8 @@ static bool run_run_python_ffi_case(std::vector<std::string> argv_storage,
     return check_text_equal("stdout", out_golden_path, got_out, expected_out);
 }
 
-bool check_text_equal(const std::string& label,
-                     const fs::path& golden_path,
-                     const std::string& got,
-                     const std::string& expected)
+bool check_text_equal(const std::string& label, const fs::path& golden_path, const std::string& got,
+                      const std::string& expected)
 {
     if (got == expected)
     {
@@ -797,10 +795,8 @@ bool check_text_equal(const std::string& label,
     return false;
 }
 
-bool run_stderr_case(const std::string& case_name,
-                     std::vector<std::string> argv_storage,
-                     const fs::path& err_golden_path,
-                     bool expect_zero)
+bool run_stderr_case(const std::string& case_name, std::vector<std::string> argv_storage,
+                     const fs::path& err_golden_path, bool expect_zero)
 {
     const CapturedRun run = run_cli(std::move(argv_storage));
     if (!check_exit_code(case_name, run.rc, expect_zero))
@@ -812,10 +808,8 @@ bool run_stderr_case(const std::string& case_name,
     return check_text_equal("stderr", err_golden_path, run.err, expected_err);
 }
 
-bool run_stdio_case(const std::string& case_name,
-                    std::vector<std::string> argv_storage,
-                    const fs::path& out_golden_path,
-                    const fs::path& err_golden_path,
+bool run_stdio_case(const std::string& case_name, std::vector<std::string> argv_storage,
+                    const fs::path& out_golden_path, const fs::path& err_golden_path,
                     bool expect_zero)
 {
     const CapturedRun run = run_cli(std::move(argv_storage));
@@ -834,12 +828,9 @@ bool run_stdio_case(const std::string& case_name,
     return check_text_equal("stdout", out_golden_path, run.out, expected_out);
 }
 
-bool run_stdio_case_with_stdin(const std::string& case_name,
-                               std::vector<std::string> argv_storage,
-                               std::string stdin_text,
-                               const fs::path& out_golden_path,
-                               const fs::path& err_golden_path,
-                               bool expect_zero)
+bool run_stdio_case_with_stdin(const std::string& case_name, std::vector<std::string> argv_storage,
+                               std::string stdin_text, const fs::path& out_golden_path,
+                               const fs::path& err_golden_path, bool expect_zero)
 {
     const CapturedRun run = run_cli_with_stdin(std::move(argv_storage), stdin_text);
     if (!check_exit_code(case_name, run.rc, expect_zero))
@@ -857,10 +848,8 @@ bool run_stdio_case_with_stdin(const std::string& case_name,
     return check_text_equal("stdout", out_golden_path, run.out, expected_out);
 }
 
-bool run_stderr_case_with_stdin(const std::string& case_name,
-                                std::vector<std::string> argv_storage,
-                                std::string stdin_text,
-                                const fs::path& err_golden_path,
+bool run_stderr_case_with_stdin(const std::string& case_name, std::vector<std::string> argv_storage,
+                                std::string stdin_text, const fs::path& err_golden_path,
                                 bool expect_zero)
 {
     const CapturedRun run = run_cli_with_stdin(std::move(argv_storage), stdin_text);
@@ -898,10 +887,8 @@ int main(int argc, char** argv)
     const fs::path rel_type_error = fs::path("tests/fixtures/check_type_error.curlee");
     const fs::path rel_struct_ok = fs::path("tests/fixtures/check_struct_ok.curlee");
     const fs::path rel_ensures_fail = fs::path("tests/fixtures/check_ensures_fail.curlee");
-    const fs::path rel_extern_assumed =
-        fs::path("tests/fixtures/check_extern_assumed.curlee");
-    const fs::path rel_phys_framebuffer =
-        fs::path("tests/fixtures/check_phys_framebuffer.curlee");
+    const fs::path rel_extern_assumed = fs::path("tests/fixtures/check_extern_assumed.curlee");
+    const fs::path rel_phys_framebuffer = fs::path("tests/fixtures/check_phys_framebuffer.curlee");
     const fs::path rel_phys_read_contract =
         fs::path("tests/fixtures/check_phys_read_contract.curlee");
     const fs::path rel_phys_read_requires =
@@ -924,6 +911,19 @@ int main(int argc, char** argv)
     const fs::path rel_run_success = fs::path("tests/fixtures/run_success.curlee");
     const fs::path rel_run_read_line_over_limit =
         fs::path("tests/fixtures/run_read_line_over_limit.curlee");
+    const fs::path rel_fuel_straightline_low =
+        fs::path("tests/fixtures/check_fuel_straightline_low.curlee");
+    const fs::path rel_fuel_straightline_ok =
+        fs::path("tests/fixtures/check_fuel_straightline_ok.curlee");
+    const fs::path rel_fuel_loop_no_decreases =
+        fs::path("tests/fixtures/check_fuel_loop_no_decreases.curlee");
+    const fs::path rel_fuel_callgraph_ok =
+        fs::path("tests/fixtures/check_fuel_callgraph_ok.curlee");
+    const fs::path rel_fuel_callgraph_low =
+        fs::path("tests/fixtures/check_fuel_callgraph_low.curlee");
+    const fs::path rel_fuel_extern_ok = fs::path("tests/fixtures/check_fuel_extern_ok.curlee");
+    const fs::path rel_fuel_extern_missing =
+        fs::path("tests/fixtures/check_fuel_extern_missing.curlee");
 
     const fs::path check_requires_divide_golden = dir / "check_requires_divide.golden";
     const fs::path check_refinement_implies_golden = dir / "check_refinement_implies.golden";
@@ -968,58 +968,48 @@ int main(int argc, char** argv)
 
     try
     {
-        if (!run_stderr_case("missing-file",
-                             {"curlee", "lex", rel_missing_file.string()},
-                             dir / "missing_file.golden",
-                             false))
+        if (!run_stderr_case("missing-file", {"curlee", "lex", rel_missing_file.string()},
+                             dir / "missing_file.golden", false))
         {
             return 1;
         }
 
         if (!run_stderr_case("check-requires-divide",
                              {"curlee", "check", rel_requires_divide.string()},
-                             dir / "check_requires_divide.golden",
-                             false))
+                             dir / "check_requires_divide.golden", false))
         {
             return 1;
         }
 
         if (!run_stderr_case("check-refinement-implies",
                              {"curlee", "check", rel_refinement_implies.string()},
-                             dir / "check_refinement_implies.golden",
-                             true))
+                             dir / "check_refinement_implies.golden", true))
         {
             return 1;
         }
 
         if (!run_stderr_case("check-requires-if-path-sensitive",
                              {"curlee", "check", rel_if_path_sensitive.string()},
-                             dir / "check_requires_if_path_sensitive.golden",
-                             true))
+                             dir / "check_requires_if_path_sensitive.golden", true))
         {
             return 1;
         }
 
         if (!run_stderr_case("check-requires-while-condition-fact",
                              {"curlee", "check", rel_while_condition_fact.string()},
-                             dir / "check_requires_while_condition_fact.golden",
-                             true))
+                             dir / "check_requires_while_condition_fact.golden", true))
         {
             return 1;
         }
 
-        if (!run_stderr_case("check-unknown-name",
-                             {"curlee", "check", rel_unknown_name.string()},
-                             dir / "check_unknown_name.golden",
-                             false))
+        if (!run_stderr_case("check-unknown-name", {"curlee", "check", rel_unknown_name.string()},
+                             dir / "check_unknown_name.golden", false))
         {
             return 1;
         }
 
-        if (!run_stderr_case("check-type-error",
-                             {"curlee", "check", rel_type_error.string()},
-                             dir / "check_type_error.golden",
-                             false))
+        if (!run_stderr_case("check-type-error", {"curlee", "check", rel_type_error.string()},
+                             dir / "check_type_error.golden", false))
         {
             return 1;
         }
@@ -1034,67 +1024,57 @@ int main(int argc, char** argv)
             return 1;
         }
 
-        if (!run_stderr_case("check-struct-ok",
-                             {"curlee", "check", rel_struct_ok.string()},
-                             dir / "check_struct_ok.golden",
-                             true))
+        if (!run_stderr_case("check-struct-ok", {"curlee", "check", rel_struct_ok.string()},
+                             dir / "check_struct_ok.golden", true))
         {
             return 1;
         }
 
         // Front-end Phys<T> support (issue #252): positive fixture passes type checking.
-        if (!run_stderr_case("check-phys-mem-ok",
-                             {"curlee", "check", rel_phys_mem_ok.string()},
-                             dir / "check_phys_mem_ok.golden",
-                             true))
+        if (!run_stderr_case("check-phys-mem-ok", {"curlee", "check", rel_phys_mem_ok.string()},
+                             dir / "check_phys_mem_ok.golden", true))
         {
             return 1;
         }
 
         if (!run_stderr_case("check-phys-non-literal-addr",
                              {"curlee", "check", rel_phys_non_literal_addr.string()},
-                             dir / "check_phys_non_literal_addr.golden",
-                             false))
+                             dir / "check_phys_non_literal_addr.golden", false))
         {
             return 1;
         }
 
         if (!run_stderr_case("check-phys-outside-unsafe",
                              {"curlee", "check", rel_phys_outside_unsafe.string()},
-                             dir / "check_phys_outside_unsafe.golden",
-                             false))
+                             dir / "check_phys_outside_unsafe.golden", false))
         {
             return 1;
         }
 
         if (!run_stderr_case("check-phys-missing-cap",
                              {"curlee", "check", rel_phys_missing_cap.string()},
-                             dir / "check_phys_missing_cap.golden",
-                             false))
+                             dir / "check_phys_missing_cap.golden", false))
         {
             return 1;
         }
 
         if (!run_stderr_case("check-phys-arithmetic",
                              {"curlee", "check", rel_phys_arithmetic.string()},
-                             dir / "check_phys_arithmetic.golden",
-                             false))
+                             dir / "check_phys_arithmetic.golden", false))
         {
             return 1;
         }
 
         if (!run_stderr_case("check-phys-string-element",
                              {"curlee", "check", rel_phys_string_element.string()},
-                             dir / "check_phys_string_element.golden",
-                             false))
+                             dir / "check_phys_string_element.golden", false))
         {
             return 1;
         }
 
         if (!run_stderr_case("check-phys-read-non-phys",
                              {"curlee", "check", rel_phys_read_non_phys.string()},
-                             dir / "check_phys_read_non_phys.golden",
-                             false))
+                             dir / "check_phys_read_non_phys.golden", false))
         {
             return 1;
         }
@@ -1104,40 +1084,33 @@ int main(int argc, char** argv)
         // fail with the opaque-value note.
         if (!run_stderr_case("check-phys-framebuffer",
                              {"curlee", "check", rel_phys_framebuffer.string()},
-                             dir / "check_phys_framebuffer.golden",
-                             true))
+                             dir / "check_phys_framebuffer.golden", true))
         {
             return 1;
         }
 
         if (!run_stderr_case("check-phys-read-contract",
                              {"curlee", "check", rel_phys_read_contract.string()},
-                             dir / "check_phys_read_contract.golden",
-                             false))
+                             dir / "check_phys_read_contract.golden", false))
         {
             return 1;
         }
 
         if (!run_stderr_case("check-phys-read-requires",
                              {"curlee", "check", rel_phys_read_requires.string()},
-                             dir / "check_phys_read_requires.golden",
-                             false))
+                             dir / "check_phys_read_requires.golden", false))
         {
             return 1;
         }
 
-        if (!run_stderr_case("run-requires-divide",
-                             {"curlee", "run", rel_requires_divide.string()},
-                             dir / "run_requires_divide.golden",
-                             false))
+        if (!run_stderr_case("run-requires-divide", {"curlee", "run", rel_requires_divide.string()},
+                             dir / "run_requires_divide.golden", false))
         {
             return 1;
         }
 
-        if (!run_stderr_case("check-ensures-fail",
-                             {"curlee", "check", rel_ensures_fail.string()},
-                             dir / "check_ensures_fail.golden",
-                             false))
+        if (!run_stderr_case("check-ensures-fail", {"curlee", "check", rel_ensures_fail.string()},
+                             dir / "check_ensures_fail.golden", false))
         {
             return 1;
         }
@@ -1146,86 +1119,70 @@ int main(int argc, char** argv)
         // "extern boundary: contract assumed, not verified" Note rendered.
         if (!run_stderr_case("check-extern-assumed",
                              {"curlee", "check", rel_extern_assumed.string()},
-                             dir / "check_extern_assumed.golden",
-                             true))
+                             dir / "check_extern_assumed.golden", true))
         {
             return 1;
         }
 
         // `curlee run` on a program containing extern functions is rejected by
         // the VM with a clear diagnostic (non-zero exit).
-        if (!run_stderr_case("run-extern-vm-reject",
-                             {"curlee", "run", rel_extern_assumed.string()},
-                             dir / "run_extern_vm_reject.golden",
-                             false))
+        if (!run_stderr_case("run-extern-vm-reject", {"curlee", "run", rel_extern_assumed.string()},
+                             dir / "run_extern_vm_reject.golden", false))
         {
             return 1;
         }
 
-        if (!run_stderr_case("run-ensures-fail",
-                             {"curlee", "run", rel_ensures_fail.string()},
-                             dir / "run_ensures_fail.golden",
-                             false))
+        if (!run_stderr_case("run-ensures-fail", {"curlee", "run", rel_ensures_fail.string()},
+                             dir / "run_ensures_fail.golden", false))
         {
             return 1;
         }
 
-        if (!run_stderr_case("run-struct-not-runnable",
-                             {"curlee", "run", rel_struct_ok.string()},
-                             dir / "run_struct_not_runnable.golden",
-                             true))
+        if (!run_stderr_case("run-struct-not-runnable", {"curlee", "run", rel_struct_ok.string()},
+                             dir / "run_struct_not_runnable.golden", true))
         {
             return 1;
         }
 
         if (!run_stderr_case("run-missing-stdout-cap",
                              {"curlee", "run", rel_run_missing_stdout_cap.string()},
-                             dir / "run_missing_stdout_cap.golden",
-                             false))
+                             dir / "run_missing_stdout_cap.golden", false))
         {
             return 1;
         }
 
         if (!run_stderr_case("run-missing-tty-cap",
                              {"curlee", "run", rel_run_missing_tty_cap.string()},
-                             dir / "run_missing_tty_cap.golden",
-                             false))
+                             dir / "run_missing_tty_cap.golden", false))
         {
             return 1;
         }
 
         if (!run_stderr_case("run-missing-stdin-cap-json",
-                             {"curlee", "run", "--diag-format", "json",
-                              rel_run_read_line.string()},
-                             dir / "run_missing_stdin_cap.json.golden",
-                             false))
+                             {"curlee", "run", "--diag-format", "json", rel_run_read_line.string()},
+                             dir / "run_missing_stdin_cap.json.golden", false))
         {
             return 1;
         }
 
-        if (!run_stdio_case("run-tty-order",
-                            {"curlee", "run", "--cap", "io.tty", rel_run_tty_order.string()},
-                            dir / "run_tty_order.stdout.golden",
-                            dir / "run_tty_order.stderr.golden",
-                            true))
+        if (!run_stdio_case(
+                "run-tty-order", {"curlee", "run", "--cap", "io.tty", rel_run_tty_order.string()},
+                dir / "run_tty_order.stdout.golden", dir / "run_tty_order.stderr.golden", true))
         {
             return 1;
         }
 
-        if (!run_stdio_case("run-with-stdout-cap",
-                            {"curlee", "run", "--cap", "io.stdout",
-                             rel_run_missing_stdout_cap.string()},
-                            dir / "run_with_stdout_cap.stdout.golden",
-                            dir / "run_with_stdout_cap.stderr.golden",
-                            true))
+        if (!run_stdio_case(
+                "run-with-stdout-cap",
+                {"curlee", "run", "--cap", "io.stdout", rel_run_missing_stdout_cap.string()},
+                dir / "run_with_stdout_cap.stdout.golden",
+                dir / "run_with_stdout_cap.stderr.golden", true))
         {
             return 1;
         }
 
-        if (!run_stdio_case("run-success",
-                            {"curlee", "run", rel_run_success.string()},
-                            dir / "run_success.stdout.golden",
-                            dir / "run_success.stderr.golden",
+        if (!run_stdio_case("run-success", {"curlee", "run", rel_run_success.string()},
+                            dir / "run_success.stdout.golden", dir / "run_success.stderr.golden",
                             true))
         {
             return 1;
@@ -1233,42 +1190,35 @@ int main(int argc, char** argv)
 
         if (!run_stdio_case("run-success-with-cap",
                             {"curlee", "run", "--cap", "python.ffi", rel_run_success.string()},
-                            dir / "run_success.stdout.golden",
-                            dir / "run_success.stderr.golden",
+                            dir / "run_success.stdout.golden", dir / "run_success.stderr.golden",
                             true))
         {
             return 1;
         }
 
-        if (!run_stdio_case_with_stdin("run-read-line-success",
-                                       {"curlee", "run", "--cap", "io.stdin",
-                                        rel_run_read_line.string()},
-                                       "hello from stdin\n",
-                                       dir / "run_read_line.stdout.golden",
-                                       dir / "run_read_line.stderr.golden",
-                                       true))
+        if (!run_stdio_case_with_stdin(
+                "run-read-line-success",
+                {"curlee", "run", "--cap", "io.stdin", rel_run_read_line.string()},
+                "hello from stdin\n", dir / "run_read_line.stdout.golden",
+                dir / "run_read_line.stderr.golden", true))
         {
             return 1;
         }
 
-        if (!run_stdio_case_with_stdin("run-read-line-eof",
-                                       {"curlee", "run", "--cap", "io.stdin",
-                                        rel_run_read_line.string()},
-                                       "",
-                                       dir / "run_read_line_eof.stdout.golden",
-                                       dir / "run_read_line_eof.stderr.golden",
-                                       true))
+        if (!run_stdio_case_with_stdin(
+                "run-read-line-eof",
+                {"curlee", "run", "--cap", "io.stdin", rel_run_read_line.string()}, "",
+                dir / "run_read_line_eof.stdout.golden", dir / "run_read_line_eof.stderr.golden",
+                true))
         {
             return 1;
         }
 
         if (!run_stderr_case_with_stdin("run-read-line-over-limit-json",
-                                        {"curlee", "run", "--cap", "io.stdin",
-                                         "--diag-format", "json",
-                                         rel_run_read_line_over_limit.string()},
+                                        {"curlee", "run", "--cap", "io.stdin", "--diag-format",
+                                         "json", rel_run_read_line_over_limit.string()},
                                         std::string(4097, 'a') + "\n",
-                                        dir / "run_read_line_over_limit.json.golden",
-                                        false))
+                                        dir / "run_read_line_over_limit.json.golden", false))
         {
             return 1;
         }
@@ -1306,6 +1256,50 @@ int main(int argc, char** argv)
             }
 
             (void)unsetenv("CURLEE_GFX_WINDOW_PRESENT_FAIL");
+        }
+
+        // Static fuel bounds / WCET (issue #262) diagnostics.
+        if (!run_stderr_case("check-fuel-straightline-ok",
+                             {"curlee", "check", rel_fuel_straightline_ok.string()},
+                             dir / "check_fuel_straightline_ok.golden", true))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-fuel-straightline-low",
+                             {"curlee", "check", rel_fuel_straightline_low.string()},
+                             dir / "check_fuel_straightline_low.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-fuel-loop-no-decreases",
+                             {"curlee", "check", rel_fuel_loop_no_decreases.string()},
+                             dir / "check_fuel_loop_no_decreases.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-fuel-callgraph-ok",
+                             {"curlee", "check", rel_fuel_callgraph_ok.string()},
+                             dir / "check_fuel_callgraph_ok.golden", true))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-fuel-callgraph-low",
+                             {"curlee", "check", rel_fuel_callgraph_low.string()},
+                             dir / "check_fuel_callgraph_low.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-fuel-extern-ok",
+                             {"curlee", "check", rel_fuel_extern_ok.string()},
+                             dir / "check_fuel_extern_ok.golden", true))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-fuel-extern-missing",
+                             {"curlee", "check", rel_fuel_extern_missing.string()},
+                             dir / "check_fuel_extern_missing.golden", false))
+        {
+            return 1;
         }
     }
     catch (const std::exception& e)

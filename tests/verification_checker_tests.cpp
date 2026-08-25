@@ -1321,7 +1321,8 @@ fn main() -> Int
   return y;
 }
 )";
-        const auto verified = verify_program(source, "snapshot-name collision caller-ghost-let test");
+        const auto verified =
+            verify_program(source, "snapshot-name collision caller-ghost-let test");
         if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
         {
             fail("expected caller ghost-let snapshot-name collision to fail (soundness)");
@@ -1534,6 +1535,201 @@ fn main() -> Int {
         if (!std::holds_alternative<curlee::verification::Verified>(verified))
         {
             fail("expected vacuous preservation to verify (documented behavior)");
+        }
+    }
+
+    // --- Static fuel bounds / WCET (issue #262) ---
+
+    // A fuel-annotated straight-line function with a sufficient bound verifies.
+    {
+        const std::string source = R"(
+fn add(a: Int, b: Int) -> Int
+  [ fuel 100; ]
+{
+  let sum: Int = a + b;
+  return sum;
+}
+
+fn main() -> Int {
+  return add(1, 2);
+}
+)";
+        const auto verified = verify_program(source, "fuel straight-line ok");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected sufficient fuel bound to verify");
+        }
+    }
+
+    // A bound that is too low fails with a span-precise counterexample.
+    {
+        const std::string source = R"(
+fn add(a: Int, b: Int) -> Int
+  [ fuel 0; ]
+{
+  let sum: Int = a + b;
+  return sum;
+}
+
+fn main() -> Int {
+  return add(1, 2);
+}
+)";
+        const auto verified = verify_program(source, "fuel straight-line low");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected too-low fuel bound to fail verification");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "fuel bound may be exceeded"))
+        {
+            fail("expected fuel bound diagnostic");
+        }
+    }
+
+    // A function without a `fuel` clause is unaffected (no fuel obligation).
+    {
+        const std::string source = R"(
+fn add(a: Int, b: Int) -> Int {
+  let sum: Int = a + b;
+  return sum;
+}
+
+fn main() -> Int {
+  return add(1, 2);
+}
+)";
+        const auto verified = verify_program(source, "no fuel clause");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected function without fuel clause to verify");
+        }
+    }
+
+    // A fuel-annotated function containing a loop WITHOUT a `decreases` variant
+    // fails closed: the static WCET cannot be bounded.
+    {
+        const std::string source = R"(
+fn count(n: Int) -> Int
+  [ fuel 1000; ]
+{
+  let i: Int = 0;
+  while (i < n) {
+    let _dummy: Int = i + 1;
+  }
+  return i;
+}
+
+fn main() -> Int {
+  return count(10);
+}
+)";
+        const auto verified = verify_program(source, "fuel loop no decreases");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected fuel with loop-without-decreases to fail closed");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "fuel cost requires a 'decreases' variant"))
+        {
+            fail("expected loop-decreases fuel diagnostic");
+        }
+    }
+
+    // Call-graph summation: a callee's declared fuel bound propagates into the
+    // caller's cost. A caller budget too low to cover the callee fails.
+    {
+        const std::string source = R"(
+fn helper(x: Int) -> Int
+  [ fuel 5; ]
+{
+  return x + 1;
+}
+
+fn main() -> Int
+  [ fuel 2; ]
+{
+  let a: Int = helper(1);
+  return a;
+}
+)";
+        const auto verified = verify_program(source, "fuel callgraph low");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected call-graph fuel budget too low to fail");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "fuel bound may be exceeded"))
+        {
+            fail("expected call-graph fuel bound diagnostic");
+        }
+    }
+
+    // Call-graph summation (positive): a caller budget covering callee costs
+    // verifies.
+    {
+        const std::string source = R"(
+fn helper(x: Int) -> Int
+  [ fuel 10; ]
+{
+  return x + 1;
+}
+
+fn main() -> Int
+  [ fuel 100; ]
+{
+  let a: Int = helper(1);
+  let b: Int = helper(2);
+  return a + b;
+}
+)";
+        const auto verified = verify_program(source, "fuel callgraph ok");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected call-graph fuel budget sufficient to verify");
+        }
+    }
+
+    // Extern cost annotation: an extern with `[ fuel 1; ]` is a trusted cost;
+    // a caller that accounts for it verifies.
+    {
+        const std::string source = R"(
+extern fn __memcpy(dst: Int, src: Int, n: Int) -> Int [ fuel 10; ];
+
+fn main() -> Int
+  [ fuel 100; ]
+{
+  return __memcpy(0, 1, 2);
+}
+)";
+        const auto verified = verify_program(source, "fuel extern ok");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected extern fuel annotation to verify");
+        }
+    }
+
+    // Extern without a fuel annotation, called from a fuel-annotated function,
+    // fails closed.
+    {
+        const std::string source = R"(
+extern fn __memcpy(dst: Int, src: Int, n: Int) -> Int;
+
+fn main() -> Int
+  [ fuel 100; ]
+{
+  return __memcpy(0, 1, 2);
+}
+)";
+        const auto verified = verify_program(source, "fuel extern missing");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected missing extern fuel annotation to fail closed");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "fuel cost: no fuel cost computable for callee"))
+        {
+            fail("expected missing-extern-fuel diagnostic");
         }
     }
 

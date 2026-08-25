@@ -43,6 +43,7 @@ enum class TokenKind
     KwGhost,
     KwInvariant,
     KwDecreases,
+    KwFuel,
 
     KwUnsafe,
     KwCap,
@@ -144,6 +145,8 @@ struct Token
         return "kw_invariant";
     case TokenKind::KwDecreases:
         return "kw_decreases";
+    case TokenKind::KwFuel:
+        return "kw_fuel";
 
     case TokenKind::KwUnsafe:
         return "kw_unsafe";

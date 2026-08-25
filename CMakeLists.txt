@@ -118,6 +118,7 @@ add_executable(curlee
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -251,6 +252,7 @@ add_executable(curlee_cli_diagnostics_golden_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -435,6 +437,7 @@ add_executable(curlee_fuzz_regression_tests
   src/compiler/emitter.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -516,6 +519,7 @@ add_executable(curlee_cli_fmt_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -542,6 +546,7 @@ add_executable(curlee_cli_bundle_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -566,6 +571,7 @@ add_executable(curlee_cli_deps_lock_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -590,6 +596,7 @@ add_executable(curlee_cli_bundle_golden_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -614,6 +621,7 @@ add_executable(curlee_cli_version_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -640,6 +648,7 @@ add_executable(curlee_cli_bad_args_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -666,6 +675,7 @@ add_executable(curlee_cli_lex_parse_error_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -692,6 +702,7 @@ add_executable(curlee_cli_check_import_error_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -718,6 +729,7 @@ add_executable(curlee_cli_check_import_cycle_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -744,6 +756,7 @@ add_executable(curlee_cli_check_import_depth_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -770,6 +783,7 @@ add_executable(curlee_cli_check_imported_main_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -796,6 +810,7 @@ add_executable(curlee_cli_check_duplicate_function_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -822,6 +837,7 @@ add_executable(curlee_cli_check_import_order_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -848,6 +864,7 @@ add_executable(curlee_cli_check_import_path_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -883,6 +900,7 @@ add_executable(curlee_cli_fuel_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -909,6 +927,7 @@ add_executable(curlee_cli_profile_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -985,6 +1004,7 @@ add_executable(curlee_e2e_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp
@@ -1062,6 +1082,7 @@ add_executable(curlee_verification_checker_tests
   src/parser/parser.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
 )
@@ -1075,6 +1096,7 @@ add_executable(curlee_verification_checker_internal_tests
   src/lexer/lexer.cpp
   src/parser/parser.cpp
   src/types/type_check.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
 )
@@ -1108,6 +1130,7 @@ add_executable(curlee_codegen_tests
   src/source/source_file.cpp
   src/types/type_check.cpp
   src/verification/checker.cpp
+  src/verification/cost_model.cpp
   src/verification/predicate_lowering.cpp
   src/verification/solver.cpp
   src/vm/vm.cpp

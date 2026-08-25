@@ -1,0 +1,10 @@
+// Negative: an extern function WITHOUT a `fuel` annotation is called from a
+// `fuel`-annotated function. The static WCET cannot be bounded for the opaque
+// extern body, so the cost model must fail closed.
+extern fn __memcpy(dst: Int, src: Int, n: Int) -> Int;
+
+fn main() -> Int
+  [ fuel 100; ]
+{
+  return __memcpy(0, 1, 2);
+}

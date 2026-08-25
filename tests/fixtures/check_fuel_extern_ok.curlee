@@ -1,0 +1,10 @@
+// Positive: an extern function with a trusted `fuel` cost annotation. Extern
+// bounds are ASSUMED (not verified against a body); a caller that declares a
+// budget accounts for the extern's declared cost.
+extern fn __memcpy(dst: Int, src: Int, n: Int) -> Int [ fuel 10; ];
+
+fn main() -> Int
+  [ fuel 100; ]
+{
+  return __memcpy(0, 1, 2);
+}

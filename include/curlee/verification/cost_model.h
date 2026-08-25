@@ -1,0 +1,130 @@
+// SPDX-License-Identifier: MIT
+#pragma once
+
+#include <curlee/parser/ast.h>
+#include <curlee/verification/predicate_lowering.h>
+#include <curlee/verification/solver.h>
+#include <functional>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <variant>
+#include <z3++.h>
+
+/**
+ * @file cost_model.h
+ * @brief Symbolic worst-case execution cost (WCET) model for `fuel` contract clauses.
+ *
+ * Issue #262 (M3 of the Zero-External-Test roadmap) adds static, solver-checked
+ * fuel bounds. Each statement/expression lowers to a symbolic Z3 Int cost
+ * expression in terms of the function's inputs:
+ *
+ *   - `let x = e;`                              -> 1
+ *   - `if c {A} else {B}`                       -> cost(c) + max(cost(A), cost(B))
+ *   - `while c [decreases D;] {B}`              -> (D_0 + 1) * (cost(c) + cost(B))
+ *   - `f(args)`                                 -> declared fuel of f (call-graph table)
+ *   - `ghost let x = e;`                        -> 0 (verification-only, erased from codegen)
+ *   - block statements                          -> sum of statement costs
+ *   - `return e;`                               -> cost(e) + 1
+ *   - expression statement                      -> cost(e)
+ *
+ * The cost model mirrors the emitter's instruction encoding (each instruction
+ * costs one fuel unit at runtime) and is the compiler-side single source of
+ * truth for static costs.
+ */
+
+namespace curlee::verification
+{
+
+/**
+ * @brief A symbolic cost expression, either a Z3 Int term or a diagnostic.
+ */
+using CostResult = std::variant<z3::expr, curlee::diag::Diagnostic>;
+
+/**
+ * @brief Static WCET cost model over a parsed function body.
+ *
+ * The model computes a symbolic Z3 Int cost for a function body. It relies on:
+ *  - the lowering context (int/bool variable bindings) to resolve names and
+ *    lower expressions/conditions into Z3 terms;
+ *  - a call-graph fuel table mapping callee names to their declared fuel bound
+ *    (an Int Z3 expression in terms of the *caller's* bindings, already
+ *    substituted at the call site);
+ *  - a fail-closed policy: loops without a provable `decreases` variant and
+ *    extern calls without a `fuel` annotation cannot be bounded, so the model
+ *    rejects them with a diagnostic instead of guessing a cost.
+ */
+class CostModel
+{
+  public:
+    /**
+     * @brief Call-graph fuel table entry.
+     *
+     * Maps a callee's fuel cost to its declared `fuel` bound. The bound is a
+     * source-level predicate over the callee's parameters; at each call site the
+     * cost model lowers it with the callee's parameters substituted by the
+     * caller's argument expressions (so an input-dependent bound such as
+     * `fuel 3 * n + 10;` is evaluated against the actual arguments).
+     *
+     * A callee is only costable when it declares a `fuel` bound (user functions
+     * without one are out of MVP scope and fail closed when their cost is
+     * needed). Extern functions must also declare a trusted cost.
+     */
+    struct FuelEntry
+    {
+        // The declared `fuel` bound predicate (non-null when present).
+        const curlee::parser::Pred* declared_bound = nullptr;
+        // The callee's declaration (provides parameter names for substitution).
+        const curlee::parser::Function* decl = nullptr;
+        bool is_extern = false;
+    };
+
+    /**
+     * @brief Expression lowering callback provided by the verifier.
+     *
+     * The cost model needs to lower call arguments into Z3 terms so a callee's
+     * declared fuel bound (an expression over the callee's parameters) can be
+     * evaluated at the call site with the caller's argument expressions
+     * substituted. `lower_expr` returns the Z3 expression for the given Expr
+     * when lowering succeeds, or std::nullopt (with a diagnostic emitted by the
+     * caller) when it fails.
+     */
+    using ExprLowerFn = std::function<std::optional<z3::expr>(const curlee::parser::Expr&)>;
+
+    explicit CostModel(z3::context& context, ExprLowerFn lower_expr = {})
+        : ctx_(context), lower_expr_(std::move(lower_expr))
+    {
+    }
+
+    /**
+     * @brief Compute the symbolic cost of a function body.
+     *
+     * @param f          the function whose body is costed
+     * @param ctx        lowering context with parameter bindings already mapped
+     * @param fuel_table call-graph table; callees are looked up by name
+     * @param diagnostics on failure, a fail-closed diagnostic is returned
+     */
+    [[nodiscard]] CostResult
+    cost_function(const curlee::parser::Function& f, const LoweringContext& ctx,
+                  const std::unordered_map<std::string_view, FuelEntry>& fuel_table);
+
+  private:
+    z3::context& ctx_;
+    ExprLowerFn lower_expr_;
+
+    [[nodiscard]] CostResult
+    cost_block(const curlee::parser::Block& block, const LoweringContext& ctx,
+               const std::unordered_map<std::string_view, FuelEntry>& fuel_table);
+    [[nodiscard]] CostResult
+    cost_stmt(const curlee::parser::Stmt& stmt, const LoweringContext& ctx,
+              const std::unordered_map<std::string_view, FuelEntry>& fuel_table);
+    [[nodiscard]] CostResult
+    cost_expr(const curlee::parser::Expr& expr, const LoweringContext& ctx,
+              const std::unordered_map<std::string_view, FuelEntry>& fuel_table);
+    [[nodiscard]] CostResult
+    cost_call(const curlee::parser::CallExpr& call, const LoweringContext& ctx,
+              const std::unordered_map<std::string_view, FuelEntry>& fuel_table);
+};
+
+} // namespace curlee::verification

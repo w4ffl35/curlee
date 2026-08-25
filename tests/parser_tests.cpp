@@ -1672,8 +1672,7 @@ fn main() -> Unit {
     }
 
     // Top-level declaration error.
-    expect_parse_error_contains("let x: Int = 1;\n",
-                                "expected 'import', 'struct', 'enum'");
+    expect_parse_error_contains("let x: Int = 1;\n", "expected 'import', 'struct', 'enum'");
 
     // Import declaration errors.
     expect_parse_error_contains("import ;\n", "expected module name after 'import'");
@@ -1703,8 +1702,9 @@ fn main() -> Unit {
     expect_parse_error_contains("fn f(x: ) -> Int { return 0; }\n", "expected type name");
 
     // Contract block errors.
-    expect_parse_error_contains("fn f() -> Int [ foo; ] { return 0; }\n",
-                                "expected 'requires', 'ensures', or 'ghost let' in contract block");
+    expect_parse_error_contains(
+        "fn f() -> Int [ foo; ] { return 0; }\n",
+        "expected 'requires', 'ensures', 'ghost let', or 'fuel' in contract block");
     expect_parse_error_contains("fn f() -> Int [ requires true ] { return 0; }\n",
                                 "expected ';' after contract clause");
     expect_parse_error_contains("fn f() -> Int [ requires true; ",

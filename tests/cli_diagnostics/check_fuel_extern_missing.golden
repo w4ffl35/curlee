@@ -1,0 +1,4 @@
+tests/fixtures/check_fuel_extern_missing.curlee:9:10: error: fuel cost: no fuel cost computable for callee '__memcpy' (declare a '[ fuel <bound>; ]' contract on the callee)
+  |
+  |   return __memcpy(0, 1, 2);
+  |          ^^^^^^^^

@@ -1,0 +1,16 @@
+// Negative: call-graph fuel summation where `main`'s budget is too low to
+// cover the callee's declared cost. `helper` declares `fuel 5;` and main
+// declares `fuel 2;` — the call alone exceeds the budget, so the obligation
+// must fail with a counterexample.
+fn helper(x: Int) -> Int
+  [ fuel 5; ]
+{
+  return x + 1;
+}
+
+fn main() -> Int
+  [ fuel 2; ]
+{
+  let a: Int = helper(1);
+  return a;
+}

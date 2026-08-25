@@ -528,8 +528,22 @@ The four directives are not independent. Implementation order matters:
    (`equiv`) and M6 (composition) build on this foundation.
 2. **M2 — Loop invariants & decreases** (foundation): enables bounded loops in
    the verifier; unblocks 3.
+   **Status (issue #261): implemented.** `KwInvariant`/`KwDecreases` tokens,
+   `WhileStmt::invariants`/`decreases`, entry/preservation/variant/post-state
+   obligations, and the single-pass fallback for unannotated loops landed. Under
+   the MVP's immutability, `decreases` is provably unsatisfiable (fail-closed),
+   which is the documented behavior until assignment lands.
 3. **M3 — Static fuel bounds** (directive 3): cost model + `fuel` clause +
    loop variant proof + VM-profile oracle.
+   **Status (issue #262): implemented.** `KwFuel` token, `Function::fuel_bound`,
+   the symbolic cost model
+   ([`cost_model.h`](include/curlee/verification/cost_model.h),
+   [`cost_model.cpp`](src/verification/cost_model.cpp)), the call-graph fuel
+   table, the `total_cost <= declared_fuel` obligation (span-precise
+   counterexample), fail-closed rules (loops without `decreases`, extern
+   without a declared cost), and the CLI profile-vs-declared drift warning.
+   The loop-variant formula `(D_0 + 1) * (cost(c) + cost(B))` is in place; its
+   full usability awaits the M3/M4 assignment work (see `docs/fuel-contracts.md`).
 4. **M4 — Typestates / linear types** (directive 1): state-aware `Type`,
    state-transition analysis, `@linear` consumption pass.
 5. **M5 — Equivalence checking** (directive 2): `equiv` declarations, product

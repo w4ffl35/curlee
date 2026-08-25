@@ -1,0 +1,16 @@
+// Positive: call-graph fuel summation. `helper` declares `fuel 10;`; `main`
+// declares a budget of 100 that comfortably covers the helper's cost plus the
+// call-site overhead. Both fuel obligations must verify.
+fn helper(x: Int) -> Int
+  [ fuel 10; ]
+{
+  return x + 1;
+}
+
+fn main() -> Int
+  [ fuel 100; ]
+{
+  let a: Int = helper(1);
+  let b: Int = helper(2);
+  return a + b;
+}

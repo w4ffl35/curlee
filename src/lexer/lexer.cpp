@@ -69,8 +69,8 @@ class Lexer
                 {
                     const char ch = peek();
                     const bool is_dec = std::isdigit(static_cast<unsigned char>(ch)) != 0;
-                    const bool is_hex = phys_addr_form &&
-                                        std::isxdigit(static_cast<unsigned char>(ch)) != 0;
+                    const bool is_hex =
+                        phys_addr_form && std::isxdigit(static_cast<unsigned char>(ch)) != 0;
                     if (ch == '_')
                     {
                         phys_addr_form = true;
@@ -84,9 +84,9 @@ class Lexer
                     }
                     break;
                 }
-                tokens.push_back(make_token(phys_addr_form ? TokenKind::PhysAddrLiteral
-                                                           : TokenKind::IntLiteral,
-                                            start, pos_));
+                tokens.push_back(
+                    make_token(phys_addr_form ? TokenKind::PhysAddrLiteral : TokenKind::IntLiteral,
+                               start, pos_));
                 continue;
             }
 
@@ -341,6 +341,10 @@ class Lexer
         if (lexeme == "decreases")
         {
             return TokenKind::KwDecreases;
+        }
+        if (lexeme == "fuel")
+        {
+            return TokenKind::KwFuel;
         }
         if (lexeme == "unsafe")
         {

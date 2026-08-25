@@ -1,0 +1,22 @@
+// Drift-oracle fixture: `main` declares a static fuel bound (100) that PASSES
+// static verification (the loop carries invariant + decreases, and the body
+// shadows the loop variable — the documented MVP shadowing behavior makes the
+// variant-decrease proof vacuous, see verification_checker_tests.cpp). At
+// runtime the loop runs without bound, so a `--fuel` limit above the declared
+// bound exhausts fuel. `run --profile` must emit the advisory drift warning
+// (fuel_used > declared) on the out-of-fuel path without changing exit
+// semantics.
+fn main() -> Int
+  [ fuel 100; ]
+{
+  let i: Int = 0;
+  let n: Int = 1000000;
+  while (i < n)
+    [ invariant 0 <= i && i <= n;
+      decreases n - i; ]
+  {
+    let i: Int = i + 1;
+    let _dummy: Int = i;
+  }
+  return i;
+}

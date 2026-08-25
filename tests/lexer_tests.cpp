@@ -38,24 +38,33 @@ int main()
     // Cover TokenKind stringification (used in diagnostics and tests).
     {
         constexpr TokenKind all_kinds[] = {
-            TokenKind::Eof,           TokenKind::Identifier, TokenKind::IntLiteral,
-            TokenKind::PhysAddrLiteral, TokenKind::StringLiteral, TokenKind::KwFn,
+            TokenKind::Eof,           TokenKind::Identifier,
+            TokenKind::IntLiteral,    TokenKind::PhysAddrLiteral,
+            TokenKind::StringLiteral, TokenKind::KwFn,
             TokenKind::KwExtern,      TokenKind::KwLet,
-            TokenKind::KwIf,          TokenKind::KwElse,     TokenKind::KwWhile,
-            TokenKind::KwReturn,      TokenKind::KwTrue,     TokenKind::KwFalse,
-            TokenKind::KwRequires,    TokenKind::KwEnsures,  TokenKind::KwWhere,
-            TokenKind::KwGhost,       TokenKind::KwInvariant, TokenKind::KwDecreases,
-            TokenKind::KwUnsafe,      TokenKind::KwCap,      TokenKind::KwImport,
-            TokenKind::KwAs,          TokenKind::KwPhys,     TokenKind::KwStruct,
-            TokenKind::KwEnum,        TokenKind::KwMatch,    TokenKind::LParen,
-            TokenKind::RParen,        TokenKind::LBrace,     TokenKind::RBrace,
-            TokenKind::LBracket,      TokenKind::RBracket,   TokenKind::Semicolon,
-            TokenKind::Comma,         TokenKind::Colon,      TokenKind::ColonColon,
-            TokenKind::Dot,           TokenKind::Arrow,      TokenKind::Equal,
-            TokenKind::EqualEqual,    TokenKind::Bang,       TokenKind::BangEqual,
-            TokenKind::Less,          TokenKind::LessEqual,  TokenKind::Greater,
-            TokenKind::GreaterEqual,  TokenKind::Plus,       TokenKind::Minus,
-            TokenKind::Star,          TokenKind::Slash,      TokenKind::AndAnd,
+            TokenKind::KwIf,          TokenKind::KwElse,
+            TokenKind::KwWhile,       TokenKind::KwReturn,
+            TokenKind::KwTrue,        TokenKind::KwFalse,
+            TokenKind::KwRequires,    TokenKind::KwEnsures,
+            TokenKind::KwWhere,       TokenKind::KwGhost,
+            TokenKind::KwInvariant,   TokenKind::KwDecreases,
+            TokenKind::KwFuel,        TokenKind::KwUnsafe,
+            TokenKind::KwCap,         TokenKind::KwImport,
+            TokenKind::KwAs,          TokenKind::KwPhys,
+            TokenKind::KwStruct,      TokenKind::KwEnum,
+            TokenKind::KwMatch,       TokenKind::LParen,
+            TokenKind::RParen,        TokenKind::LBrace,
+            TokenKind::RBrace,        TokenKind::LBracket,
+            TokenKind::RBracket,      TokenKind::Semicolon,
+            TokenKind::Comma,         TokenKind::Colon,
+            TokenKind::ColonColon,    TokenKind::Dot,
+            TokenKind::Arrow,         TokenKind::Equal,
+            TokenKind::EqualEqual,    TokenKind::Bang,
+            TokenKind::BangEqual,     TokenKind::Less,
+            TokenKind::LessEqual,     TokenKind::Greater,
+            TokenKind::GreaterEqual,  TokenKind::Plus,
+            TokenKind::Minus,         TokenKind::Star,
+            TokenKind::Slash,         TokenKind::AndAnd,
             TokenKind::OrOr,
         };
 
@@ -224,6 +233,25 @@ int main()
         expect_token(toks, 8, TokenKind::Identifier, "i");
         expect_token(toks, 9, TokenKind::Semicolon, ";");
         expect_token(toks, 10, TokenKind::Eof, "");
+    }
+
+    {
+        // Static fuel (WCET) keyword (issue #262): `fuel` in contract blocks.
+        const std::string src = "fuel 3 * n + 10;";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for fuel keyword");
+        }
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::KwFuel, "fuel");
+        expect_token(toks, 1, TokenKind::IntLiteral, "3");
+        expect_token(toks, 2, TokenKind::Star, "*");
+        expect_token(toks, 3, TokenKind::Identifier, "n");
+        expect_token(toks, 4, TokenKind::Plus, "+");
+        expect_token(toks, 5, TokenKind::IntLiteral, "10");
+        expect_token(toks, 6, TokenKind::Semicolon, ";");
+        expect_token(toks, 7, TokenKind::Eof, "");
     }
 
     {

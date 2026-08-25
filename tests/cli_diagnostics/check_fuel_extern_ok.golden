@@ -1,0 +1,4 @@
+tests/fixtures/check_fuel_extern_ok.curlee:4:11: note: extern boundary: contract assumed, not verified
+  |
+  | extern fn __memcpy(dst: Int, src: Int, n: Int) -> Int [ fuel 10; ];
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

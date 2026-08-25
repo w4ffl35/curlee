@@ -3,8 +3,10 @@
 #include <curlee/lexer/token.h>
 #include <curlee/types/type.h>
 #include <curlee/verification/checker.h>
+#include <curlee/verification/cost_model.h>
 #include <curlee/verification/predicate_lowering.h>
 #include <curlee/verification/solver.h>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -281,7 +283,18 @@ class Verifier
 {
   public:
     explicit Verifier(const curlee::types::TypeInfo& type_info)
-        : type_info_(type_info), solver_(), lower_ctx_(solver_.context())
+        : type_info_(type_info), solver_(), lower_ctx_(solver_.context()),
+          cost_model_(solver_.context(),
+                      [this](const curlee::parser::Expr& e)
+                      {
+                          auto lowered = lower_expr(e);
+                          if (std::holds_alternative<ExprValue>(lowered))
+                          {
+                              return std::optional<z3::expr>{
+                                  std::get<ExprValue>(std::move(lowered)).expr};
+                          }
+                          return std::optional<z3::expr>{};
+                      })
     {
         // Wire the ghost function table into the shared lowering context so
         // predicate calls in requires/ensures lower to uninterpreted functions.
@@ -326,11 +339,18 @@ class Verifier
     const curlee::types::TypeInfo& type_info_;
     Solver solver_;
     LoweringContext lower_ctx_;
+    CostModel cost_model_;
     std::vector<Diagnostic> diags_;
     std::vector<Diagnostic> notes_;
     std::vector<z3::expr> facts_;
     std::vector<ScopeState> scopes_;
     std::unordered_map<std::string_view, FunctionSig> functions_;
+
+    // Call-graph fuel table (name -> declared fuel bound). Populated during
+    // collect_signatures. A callee is costable only when it declares a `fuel`
+    // bound; a call to a callee without one fails closed when the caller's
+    // static fuel cost is computed.
+    std::unordered_map<std::string_view, CostModel::FuelEntry> fuel_table_;
 
     // Ghost function signatures used to lower predicate calls to uninterpreted
     // function applications. Populated during collect_signatures.
@@ -447,6 +467,20 @@ class Verifier
                 functions_.emplace(f.name, std::move(sig));
             }
 
+            // Populate the call-graph fuel table: a function is costable when it
+            // declares a `fuel` bound. Extern functions must declare a trusted
+            // cost (their bodies are opaque). Functions without a declared bound
+            // are simply absent from the table; a call to them fails closed when
+            // the caller's static fuel cost is computed.
+            if (f.fuel_bound.has_value())
+            {
+                CostModel::FuelEntry entry;
+                entry.declared_bound = &*f.fuel_bound;
+                entry.decl = &f;
+                entry.is_extern = f.is_extern;
+                fuel_table_.emplace(f.name, std::move(entry));
+            }
+
             // Ghost functions are additionally exposed to predicate lowering as
             // uninterpreted functions so they can be called from requires/ensures
             // clauses (issue #260, M1 part A).
@@ -526,8 +560,8 @@ class Verifier
             return it->second;
         }
         const std::string name = "Phys" + std::string(element_kind);
-        auto [inserted_it, _] = phys_sorts_.emplace(
-            element_kind, solver_.context().uninterpreted_sort(name.c_str()));
+        auto [inserted_it, _] =
+            phys_sorts_.emplace(element_kind, solver_.context().uninterpreted_sort(name.c_str()));
         return inserted_it->second;
     }
 
@@ -761,7 +795,8 @@ class Verifier
         // before attempting to lower, so no opaque-derived contract can silently pass.
         if (pred_mentions_opaque_read(pred))
         {
-            reject_opaque_read_contract(pred.span, "cannot prove contract on opaque MMIO read value");
+            reject_opaque_read_contract(pred.span,
+                                        "cannot prove contract on opaque MMIO read value");
             return;
         }
         auto lowered = lower_predicate(pred, lower_ctx_);
@@ -938,8 +973,8 @@ class Verifier
                     }
                     // Lower to a constant of the opaque sort. The constant name embeds the
                     // element kind and the address lexeme so distinct addresses stay distinct.
-                    const std::string const_name = "phys_" + std::string(node.element_kind) + "_" +
-                                                   std::string(node.lexeme);
+                    const std::string const_name =
+                        "phys_" + std::string(node.element_kind) + "_" + std::string(node.lexeme);
                     const z3::sort& sort = phys_sort(node.element_kind);
                     return ExprValue{solver_.context().constant(const_name.c_str(), sort),
                                      TypeKind::Phys, true};
@@ -975,7 +1010,8 @@ class Verifier
                     // Unit. No axioms relate it to read(), so writes are opaque too.
                     if (node.base == nullptr || node.value == nullptr) // GCOVR_EXCL_LINE
                     {
-                        return error_at(e.span, "missing Phys base or value in write()"); // GCOVR_EXCL_LINE
+                        return error_at(e.span,
+                                        "missing Phys base or value in write()"); // GCOVR_EXCL_LINE
                     }
                     auto base_res = lower_expr(*node.base);
                     if (std::holds_alternative<Diagnostic>(base_res))
@@ -1118,7 +1154,7 @@ class Verifier
                 // is handled by insert_or_assign; the constant-name collision
                 // is handled by this unique suffix.
                 const std::string snap_name = "ghost_" + std::string(g->name) + "_callsite_" +
-                                               std::to_string(snapshot_counter_++);
+                                              std::to_string(snapshot_counter_++);
                 if (value.kind == TypeKind::Int)
                 {
                     auto c = solver_.context().int_const(snap_name.c_str());
@@ -1182,8 +1218,9 @@ class Verifier
                 {
                     // arg_is_opaque is only set when an argument was scanned, so args is
                     // guaranteed non-empty here (the ternary fallback was dead code).
-                    reject_opaque_read_contract(call.args[0].span,
-                                                "cannot prove call contract on opaque MMIO read argument");
+                    reject_opaque_read_contract(
+                        call.args[0].span,
+                        "cannot prove call contract on opaque MMIO read argument");
                 }
                 return;
             }
@@ -1472,9 +1509,9 @@ class Verifier
         auto value = std::get<ExprValue>(lowered);
         // An opaque MMIO read lowers to an Int-typed Z3 term; accept it for unsigned element
         // kind returns (U8/U16/U32/U64) so the ensures check can run below.
-        const bool opaque_unsigned_return =
-            is_phys_element_kind(expected_return) && value.kind == TypeKind::Int &&
-            expr_is_opaque_read(*s.value);
+        const bool opaque_unsigned_return = is_phys_element_kind(expected_return) &&
+                                            value.kind == TypeKind::Int &&
+                                            expr_is_opaque_read(*s.value);
         if (value.kind != expected_return && !opaque_unsigned_return)
         {
             return;
@@ -1698,8 +1735,7 @@ class Verifier
                 auto value = std::get<ExprValue>(std::move(lowered));
                 if (value.kind == core_t->kind)
                 {
-                    if (auto it = lower_ctx_.int_vars.find(s.name);
-                        it != lower_ctx_.int_vars.end())
+                    if (auto it = lower_ctx_.int_vars.find(s.name); it != lower_ctx_.int_vars.end())
                     {
                         facts_.push_back(it->second == value.expr);
                     }
@@ -1796,11 +1832,12 @@ class Verifier
     {
         if (pred_mentions_opaque_read(pred))
         {
-            reject_opaque_read_contract(pred.span, "cannot prove contract on opaque MMIO read value");
+            reject_opaque_read_contract(pred.span,
+                                        "cannot prove contract on opaque MMIO read value");
             return std::nullopt;
         }
-        auto lowered = int_clause ? lower_predicate_int(pred, lower_ctx_)
-                                  : lower_predicate(pred, lower_ctx_);
+        auto lowered =
+            int_clause ? lower_predicate_int(pred, lower_ctx_) : lower_predicate(pred, lower_ctx_);
         if (std::holds_alternative<Diagnostic>(lowered))
         {
             diags_.push_back(std::get<Diagnostic>(std::move(lowered)));
@@ -1939,8 +1976,9 @@ class Verifier
                 if (lowered_v.has_value())
                 {
                     const auto& d = *s.decreases;
-                    check_obligation(d, lower_ctx_, *lowered_v < *variant_before, d.span, {},
-                                     "decreases expression does not strictly decrease each iteration");
+                    check_obligation(
+                        d, lower_ctx_, *lowered_v < *variant_before, d.span, {},
+                        "decreases expression does not strictly decrease each iteration");
                 }
             }
 
@@ -2000,10 +2038,10 @@ class Verifier
             Diagnostic d = note_at(f.span, "extern boundary: contract assumed, not verified");
             if (!f.requires_clauses.empty() || !f.ensures.empty())
             {
-                d.notes.push_back(
-                    Related{.message = "extern declaration carries contracts that are "
-                                       "assumed without proof",
-                            .span = f.span});
+                d.notes.push_back(Related{.message =
+                                              "extern declaration carries contracts that are "
+                                              "assumed without proof",
+                                          .span = f.span});
             }
             diags_.push_back(std::move(d));
             return;
@@ -2069,8 +2107,114 @@ class Verifier
             check_stmt(stmt, sig_it->second.result);
         }
 
+        // Static fuel (WCET) obligation: if the function declares a `fuel`
+        // bound, the symbolic cost of the body must not exceed it. The cost
+        // model lowers the body into a Z3 Int cost expression (calls to
+        // fuel-annotated callees propagate their declared costs via the
+        // call-graph table); loops must carry a provable `decreases` variant
+        // (fail closed otherwise). Runs while the parameter bindings are still
+        // in scope so the bound and body expressions resolve.
+        //
+        // Extern functions are excluded: their `fuel` bound is a *trusted* cost
+        // annotation for the opaque body (used at call sites), not a proof
+        // obligation against a body that does not exist.
+        if (f.fuel_bound.has_value() && !f.is_extern)
+        {
+            check_fuel_obligation(f, sig_it->second);
+        }
+
         pop_scope();
         current_function_.reset();
+    }
+
+    // Check a function's static fuel (WCET) obligation: symbolic cost of the
+    // body must be <= the declared `fuel` bound. Uses the standard solver
+    // obligation path (facts + !obligation); SAT yields a WCET-violating input
+    // assignment with a model note. Fail-closed diagnostics (loop without
+    // `decreases`, callee without a declared bound) are reported by the cost
+    // model and surfaced as errors.
+    void check_fuel_obligation(const Function& f, const FunctionSig& sig)
+    {
+        const auto& bound_pred = *f.fuel_bound;
+
+        // Lower the declared bound to a Z3 Int expression over the function's
+        // inputs.
+        auto lowered_bound = lower_predicate_int_named(bound_pred, lower_ctx_, "fuel");
+        if (std::holds_alternative<Diagnostic>(lowered_bound))
+        {
+            diags_.push_back(std::get<Diagnostic>(std::move(lowered_bound)));
+            return;
+        }
+
+        // Compute the symbolic cost of the body.
+        auto cost_res = cost_model_.cost_function(f, lower_ctx_, fuel_table_);
+        if (std::holds_alternative<Diagnostic>(cost_res))
+        {
+            diags_.push_back(std::get<Diagnostic>(std::move(cost_res)));
+            return;
+        }
+        const z3::expr total_cost = std::get<z3::expr>(cost_res);
+
+        // Obligation: total_cost <= bound. Fail when a model satisfies
+        // total_cost > bound (i.e. the bound is too low).
+        solver_.push();
+        for (const auto& fact : facts_)
+        {
+            solver_.add(fact);
+        }
+        solver_.add(total_cost > std::get<z3::expr>(lowered_bound));
+        const auto res = solver_.check();
+
+        if (res == CheckResult::Sat)
+        {
+            Diagnostic d =
+                error_at(f.span, "fuel bound may be exceeded: worst-case cost exceeds the "
+                                 "declared fuel '" +
+                                     pred_to_string(bound_pred) + "'");
+            Related goal;
+            goal.message = "goal: total_cost <= " + pred_to_string(bound_pred);
+            goal.span = std::nullopt;
+            d.notes.push_back(std::move(goal));
+
+            // Model note over the input variables mentioned in the bound/body.
+            std::vector<z3::expr> model_vars;
+            std::unordered_set<std::string_view> names;
+            collect_pred_names(bound_pred, names);
+            for (const auto& name : names)
+            {
+                if (auto it = lower_ctx_.int_vars.find(name); it != lower_ctx_.int_vars.end())
+                {
+                    model_vars.push_back(it->second);
+                }
+                else if (auto it2 = lower_ctx_.bool_vars.find(name);
+                         it2 != lower_ctx_.bool_vars.end())
+                {
+                    model_vars.push_back(it2->second);
+                }
+            }
+            add_model_note(d, model_vars);
+
+            Related hint;
+            hint.message = "hint: raise the fuel bound or reduce the worst-case cost (e.g. add a "
+                           "'decreases' variant to loops, or a lower declared bound on callees)";
+            hint.span = std::nullopt;
+            d.notes.push_back(std::move(hint));
+            diags_.push_back(std::move(d));
+        }
+        else if (res == CheckResult::Unknown)
+        {
+            Diagnostic d =
+                error_at(f.span, "fuel bound could not be checked (solver returned unknown)");
+            Related hint;
+            hint.message =
+                "hint: simplify the cost expression to keep it in the decidable fragment";
+            hint.span = std::nullopt;
+            d.notes.push_back(std::move(hint));
+            diags_.push_back(std::move(d));
+        }
+
+        solver_.pop();
+        (void)sig;
     }
 
     std::optional<FunctionSig> current_function_;

@@ -384,6 +384,14 @@ struct Function
     // erased from codegen.
     std::vector<GhostLetStmt> ghost_lets;
 
+    // Optional static fuel bound (WCET) contract clause: `fuel <pred>;` inside
+    // the contract block. `<pred>` is an Int-valued expression over the
+    // function's inputs that bounds the worst-case execution cost (in abstract
+    // fuel units). For extern functions the bound is a *trusted* annotation of
+    // the opaque body's cost. When absent, a function is not subject to a
+    // static fuel obligation (backward-compatible).
+    std::optional<Pred> fuel_bound;
+
     // Optional return type (MVP: identifier only). Present when `->` appears.
     std::optional<TypeName> return_type;
 };

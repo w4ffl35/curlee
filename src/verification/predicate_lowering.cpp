@@ -91,16 +91,15 @@ TypedResult lower_node(const curlee::parser::Pred& pred, const LoweringContext& 
                 auto sig_it = ctx.ghost_fns->find(node.callee);
                 if (sig_it == ctx.ghost_fns->end())
                 {
-                    return error_at(pred.span, "unknown ghost function '" +
-                                                   std::string(node.callee) + "'");
+                    return error_at(pred.span,
+                                    "unknown ghost function '" + std::string(node.callee) + "'");
                 }
                 const GhostFnSig& sig = sig_it->second;
                 if (node.args.size() != sig.params.size())
                 {
                     return error_at(pred.span,
-                                    "ghost function '" + std::string(node.callee) +
-                                        "' expects " + std::to_string(sig.params.size()) +
-                                        " argument(s), got " +
+                                    "ghost function '" + std::string(node.callee) + "' expects " +
+                                        std::to_string(sig.params.size()) + " argument(s), got " +
                                         std::to_string(node.args.size()));
                 }
 
@@ -118,8 +117,7 @@ TypedResult lower_node(const curlee::parser::Pred& pred, const LoweringContext& 
                     const bool got_bool = (arg.type == PredType::Bool);
                     if (want_bool != got_bool)
                     {
-                        return error_at(node.args[i].span,
-                                        "ghost function argument type mismatch");
+                        return error_at(node.args[i].span, "ghost function argument type mismatch");
                     }
                     arg_exprs.push_back(arg.expr);
                 }
@@ -141,8 +139,9 @@ TypedResult lower_node(const curlee::parser::Pred& pred, const LoweringContext& 
                 auto decl = ctx.ctx.function(fname.c_str(), arg_sorts, res_sort);
 
                 z3::expr app = decl(static_cast<unsigned>(arg_exprs.size()), arg_exprs.data());
-                return TypedExpr{app, sig.result == curlee::types::TypeKind::Bool ? PredType::Bool
-                                                                                  : PredType::Int,
+                return TypedExpr{app,
+                                 sig.result == curlee::types::TypeKind::Bool ? PredType::Bool
+                                                                             : PredType::Int,
                                  false};
             }
             else if constexpr (std::is_same_v<Node, curlee::parser::PredUnary>)
@@ -293,6 +292,12 @@ LoweringResult lower_predicate(const curlee::parser::Pred& pred, const LoweringC
 
 LoweringResult lower_predicate_int(const curlee::parser::Pred& pred, const LoweringContext& ctx)
 {
+    return lower_predicate_int_named(pred, ctx, "decreases");
+}
+
+LoweringResult lower_predicate_int_named(const curlee::parser::Pred& pred,
+                                         const LoweringContext& ctx, std::string_view clause_name)
+{
     auto lowered = lower_node(pred, ctx);
     if (std::holds_alternative<curlee::diag::Diagnostic>(lowered))
     {
@@ -302,7 +307,7 @@ LoweringResult lower_predicate_int(const curlee::parser::Pred& pred, const Lower
     auto typed = std::get<TypedExpr>(lowered);
     if (typed.type != PredType::Int)
     {
-        return error_at(pred.span, "decreases clause must resolve to Int");
+        return error_at(pred.span, std::string(clause_name) + " clause must resolve to Int");
     }
 
     return typed.expr;

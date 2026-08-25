@@ -87,6 +87,8 @@ int main()
         find_repo_relative(fs::path("tests") / "fixtures" / "run_success.curlee");
     const fs::path infinite =
         find_repo_relative(fs::path("tests") / "fixtures" / "run_infinite_loop.curlee");
+    const fs::path fuel_drift =
+        find_repo_relative(fs::path("tests") / "fixtures" / "run_fuel_drift.curlee");
     const fs::path type_error =
         find_repo_relative(fs::path("tests") / "fixtures" / "check_type_error.curlee");
     const fs::path rng_seeded =
@@ -104,16 +106,16 @@ int main()
         }
         expect_contains(err, "expected format after --diag-format", "stderr");
 
-        rc = run_cli_capture({"curlee", "check", "--diag-format", "yaml", type_error.string()},
-                             out, err);
+        rc = run_cli_capture({"curlee", "check", "--diag-format", "yaml", type_error.string()}, out,
+                             err);
         if (rc != 2)
         {
             fail("expected usage exit code for invalid --diag-format value");
         }
         expect_contains(err, "expected --diag-format to be one of: text, json", "stderr");
 
-        rc = run_cli_capture(
-            {"curlee", "check", "--diag-format=yaml", type_error.string()}, out, err);
+        rc = run_cli_capture({"curlee", "check", "--diag-format=yaml", type_error.string()}, out,
+                             err);
         if (rc != 2)
         {
             fail("expected usage exit code for invalid --diag-format= value");
@@ -125,9 +127,8 @@ int main()
     {
         std::string out;
         std::string err;
-        const int rc = run_cli_capture({"curlee", "check", "--diag-format", "text",
-                                        type_error.string()},
-                                       out, err);
+        const int rc = run_cli_capture(
+            {"curlee", "check", "--diag-format", "text", type_error.string()}, out, err);
         if (rc == 0)
         {
             fail("expected check --diag-format text to fail on type error fixture");
@@ -139,9 +140,8 @@ int main()
     {
         std::string out;
         std::string err;
-        const int rc =
-            run_cli_capture({"curlee", "check", "--diag-format=json", type_error.string()},
-                            out, err);
+        const int rc = run_cli_capture(
+            {"curlee", "check", "--diag-format=json", type_error.string()}, out, err);
         if (rc == 0)
         {
             fail("expected check --diag-format json to fail on type error fixture");
@@ -168,17 +168,17 @@ int main()
 
         std::string out;
         std::string err;
-        int rc = run_cli_capture({"curlee", "bundle", "build", "--cap", "io.stdout",
-                                  entry.string(), bundle.string()},
-                                 out, err);
+        int rc = run_cli_capture(
+            {"curlee", "bundle", "build", "--cap", "io.stdout", entry.string(), bundle.string()},
+            out, err);
         if (rc != 0)
         {
             fail("expected bundle build to succeed for diagnostics/profile tests; stderr=" + err);
         }
 
-        rc = run_cli_capture({"curlee", "run", "--diag-format", "json", "--bundle",
-                              bundle.string(), entry.string()},
-                             out, err);
+        rc = run_cli_capture(
+            {"curlee", "run", "--diag-format", "json", "--bundle", bundle.string(), entry.string()},
+            out, err);
         if (rc == 0)
         {
             fail("expected bundle run without required cap to fail");
@@ -193,9 +193,8 @@ int main()
     {
         std::string out;
         std::string err;
-        const int rc = run_cli_capture({"curlee", "run", "--profile", "--fuel", "1000",
-                                        run_success.string()},
-                                       out, err);
+        const int rc = run_cli_capture(
+            {"curlee", "run", "--profile", "--fuel", "1000", run_success.string()}, out, err);
         if (rc != 0)
         {
             fail("expected run --profile to succeed; stderr=" + err);
@@ -211,9 +210,8 @@ int main()
     {
         std::string out;
         std::string err;
-        const int rc =
-            run_cli_capture({"curlee", "run", "--profile-format", "json", run_success.string()},
-                            out, err);
+        const int rc = run_cli_capture(
+            {"curlee", "run", "--profile-format", "json", run_success.string()}, out, err);
         if (rc != 0)
         {
             fail("expected run --profile-format json to succeed; stderr=" + err);
@@ -232,18 +230,16 @@ int main()
         std::string out_b;
         std::string err_b;
 
-        const int rc_a = run_cli_capture({"curlee", "run", "--cap", "rng.seeded", "--seed",
-                                          "123", "--profile-format", "json",
-                                          rng_seeded.string()},
+        const int rc_a = run_cli_capture({"curlee", "run", "--cap", "rng.seeded", "--seed", "123",
+                                          "--profile-format", "json", rng_seeded.string()},
                                          out_a, err_a);
         if (rc_a != 0)
         {
             fail("expected seeded rng run to succeed; stderr=" + err_a);
         }
 
-        const int rc_b = run_cli_capture({"curlee", "run", "--cap", "rng.seeded", "--seed",
-                                          "123", "--profile-format", "json",
-                                          rng_seeded.string()},
+        const int rc_b = run_cli_capture({"curlee", "run", "--cap", "rng.seeded", "--seed", "123",
+                                          "--profile-format", "json", rng_seeded.string()},
                                          out_b, err_b);
         if (rc_b != 0)
         {
@@ -261,9 +257,8 @@ int main()
     {
         std::string out;
         std::string err;
-        const int rc = run_cli_capture({"curlee", "run", "--cap", "rng.seeded",
-                                        rng_seeded.string()},
-                                       out, err);
+        const int rc = run_cli_capture(
+            {"curlee", "run", "--cap", "rng.seeded", rng_seeded.string()}, out, err);
         if (rc == 0)
         {
             fail("expected rng run without --seed to fail");
@@ -275,9 +270,8 @@ int main()
     {
         std::string out;
         std::string err;
-        const int rc = run_cli_capture({"curlee", "run", "--seed", "123",
-                                        rng_seeded.string()},
-                                       out, err);
+        const int rc =
+            run_cli_capture({"curlee", "run", "--seed", "123", rng_seeded.string()}, out, err);
         if (rc == 0)
         {
             fail("expected rng run without capability to fail");
@@ -289,9 +283,8 @@ int main()
     {
         std::string out;
         std::string err;
-        const int rc =
-            run_cli_capture({"curlee", "run", "--profile-format", "text", run_success.string()},
-                            out, err);
+        const int rc = run_cli_capture(
+            {"curlee", "run", "--profile-format", "text", run_success.string()}, out, err);
         if (rc != 0)
         {
             fail("expected run --profile-format text to succeed; stderr=" + err);
@@ -303,9 +296,8 @@ int main()
     {
         std::string out;
         std::string err;
-        const int rc = run_cli_capture({"curlee", "run", "--profile", "--fuel", "10",
-                                        infinite.string()},
-                                       out, err);
+        const int rc = run_cli_capture(
+            {"curlee", "run", "--profile", "--fuel", "10", infinite.string()}, out, err);
         if (rc == 0)
         {
             fail("expected run --profile to fail under low fuel");
@@ -319,10 +311,9 @@ int main()
     {
         std::string out;
         std::string err;
-        const int rc =
-            run_cli_capture({"curlee", "run", "--profile-format=json", "--fuel", "10",
-                             infinite.string()},
-                            out, err);
+        const int rc = run_cli_capture(
+            {"curlee", "run", "--profile-format=json", "--fuel", "10", infinite.string()}, out,
+            err);
         if (rc == 0)
         {
             fail("expected run --profile-format=json to fail under low fuel");
@@ -356,16 +347,15 @@ int main()
             fail("expected success bundle build to succeed; stderr=" + err);
         }
 
-        rc = run_cli_capture({"curlee", "bundle", "build", infinite.string(),
-                      bundle_fail.string()},
+        rc = run_cli_capture({"curlee", "bundle", "build", infinite.string(), bundle_fail.string()},
                              out, err);
         if (rc != 0)
         {
             fail("expected failing bundle fixture build to succeed; stderr=" + err);
         }
 
-        rc = run_cli_capture({"curlee", "run", "--profile", "--cap", "io.stdout",
-                      "--bundle", bundle_ok.string(), entry_ok.string()},
+        rc = run_cli_capture({"curlee", "run", "--profile", "--cap", "io.stdout", "--bundle",
+                              bundle_ok.string(), entry_ok.string()},
                              out, err);
         if (rc != 0)
         {
@@ -375,7 +365,7 @@ int main()
         expect_contains(out, "ok=true", "stdout");
 
         rc = run_cli_capture({"curlee", "run", "--profile", "--fuel", "10", "--bundle",
-                      bundle_fail.string(), infinite.string()},
+                              bundle_fail.string(), infinite.string()},
                              out, err);
         if (rc == 0)
         {
@@ -404,9 +394,9 @@ int main()
 
         std::string out;
         std::string err;
-        int rc = run_cli_capture({"curlee", "bundle", "build", "--cap", "rng.seeded",
-                                  entry.string(), bundle.string()},
-                                 out, err);
+        int rc = run_cli_capture(
+            {"curlee", "bundle", "build", "--cap", "rng.seeded", entry.string(), bundle.string()},
+            out, err);
         if (rc != 0)
         {
             fail("expected rng bundle build to succeed; stderr=" + err);
@@ -462,13 +452,51 @@ int main()
         }
         expect_contains(err, "expected --profile-format to be one of: text, json", "stderr");
 
-        rc = run_cli_capture({"curlee", "run", "--profile-format=yaml", run_success.string()},
-                             out, err);
+        rc = run_cli_capture({"curlee", "run", "--profile-format=yaml", run_success.string()}, out,
+                             err);
         if (rc != 2)
         {
             fail("expected usage exit code for invalid --profile-format=");
         }
         expect_contains(err, "expected --profile-format= to be one of: text, json", "stderr");
+    }
+
+    // Static-fuel drift oracle (issue #262): when the runtime profile shows
+    // fuel_used exceeding the declared static fuel bound on `main`, an advisory
+    // warning is emitted on stderr WITHOUT changing pass/fail semantics (the
+    // out-of-fuel failure still exits non-zero).
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "run", "--profile", "--fuel", "200", fuel_drift.string()}, out, err);
+        if (rc == 0)
+        {
+            fail("expected drift fixture to exhaust fuel and fail");
+        }
+        expect_contains(err, "out of fuel", "stderr");
+        expect_contains(err, "curlee profile: steps=200", "stderr");
+        expect_contains(err,
+                        "curlee warning: runtime fuel_used (200) exceeds the declared static "
+                        "fuel bound (100) on 'main'",
+                        "stderr");
+    }
+
+    // No drift warning when the runtime fuel stays within the declared bound:
+    // a successful run (fuel_used == 0) must not emit the advisory.
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "run", "--profile", "--fuel", "100", run_success.string()}, out, err);
+        if (rc != 0)
+        {
+            fail("expected successful run; stderr=" + err);
+        }
+        if (err.find("curlee warning: runtime fuel_used") != std::string::npos)
+        {
+            fail("expected no fuel drift warning on a within-bound successful run");
+        }
     }
 
     std::cout << "OK\n";

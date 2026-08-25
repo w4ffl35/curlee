@@ -1,0 +1,13 @@
+// Positive: straight-line function with a sufficient static fuel bound.
+// The cost model charges 1 per `let`, 1 per `return`, plus expression costs;
+// a bound of 100 is far above the actual cost, so verification must pass.
+fn add(a: Int, b: Int) -> Int
+  [ fuel 100; ]
+{
+  let sum: Int = a + b;
+  return sum;
+}
+
+fn main() -> Int {
+  return add(1, 2);
+}

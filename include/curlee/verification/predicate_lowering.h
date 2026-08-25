@@ -73,4 +73,15 @@ using LoweringResult = std::variant<z3::expr, curlee::diag::Diagnostic>;
 [[nodiscard]] LoweringResult lower_predicate_int(const curlee::parser::Pred& pred,
                                                  const LoweringContext& ctx);
 
+/**
+ * @brief Lower a parsed predicate into an Int Z3 expression, naming the clause.
+ *
+ * Same as `lower_predicate_int` but allows the caller to supply the clause
+ * name used in the "… clause must resolve to Int" diagnostic (e.g. "fuel" for
+ * static WCET bounds).
+ */
+[[nodiscard]] LoweringResult lower_predicate_int_named(const curlee::parser::Pred& pred,
+                                                       const LoweringContext& ctx,
+                                                       std::string_view clause_name);
+
 } // namespace curlee::verification

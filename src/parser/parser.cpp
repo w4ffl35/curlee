@@ -269,8 +269,7 @@ class Parser
                 continue;
             }
 
-            if (check(TokenKind::KwFn) || check(TokenKind::KwExtern) ||
-                check(TokenKind::KwGhost))
+            if (check(TokenKind::KwFn) || check(TokenKind::KwExtern) || check(TokenKind::KwGhost))
             {
                 if (!seen_non_import)
                 {
@@ -427,8 +426,7 @@ class Parser
             while (match(TokenKind::Dot))
             {
                 const Token dot = previous();
-                const bool seg_is_ident =
-                    check(TokenKind::Identifier) || check(TokenKind::KwPhys);
+                const bool seg_is_ident = check(TokenKind::Identifier) || check(TokenKind::KwPhys);
                 if (!seg_is_ident)
                 {
                     return error_at(peek(), "expected identifier after '.' in capability name");
@@ -476,10 +474,8 @@ class Parser
                             .name = t.lexeme,
                             .type_arg = arg.lexeme};
         }
-        return TypeName{.span = t.span,
-                        .is_capability = false,
-                        .name = t.lexeme,
-                        .type_arg = std::nullopt};
+        return TypeName{
+            .span = t.span, .is_capability = false, .name = t.lexeme, .type_arg = std::nullopt};
     }
 
     [[nodiscard]] std::variant<ImportDecl, curlee::diag::Diagnostic> parse_import()
@@ -1035,10 +1031,8 @@ class Parser
         return error_at(peek(), "expected predicate");
     }
 
-    [[nodiscard]] std::variant<Function, curlee::diag::Diagnostic> parse_function(bool is_extern =
-                                                                                      false,
-                                                                                  bool is_ghost =
-                                                                                      false)
+    [[nodiscard]] std::variant<Function, curlee::diag::Diagnostic>
+    parse_function(bool is_extern = false, bool is_ghost = false)
     {
         if (is_extern)
         {
@@ -1111,6 +1105,7 @@ class Parser
         std::vector<Pred> requires_clauses;
         std::vector<Pred> ensures;
         std::vector<GhostLetStmt> ghost_lets;
+        std::optional<Pred> fuel_bound;
         if (match(TokenKind::LBracket))
         {
             while (!check(TokenKind::RBracket) && !is_at_end())
@@ -1148,10 +1143,27 @@ class Parser
                     }
                     ensures.push_back(std::get<Pred>(std::move(pred_res)));
                 }
+                else if (match(TokenKind::KwFuel))
+                {
+                    // Static WCET bound: `fuel <pred>;` — an Int-valued expression
+                    // over the function's inputs bounding worst-case cost. A
+                    // function may declare at most one fuel clause.
+                    auto pred_res = parse_pred();
+                    if (std::holds_alternative<curlee::diag::Diagnostic>(pred_res))
+                    {
+                        return std::get<curlee::diag::Diagnostic>(std::move(pred_res));
+                    }
+                    if (fuel_bound.has_value())
+                    {
+                        return error_at(peek(), "duplicate 'fuel' clause in contract block");
+                    }
+                    fuel_bound = std::get<Pred>(std::move(pred_res));
+                }
                 else
                 {
-                    return error_at(peek(),
-                                    "expected 'requires', 'ensures', or 'ghost let' in contract block");
+                    return error_at(
+                        peek(),
+                        "expected 'requires', 'ensures', 'ghost let', or 'fuel' in contract block");
                 }
 
                 if (auto err = consume(TokenKind::Semicolon, "expected ';' after contract clause");
@@ -1193,6 +1205,7 @@ class Parser
                 .requires_clauses = std::move(requires_clauses),
                 .ensures = std::move(ensures),
                 .ghost_lets = std::move(ghost_lets),
+                .fuel_bound = std::move(fuel_bound),
                 .return_type = return_type,
             };
             return fn;
@@ -1215,6 +1228,7 @@ class Parser
             .requires_clauses = std::move(requires_clauses),
             .ensures = std::move(ensures),
             .ghost_lets = std::move(ghost_lets),
+            .fuel_bound = std::move(fuel_bound),
             .return_type = return_type,
         };
         return fn;
@@ -1526,7 +1540,8 @@ class Parser
                     {
                         if (decreases.has_value())
                         {
-                            return error_at(peek(), "duplicate 'decreases' clause in loop contract");
+                            return error_at(peek(),
+                                            "duplicate 'decreases' clause in loop contract");
                         }
                         auto pred_res = parse_pred();
                         if (std::holds_alternative<curlee::diag::Diagnostic>(pred_res))
@@ -1537,18 +1552,20 @@ class Parser
                     }
                     else
                     {
-                        return error_at(peek(),
-                                        "expected 'invariant' or 'decreases' in loop contract block");
+                        return error_at(
+                            peek(), "expected 'invariant' or 'decreases' in loop contract block");
                     }
 
-                    if (auto err = consume(TokenKind::Semicolon, "expected ';' after loop contract clause");
+                    if (auto err = consume(TokenKind::Semicolon,
+                                           "expected ';' after loop contract clause");
                         err.has_value())
                     {
                         return *err;
                     }
                 }
 
-                if (auto err = consume(TokenKind::RBracket, "expected ']' to end loop contract block");
+                if (auto err =
+                        consume(TokenKind::RBracket, "expected ']' to end loop contract block");
                     err.has_value())
                 {
                     return *err;
@@ -2228,8 +2245,7 @@ class Parser
         if (match(TokenKind::KwPhys))
         {
             const Token kw = previous();
-            if (auto err = consume(TokenKind::Less, "expected '<' after 'phys'");
-                err.has_value())
+            if (auto err = consume(TokenKind::Less, "expected '<' after 'phys'"); err.has_value())
             {
                 return *err;
             }
@@ -2264,8 +2280,8 @@ class Parser
 
             Expr expr;
             expr.span = span_cover(kw.span, rparen.span);
-            expr.node = curlee::parser::PhysExpr{.element_kind = elem.lexeme,
-                                                 .lexeme = addr.lexeme};
+            expr.node =
+                curlee::parser::PhysExpr{.element_kind = elem.lexeme, .lexeme = addr.lexeme};
             return expr;
         }
 
@@ -2447,7 +2463,8 @@ class Dumper
             dump_type(*f.return_type);
         }
 
-        if (!f.requires_clauses.empty() || !f.ensures.empty() || !f.ghost_lets.empty())
+        if (!f.requires_clauses.empty() || !f.ensures.empty() || !f.ghost_lets.empty() ||
+            f.fuel_bound.has_value())
         {
             out_ << " [";
             for (const auto& g : f.ghost_lets)
@@ -2472,6 +2489,12 @@ class Dumper
             {
                 out_ << " ensures ";
                 dump_pred(e);
+                out_ << ";";
+            }
+            if (f.fuel_bound.has_value())
+            {
+                out_ << " fuel ";
+                dump_pred(*f.fuel_bound);
                 out_ << ";";
             }
             out_ << " ]";

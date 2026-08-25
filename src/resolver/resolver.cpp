@@ -25,8 +25,8 @@ using curlee::parser::CallExpr;
 using curlee::parser::Expr;
 using curlee::parser::ExprStmt;
 using curlee::parser::Function;
-using curlee::parser::GroupExpr;
 using curlee::parser::GhostLetStmt;
+using curlee::parser::GroupExpr;
 using curlee::parser::IfStmt;
 using curlee::parser::LetStmt;
 using curlee::parser::MatchStmt;
@@ -362,6 +362,13 @@ class Resolver
         }
         resolving_ensures_ = prev_resolving_ensures;
 
+        // The static fuel (WCET) bound is an Int-valued expression over the
+        // function's inputs; resolve names like any other contract clause.
+        if (f.fuel_bound.has_value())
+        {
+            resolve_pred(*f.fuel_bound);
+        }
+
         for (const auto& s : f.body.stmts)
         {
             resolve_stmt(s);
@@ -523,7 +530,8 @@ class Resolver
     void resolve_expr_node(const CallExpr& e, Span)
     {
         bool resolve_callee = true;
-        if (const auto* callee_name = std::get_if<NameExpr>(&e.callee->node); callee_name != nullptr)
+        if (const auto* callee_name = std::get_if<NameExpr>(&e.callee->node);
+            callee_name != nullptr)
         {
             if (is_builtin_call_name(callee_name->name))
             {
@@ -729,12 +737,14 @@ ResolveResult resolve(const curlee::parser::Program& program,
 bool is_builtin_call_name(std::string_view name)
 {
     static const std::unordered_set<std::string_view> builtins = {
-        "print",           "__read_line",      "__tty_clear",      "__fs_read_text",
-        "__fs_write_text", "__tty_write_at",   "__tty_flush",      "__rng_next_int",
-        "__vec_new_int",   "__vec_len_int",    "__vec_push_int",   "__vec_get_int",
-        "__vec_set_int",   "__vec_new_bool",   "__vec_len_bool",   "__vec_push_bool",
-        "__vec_get_bool",  "__vec_set_bool",   "__set_new_int",    "__set_has_int",
-        "__set_insert_int", "variant_is", "variant_unwrap",
+        "print",           "__read_line",     "__tty_clear",
+        "__fs_read_text",  "__fs_write_text", "__tty_write_at",
+        "__tty_flush",     "__rng_next_int",  "__vec_new_int",
+        "__vec_len_int",   "__vec_push_int",  "__vec_get_int",
+        "__vec_set_int",   "__vec_new_bool",  "__vec_len_bool",
+        "__vec_push_bool", "__vec_get_bool",  "__vec_set_bool",
+        "__set_new_int",   "__set_has_int",   "__set_insert_int",
+        "variant_is",      "variant_unwrap",
     };
     return builtins.contains(name);
 }

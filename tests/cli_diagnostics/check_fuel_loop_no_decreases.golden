@@ -1,0 +1,4 @@
+tests/fixtures/check_fuel_loop_no_decreases.curlee:7:3: error: fuel cost requires a 'decreases' variant on every loop (add '[ decreases <expr>; ]' to the loop contract)
+  |
+  |   while (i < n) {
+  |   ^

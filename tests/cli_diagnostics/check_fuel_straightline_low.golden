@@ -1,0 +1,6 @@
+tests/fixtures/check_fuel_straightline_low.curlee:4:4: error: fuel bound may be exceeded: worst-case cost exceeds the declared fuel '0'
+  |
+  | fn add(a: Int, b: Int) -> Int
+  |    ^
+note: goal: total_cost <= 0
+note: hint: raise the fuel bound or reduce the worst-case cost (e.g. add a 'decreases' variant to loops, or a lower declared bound on callees)

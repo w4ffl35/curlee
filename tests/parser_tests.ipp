@@ -145,8 +145,7 @@ fn main() -> Unit {
 
     // Generic type arguments: success and parser diagnostics.
     {
-        const std::string src =
-            R"(fn main(v: Vec<Int>) -> Int { return __vec_len_int(v); })";
+        const std::string src = R"(fn main(v: Vec<Int>) -> Int { return __vec_len_int(v); })";
         const auto lexed = lexer::lex(src);
         if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
         {
@@ -606,6 +605,49 @@ fn g() -> Unit { return; }
             fail("dump missing ensures-only contract");
         }
     }
+
+    // Static fuel (WCET) clause (issue #262): parses into the function and is
+    // round-tripped by the dumper.
+    {
+        const std::string src = R"(fn accumulate(n: Int) -> Int
+  [ requires n >= 0;
+    ensures result >= 0;
+    fuel 3 * n + 10; ]
+{
+  return n;
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on fuel program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on fuel program");
+        }
+        const auto& program = std::get<parser::Program>(parsed);
+        if (program.functions.empty())
+        {
+            fail("expected at least one function");
+        }
+        const auto& fn = program.functions.front();
+        if (!fn.fuel_bound.has_value())
+        {
+            fail("expected fuel_bound to be parsed");
+        }
+        const std::string dumped = parser::dump(program);
+        if (dumped.find("fuel 3 * n + 10") == std::string::npos)
+        {
+            fail("dump missing fuel clause");
+        }
+    }
+
+    // Duplicate fuel clauses are rejected.
+    expect_parse_error_contains("fn f() -> Int [ fuel 1; fuel 2; ] { return 0; }\n",
+                                "duplicate 'fuel' clause in contract block");
 
     // Dumper: cover has_types short-circuit cases and optional return type.
     {
@@ -1594,8 +1636,9 @@ fn main() -> Unit {
     expect_parse_error_contains("fn f(x: ) -> Int { return 0; }\n", "expected type name");
 
     // Contract block errors.
-    expect_parse_error_contains("fn f() -> Int [ foo; ] { return 0; }\n",
-                                "expected 'requires' or 'ensures' in contract block");
+    expect_parse_error_contains(
+        "fn f() -> Int [ foo; ] { return 0; }\n",
+        "expected 'requires', 'ensures', 'ghost let', or 'fuel' in contract block");
     expect_parse_error_contains("fn f() -> Int [ requires true ] { return 0; }\n",
                                 "expected ';' after contract clause");
     expect_parse_error_contains("fn f() -> Int [ requires true; ",

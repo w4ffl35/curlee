@@ -1,0 +1,13 @@
+// Negative: straight-line function with a static fuel bound that is too low.
+// The cost model charges at least 1 per statement; a bound of 0 must fail with
+// a span-precise counterexample diagnostic.
+fn add(a: Int, b: Int) -> Int
+  [ fuel 0; ]
+{
+  let sum: Int = a + b;
+  return sum;
+}
+
+fn main() -> Int {
+  return add(1, 2);
+}
