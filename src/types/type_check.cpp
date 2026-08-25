@@ -22,6 +22,7 @@ using curlee::parser::Expr;
 using curlee::parser::ExprStmt;
 using curlee::parser::Function;
 using curlee::parser::GroupExpr;
+using curlee::parser::GhostLetStmt;
 using curlee::parser::IfStmt;
 using curlee::parser::LetStmt;
 using curlee::parser::MatchStmt;
@@ -419,6 +420,15 @@ class Checker
             declare_var(f.params[i].name, it->second.params[i]);
         }
 
+        // Contract-block ghost snapshots are declared (and their initializers
+        // type-checked) before the body so that `ensures` clauses referencing
+        // the snapshot names type-check against them. The snapshot bindings are
+        // verification-only and never reach codegen.
+        for (const auto& g : f.ghost_lets)
+        {
+            check_stmt_node(g, f.span, it->second.result);
+        }
+
         for (const auto& s : f.body.stmts)
         {
             check_stmt(s, it->second.result);
@@ -455,6 +465,41 @@ class Checker
             error_at(stmt_span, "type mismatch in let: expected " +
                                     std::string(to_string(*declared)) + ", got " +
                                     std::string(to_string(*init)));
+        }
+    }
+
+    void check_stmt_node(const GhostLetStmt& s, Span stmt_span, Type)
+    {
+        // Ghost snapshots are type-checked like ordinary lets: the snapshot name
+        // is declared with the annotated type (or inferred from the initializer
+        // when omitted) and the initializer is checked for a matching type. The
+        // binding is verification-only (the emitter rejects it in emitted
+        // bodies), but type errors in ghost bindings must still be caught here.
+        auto init = check_expr(s.value);
+        if (!init.has_value())
+        {
+            return;
+        }
+
+        if (s.type.has_value())
+        {
+            auto declared = type_from_ast(*s.type);
+            if (!declared.has_value())
+            {
+                return;
+            }
+            if (*init != *declared)
+            {
+                error_at(stmt_span, "type mismatch in ghost let: expected " +
+                                        std::string(to_string(*declared)) + ", got " +
+                                        std::string(to_string(*init)));
+            }
+            declare_var(s.name, *declared);
+        }
+        else
+        {
+            // Infer the snapshot type from the initializer.
+            declare_var(s.name, *init);
         }
     }
 

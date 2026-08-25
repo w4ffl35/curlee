@@ -27,6 +27,7 @@ using curlee::parser::Expr;
 using curlee::parser::ExprStmt;
 using curlee::parser::Function;
 using curlee::parser::GroupExpr;
+using curlee::parser::GhostLetStmt;
 using curlee::parser::IfStmt;
 using curlee::parser::IntExpr;
 using curlee::parser::LetStmt;
@@ -240,6 +241,17 @@ class CEmitter
             }
         }
 
+        // Ghost functions are verification-only and erased from the freestanding
+        // C output. They cannot be `main` (the entry point must be runnable).
+        for (const auto& f : program.functions)
+        {
+            if (f.is_ghost && f.name == "main")
+            {
+                diags_.push_back(error_at(f.span, "ghost function cannot be 'main'"));
+                return diags_;
+            }
+        }
+
         const Function* entry = find_main(program);
         if (entry == nullptr)
         {
@@ -294,9 +306,14 @@ class CEmitter
         // Function definitions in declaration order (deterministic golden output).
         // Extern functions have no definition: they were already declared via
         // emit_forward_decls (extern ... ;) and the symbol resolves at link time.
+        // Ghost functions are verification-only and erased from the C output.
         for (const auto& f : program.functions)
         {
             if (f.is_extern)
+            {
+                continue;
+            }
+            if (f.is_ghost)
             {
                 continue;
             }
@@ -442,6 +459,12 @@ class CEmitter
     {
         for (const auto& f : program.functions)
         {
+            // Ghost functions are verification-only and erased from the C output;
+            // their signatures are never emitted, so skip validation.
+            if (f.is_ghost)
+            {
+                continue;
+            }
             // Parameters: Phys<T> is fine (uintN_t*); capabilities are dropped;
             // Unit/String/Vec/Set are rejected.
             for (const auto& p : f.params)
@@ -509,6 +532,12 @@ class CEmitter
     {
         for (const auto& f : program_->functions)
         {
+            // Ghost functions are verification-only and erased from the C
+            // output: no forward declaration is emitted.
+            if (f.is_ghost)
+            {
+                continue;
+            }
             const std::string ret = return_c_type(f);
             if (f.is_extern)
             {
@@ -821,6 +850,10 @@ class CEmitter
 
     void emit_function(const Function& fn, bool is_main)
     {
+        // Contract-block ghost snapshots are verification-only: like `requires`
+        // and `ensures`, they are enforced by the verifier before emission and
+        // are not carried into the emitted C.
+        //
         // Contracts are enforced by verification before emission; they are not
         // carried into the emitted C (the verifier is the gate).
         phys_vars_.clear();
@@ -1015,6 +1048,13 @@ class CEmitter
     void emit_stmt(const Stmt& stmt)
     {
         std::visit([&](const auto& node) { emit_stmt_node(node, stmt.span); }, stmt.node);
+    }
+
+    void emit_stmt_node(const GhostLetStmt&, Span)
+    {
+        // Ghost snapshots are verification-only and produce no runtime code:
+        // erase the statement from the C output (the verifier has already
+        // discharged any obligations referencing it).
     }
 
     void emit_stmt_node(const LetStmt& stmt, Span span)
@@ -1643,6 +1683,14 @@ class CEmitter
         {
             push_error(span, "unknown function '" + std::string(callee_fn_name) +
                              "' in freestanding target");
+            return "0";
+        }
+        if (callee->is_ghost)
+        {
+            // Ghost functions are verification-only and erased from the C
+            // output: a runnable function must never call one (it would dangle).
+            push_error(span, "cannot call ghost function '" + std::string(callee_fn_name) +
+                             "' from runnable code");
             return "0";
         }
         if (expr.args.size() != callee->params.size())

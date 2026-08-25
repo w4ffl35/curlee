@@ -450,6 +450,20 @@ std::string pred_to_string(const curlee::parser::Pred& pred)
             {
                 return std::string(node.name);
             }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PredCall>)
+            {
+                std::string out = std::string(node.callee) + "(";
+                for (std::size_t i = 0; i < node.args.size(); ++i)
+                {
+                    if (i > 0)
+                    {
+                        out += ", ";
+                    }
+                    out += pred_to_string(node.args[i]);
+                }
+                out += ")";
+                return out;
+            }
             else if constexpr (std::is_same_v<Node, curlee::parser::PredUnary>)
             {
                 return token_op_to_string(node.op) + pred_to_string(*node.rhs);
@@ -503,6 +517,20 @@ pred_to_string_with_subst(const curlee::parser::Pred& pred,
                     return it->second;
                 }
                 return std::string(node.name);
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::PredCall>)
+            {
+                std::string out = std::string(node.callee) + "(";
+                for (std::size_t i = 0; i < node.args.size(); ++i)
+                {
+                    if (i > 0)
+                    {
+                        out += ", ";
+                    }
+                    out += pred_to_string_with_subst(node.args[i], substitutions);
+                }
+                out += ")";
+                return out;
             }
             else if constexpr (std::is_same_v<T, curlee::parser::PredUnary>)
             {
@@ -1037,6 +1065,10 @@ void find_call_exprs_in_stmt(const curlee::parser::Stmt& stmt, std::size_t offse
             {
                 best = find_call_expr_at(node.value, offset, best);
             }
+            else if constexpr (std::is_same_v<T, curlee::parser::GhostLetStmt>)
+            {
+                best = find_call_expr_at(node.value, offset, best);
+            }
             else if constexpr (std::is_same_v<T, curlee::parser::ReturnStmt>)
             {
                 if (node.value)
@@ -1127,6 +1159,10 @@ void find_exprs_in_stmt(const curlee::parser::Stmt& stmt, std::size_t offset,
         {
             using T = std::decay_t<decltype(node)>;
             if constexpr (std::is_same_v<T, curlee::parser::LetStmt>)
+            {
+                best = find_expr_at(node.value, offset, best);
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::GhostLetStmt>)
             {
                 best = find_expr_at(node.value, offset, best);
             }

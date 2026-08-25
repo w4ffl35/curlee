@@ -3325,6 +3325,126 @@ fn main() -> Unit {
         }
     }
 
+    // Ghost functions are verification-only: they must produce no bytecode.
+    {
+        const std::string source = R"(
+ghost fn helper(x: Int) -> Int [ ensures result > x; ] { return x + 1; }
+fn main() -> Int { return 0; }
+)";
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for ghost fn codegen test");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for ghost fn codegen test");
+        }
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected ghost fn program to emit without error");
+        }
+        const auto& chunk = std::get<curlee::vm::Chunk>(emitted);
+        if (chunk.code.empty())
+        {
+            fail("expected main to produce bytecode");
+        }
+    }
+
+    // A runnable function that calls a ghost function must be rejected.
+    {
+        const std::string source = R"(
+ghost fn helper(x: Int) -> Int [ ensures result > x; ] { return x + 1; }
+fn main() -> Int { return helper(0); }
+)";
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for ghost call rejection test");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for ghost call rejection test");
+        }
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected ghost call from runnable code to be rejected");
+        }
+    }
+
+    // A ghost function cannot be `main`: the entry point must be runnable.
+    {
+        const std::string source = R"(
+ghost fn main() -> Int { return 0; }
+)";
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for ghost main rejection test");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for ghost main rejection test");
+        }
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected ghost main to be rejected by the emitter");
+        }
+    }
+
+    // A runnable function carrying a contract-block ghost snapshot emits
+    // successfully: the snapshot is verification-only and erased from the
+    // bytecode (like requires/ensures).
+    {
+        const std::string source = R"(
+fn transfer(src: Int, dst: Int) -> Int
+  [ ghost let src_before = src;
+    ensures result == src_before; ]
+{
+  return src;
+}
+fn main() -> Int { return transfer(5, 0); }
+)";
+        const auto lexed = curlee::lexer::lex(source);
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lexed))
+        {
+            fail("expected lexing to succeed for contract-block snapshot emit test");
+        }
+        const auto& tokens = std::get<std::vector<curlee::lexer::Token>>(lexed);
+        const auto parsed = curlee::parser::parse(tokens);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(parsed))
+        {
+            fail("expected parsing to succeed for contract-block snapshot emit test");
+        }
+        const auto& program = std::get<curlee::parser::Program>(parsed);
+
+        const auto emitted = curlee::compiler::emit_bytecode(program);
+        if (std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+        {
+            fail("expected contract-block snapshot program to emit without error");
+        }
+        const auto& chunk = std::get<curlee::vm::Chunk>(emitted);
+        if (chunk.code.empty())
+        {
+            fail("expected main to produce bytecode");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

@@ -330,6 +330,10 @@ class Lexer
         {
             return TokenKind::KwWhere;
         }
+        if (lexeme == "ghost")
+        {
+            return TokenKind::KwGhost;
+        }
         if (lexeme == "unsafe")
         {
             return TokenKind::KwUnsafe;

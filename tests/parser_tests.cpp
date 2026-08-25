@@ -1672,7 +1672,7 @@ fn main() -> Unit {
 
     // Contract block errors.
     expect_parse_error_contains("fn f() -> Int [ foo; ] { return 0; }\n",
-                                "expected 'requires' or 'ensures' in contract block");
+                                "expected 'requires', 'ensures', or 'ghost let' in contract block");
     expect_parse_error_contains("fn f() -> Int [ requires true ] { return 0; }\n",
                                 "expected ';' after contract clause");
     expect_parse_error_contains("fn f() -> Int [ requires true; ",
@@ -1862,6 +1862,77 @@ extern f() -> Unit;
 fn main() -> Unit { return; }
 )";
         expect_parse_error_contains(src, "expected 'fn'");
+    }
+
+    // Contract-block `ghost let` snapshot parses into Function::ghost_lets and
+    // round-trips through the dumper.
+    {
+        const std::string src = R"(
+fn transfer(src: Int, dst: Int) -> Int
+  [ ghost let src_before = src;
+    requires dst >= 0;
+    ensures result == src_before; ]
+{
+  return src;
+}
+fn main() -> Int { return transfer(5, 0); }
+)";
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on contract-block ghost let program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on contract-block ghost let program");
+        }
+        const auto& prog = std::get<parser::Program>(parsed);
+        if (prog.functions.empty())
+        {
+            fail("expected functions in contract-block ghost let program");
+        }
+        const auto& fn = prog.functions[0];
+        if (fn.ghost_lets.size() != 1)
+        {
+            fail("expected one contract-block ghost let");
+        }
+        if (fn.ghost_lets[0].name != "src_before")
+        {
+            fail("expected snapshot name 'src_before'");
+        }
+        if (fn.requires_clauses.size() != 1 || fn.ensures.size() != 1)
+        {
+            fail("expected requires/ensures preserved alongside ghost let");
+        }
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("ghost let src_before") == std::string::npos)
+        {
+            fail("dump missing contract-block ghost let");
+        }
+    }
+
+    // A body-level `ghost let` also parses as a GhostLetStmt statement.
+    {
+        const std::string src = R"(
+fn f() -> Int {
+  ghost let snap = 3;
+  return 3;
+}
+fn main() -> Int { return f(); }
+)";
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on body ghost let program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on body ghost let program");
+        }
     }
 
     std::cout << "OK\n";

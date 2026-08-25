@@ -21,6 +21,7 @@ using curlee::parser::CallExpr;
 using curlee::parser::Expr;
 using curlee::parser::ExprStmt;
 using curlee::parser::Function;
+using curlee::parser::GhostLetStmt;
 using curlee::parser::IfStmt;
 using curlee::parser::LetStmt;
 using curlee::parser::MatchStmt;
@@ -164,6 +165,18 @@ class Emitter
             }
         }
 
+        // Ghost functions are verification-only: they are erased from codegen
+        // and produce no bytecode. They cannot be `main` (the entry point must
+        // be runnable), and they are simply skipped in the emit loop below.
+        for (const auto& f : program.functions)
+        {
+            if (f.is_ghost && f.name == "main")
+            {
+                diags_.push_back(error_at(f.span, "ghost function cannot be 'main'"));
+                return diags_;
+            }
+        }
+
         const Function* entry = find_main(program);
         if (entry == nullptr)
         {
@@ -177,6 +190,11 @@ class Emitter
         {
             if (f.name == "main")
             {
+                continue;
+            }
+            if (f.is_ghost)
+            {
+                // Ghost functions produce no bytecode.
                 continue;
             }
             emit_function(f, /*is_main=*/false);
@@ -405,6 +423,13 @@ class Emitter
         const auto slot = static_cast<std::uint16_t>(local_base_ + locals_.size());
         locals_.emplace(stmt.name, slot);
         chunk_.emit_local(OpCode::StoreLocal, slot, span);
+    }
+
+    void emit_stmt_node(const GhostLetStmt&, Span)
+    {
+        // Ghost snapshots are verification-only and produce no runtime code:
+        // erase the statement from the bytecode (the verifier has already
+        // discharged any obligations referencing it).
     }
 
     void emit_stmt_node(const ReturnStmt& stmt, Span span)
@@ -1266,6 +1291,15 @@ class Emitter
         }
 
         const auto* callee_decl = fn_it->second;
+        if (callee_decl->is_ghost)
+        {
+            // Ghost functions are verification-only and erased from the bytecode:
+            // a runnable function must never call one (the call would dangle).
+            diags_.push_back(error_at(span, "cannot call ghost function '" +
+                                                std::string(callee_fn_name) +
+                                                "' from runnable code"));
+            return;
+        }
         if (expr.args.size() != callee_decl->params.size())
         {
             diags_.push_back(

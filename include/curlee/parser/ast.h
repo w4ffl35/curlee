@@ -50,6 +50,19 @@ struct PredName
     std::string_view name;
 };
 
+/**
+ * @brief Function call predicate (e.g. `old_sum(v)`).
+ *
+ * Calls in predicates are restricted to ghost functions (verification-only).
+ * They are lowered to uninterpreted function applications by the verifier,
+ * mirroring the phys_read machinery.
+ */
+struct PredCall
+{
+    std::string_view callee;
+    std::vector<Pred> args;
+};
+
 /** @brief Unary predicate (e.g. `!p`). */
 struct PredUnary
 {
@@ -77,7 +90,7 @@ struct PredGroup
 struct Pred
 {
     curlee::source::Span span;
-    std::variant<PredInt, PredBool, PredName, PredUnary, PredBinary, PredGroup> node;
+    std::variant<PredInt, PredBool, PredName, PredCall, PredUnary, PredBinary, PredGroup> node;
 };
 
 /** Forward declaration for expression nodes. */
@@ -208,6 +221,22 @@ struct LetStmt
     Expr value;
 };
 
+/**
+ * @brief Ghost let statement (verification-only snapshot binding).
+ *
+ * `ghost let x = e;` freezes the current value of `e` into a fresh name `x`.
+ * The binding is visible to verification (so later mutation of the source
+ * binding does not affect the snapshot) but produces no runtime code: it is
+ * erased from the emitted bytecode and freestanding C. The type annotation is
+ * optional; when omitted it is inferred from the initializer expression.
+ */
+struct GhostLetStmt
+{
+    std::string_view name;
+    std::optional<TypeName> type;
+    Expr value;
+};
+
 /** @brief Return statement (optional return value). */
 struct ReturnStmt
 {
@@ -280,7 +309,8 @@ struct BlockStmt
 struct Stmt
 {
     curlee::source::Span span;
-    std::variant<LetStmt, ReturnStmt, ExprStmt, BlockStmt, IfStmt, WhileStmt, MatchStmt, UnsafeStmt>
+    std::variant<LetStmt, GhostLetStmt, ReturnStmt, ExprStmt, BlockStmt, IfStmt, WhileStmt,
+                 MatchStmt, UnsafeStmt>
         node;
 };
 
@@ -306,6 +336,12 @@ struct Function
     // cannot execute them (freestanding build --link only).
     bool is_extern = false;
 
+    // True when this is a `ghost fn` (verification-only). Ghost functions are
+    // type-checked and verified like normal functions, but their bodies are
+    // erased from codegen: they are never emitted to VM bytecode or freestanding
+    // C, and they cannot be `main`.
+    bool is_ghost = false;
+
     struct Param
     {
         curlee::source::Span span;
@@ -317,6 +353,14 @@ struct Function
     std::vector<Param> params;
     std::vector<Pred> requires_clauses;
     std::vector<Pred> ensures;
+
+    // Contract-block ghost snapshots: `ghost let name[: Type] = expr;` clauses
+    // written inside the `[...]` contract block, before the body. Each snapshot
+    // freezes the pre-state value of `expr` into `name` so the function's own
+    // `ensures` (and, via call-site post-state inheritance, its callers) can
+    // reference it. Like all ghost code, snapshots are verification-only and
+    // erased from codegen.
+    std::vector<GhostLetStmt> ghost_lets;
 
     // Optional return type (MVP: identifier only). Present when `->` appears.
     std::optional<TypeName> return_type;

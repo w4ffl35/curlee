@@ -41,7 +41,8 @@ static std::unique_ptr<curlee::parser::Expr> make_expr_ptr(curlee::parser::Expr&
 static curlee::parser::Pred make_pred(
     curlee::source::Span span,
     std::variant<curlee::parser::PredInt, curlee::parser::PredBool, curlee::parser::PredName,
-                 curlee::parser::PredUnary, curlee::parser::PredBinary, curlee::parser::PredGroup>
+                 curlee::parser::PredCall, curlee::parser::PredUnary,
+                 curlee::parser::PredBinary, curlee::parser::PredGroup>
         node)
 {
     curlee::parser::Pred p;

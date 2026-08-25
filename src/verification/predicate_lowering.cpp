@@ -6,6 +6,15 @@ namespace curlee::verification
 namespace
 {
 
+z3::sort pred_sort_for_kind(z3::context& ctx, curlee::types::TypeKind kind)
+{
+    if (kind == curlee::types::TypeKind::Bool)
+    {
+        return ctx.bool_sort();
+    }
+    return ctx.int_sort();
+}
+
 enum class PredType
 {
     Int,
@@ -68,6 +77,73 @@ TypedResult lower_node(const curlee::parser::Pred& pred, const LoweringContext& 
                 }
                 return error_at(pred.span,
                                 "unknown predicate name '" + std::string(node.name) + "'");
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PredCall>)
+            {
+                // Calls in predicates are restricted to ghost functions, which
+                // lower to uninterpreted function applications (mirroring the
+                // phys_read machinery).
+                if (ctx.ghost_fns == nullptr)
+                {
+                    return error_at(pred.span,
+                                    "calls are not supported in verification expressions");
+                }
+                auto sig_it = ctx.ghost_fns->find(node.callee);
+                if (sig_it == ctx.ghost_fns->end())
+                {
+                    return error_at(pred.span, "unknown ghost function '" +
+                                                   std::string(node.callee) + "'");
+                }
+                const GhostFnSig& sig = sig_it->second;
+                if (node.args.size() != sig.params.size())
+                {
+                    return error_at(pred.span,
+                                    "ghost function '" + std::string(node.callee) +
+                                        "' expects " + std::to_string(sig.params.size()) +
+                                        " argument(s), got " +
+                                        std::to_string(node.args.size()));
+                }
+
+                std::vector<z3::expr> arg_exprs;
+                arg_exprs.reserve(node.args.size());
+                for (std::size_t i = 0; i < node.args.size(); ++i)
+                {
+                    auto arg_res = lower_node(node.args[i], ctx);
+                    if (std::holds_alternative<curlee::diag::Diagnostic>(arg_res))
+                    {
+                        return std::get<curlee::diag::Diagnostic>(arg_res);
+                    }
+                    auto arg = std::get<TypedExpr>(arg_res);
+                    const bool want_bool = (sig.params[i] == curlee::types::TypeKind::Bool);
+                    const bool got_bool = (arg.type == PredType::Bool);
+                    if (want_bool != got_bool)
+                    {
+                        return error_at(node.args[i].span,
+                                        "ghost function argument type mismatch");
+                    }
+                    arg_exprs.push_back(arg.expr);
+                }
+
+                if (sig.result != curlee::types::TypeKind::Int &&
+                    sig.result != curlee::types::TypeKind::Bool)
+                {
+                    return error_at(pred.span, "ghost function '" + std::string(node.callee) +
+                                                   "' must return Int or Bool in predicates");
+                }
+
+                z3::sort_vector arg_sorts(ctx.ctx);
+                for (const auto k : sig.params)
+                {
+                    arg_sorts.push_back(pred_sort_for_kind(ctx.ctx, k));
+                }
+                const z3::sort res_sort = pred_sort_for_kind(ctx.ctx, sig.result);
+                const std::string fname = "ghost_" + std::string(node.callee);
+                auto decl = ctx.ctx.function(fname.c_str(), arg_sorts, res_sort);
+
+                z3::expr app = decl(static_cast<unsigned>(arg_exprs.size()), arg_exprs.data());
+                return TypedExpr{app, sig.result == curlee::types::TypeKind::Bool ? PredType::Bool
+                                                                                  : PredType::Int,
+                                 false};
             }
             else if constexpr (std::is_same_v<Node, curlee::parser::PredUnary>)
             {

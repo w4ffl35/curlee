@@ -73,6 +73,10 @@ void assign_expr_ids_stmt(curlee::parser::Stmt& stmt, std::size_t& next_id)
             {
                 assign_expr_ids(node.value, next_id);
             }
+            else if constexpr (std::is_same_v<Node, curlee::parser::GhostLetStmt>)
+            {
+                assign_expr_ids(node.value, next_id);
+            }
             else if constexpr (std::is_same_v<Node, curlee::parser::ReturnStmt>)
             {
                 if (node.value.has_value())
@@ -265,7 +269,8 @@ class Parser
                 continue;
             }
 
-            if (check(TokenKind::KwFn) || check(TokenKind::KwExtern))
+            if (check(TokenKind::KwFn) || check(TokenKind::KwExtern) ||
+                check(TokenKind::KwGhost))
             {
                 if (!seen_non_import)
                 {
@@ -273,10 +278,21 @@ class Parser
                 }
                 seen_non_import = true;
 
-                // `extern fn name(...) [contracts];` declares a function whose
-                // implementation is provided at link time; `fn` defines one.
-                const bool is_extern = check(TokenKind::KwExtern);
-                auto fun = parse_function(is_extern);
+                // `ghost fn name(...) [contracts] { ... }` is a verification-only
+                // function (erased from codegen); `extern fn ...;` declares a
+                // function whose implementation is provided at link time; `fn`
+                // defines one.
+                bool is_ghost = false;
+                bool is_extern = false;
+                if (check(TokenKind::KwGhost))
+                {
+                    is_ghost = true;
+                }
+                else if (check(TokenKind::KwExtern))
+                {
+                    is_extern = true;
+                }
+                auto fun = parse_function(is_extern, is_ghost);
                 if (std::holds_alternative<curlee::diag::Diagnostic>(fun))
                 {
                     diagnostics_.push_back(std::get<curlee::diag::Diagnostic>(std::move(fun)));
@@ -949,6 +965,44 @@ class Parser
         if (match(TokenKind::Identifier))
         {
             const Token name = previous();
+
+            // Function call predicate: `name(args...)`. Restricted to ghost
+            // functions by the resolver/verifier.
+            if (check(TokenKind::LParen))
+            {
+                advance(); // consume '('
+                std::vector<Pred> args;
+                if (!check(TokenKind::RParen))
+                {
+                    while (true)
+                    {
+                        auto arg_res = parse_pred();
+                        if (std::holds_alternative<curlee::diag::Diagnostic>(arg_res))
+                        {
+                            return std::get<curlee::diag::Diagnostic>(std::move(arg_res));
+                        }
+                        args.push_back(std::get<Pred>(std::move(arg_res)));
+
+                        if (match(TokenKind::Comma))
+                        {
+                            continue;
+                        }
+                        break;
+                    }
+                }
+                if (auto err = consume(TokenKind::RParen, "expected ')' after predicate call");
+                    err.has_value())
+                {
+                    return *err;
+                }
+                const Token rparen = previous();
+
+                Pred pred;
+                pred.span = span_cover(name.span, rparen.span);
+                pred.node = PredCall{.callee = name.lexeme, .args = std::move(args)};
+                return pred;
+            }
+
             Pred pred;
             pred.span = name.span;
             pred.node = PredName{.name = name.lexeme};
@@ -982,11 +1036,20 @@ class Parser
     }
 
     [[nodiscard]] std::variant<Function, curlee::diag::Diagnostic> parse_function(bool is_extern =
-                                                                                    false)
+                                                                                      false,
+                                                                                  bool is_ghost =
+                                                                                      false)
     {
         if (is_extern)
         {
             if (auto err = consume(TokenKind::KwExtern, "expected 'extern'"); err.has_value())
+            {
+                return *err;
+            }
+        }
+        if (is_ghost)
+        {
+            if (auto err = consume(TokenKind::KwGhost, "expected 'ghost'"); err.has_value())
             {
                 return *err;
             }
@@ -1047,10 +1110,26 @@ class Parser
 
         std::vector<Pred> requires_clauses;
         std::vector<Pred> ensures;
+        std::vector<GhostLetStmt> ghost_lets;
         if (match(TokenKind::LBracket))
         {
             while (!check(TokenKind::RBracket) && !is_at_end())
             {
+                if (check(TokenKind::KwGhost))
+                {
+                    // `ghost let name[: Type] = expr;` — pre-state snapshot
+                    // clause. The snapshot name is visible to this function's
+                    // `requires`/`ensures` and (via call-site post-state
+                    // inheritance) to callers.
+                    auto ghost_res = parse_ghost_let_clause();
+                    if (std::holds_alternative<curlee::diag::Diagnostic>(ghost_res))
+                    {
+                        return std::get<curlee::diag::Diagnostic>(std::move(ghost_res));
+                    }
+                    ghost_lets.push_back(std::get<GhostLetStmt>(std::move(ghost_res)));
+                    continue;
+                }
+
                 if (match(TokenKind::KwRequires))
                 {
                     auto pred_res = parse_pred();
@@ -1071,7 +1150,8 @@ class Parser
                 }
                 else
                 {
-                    return error_at(peek(), "expected 'requires' or 'ensures' in contract block");
+                    return error_at(peek(),
+                                    "expected 'requires', 'ensures', or 'ghost let' in contract block");
                 }
 
                 if (auto err = consume(TokenKind::Semicolon, "expected ';' after contract clause");
@@ -1112,6 +1192,7 @@ class Parser
                 .params = std::move(params),
                 .requires_clauses = std::move(requires_clauses),
                 .ensures = std::move(ensures),
+                .ghost_lets = std::move(ghost_lets),
                 .return_type = return_type,
             };
             return fn;
@@ -1129,9 +1210,11 @@ class Parser
             .name = name.lexeme,
             .body = std::move(body),
             .is_extern = false,
+            .is_ghost = is_ghost,
             .params = std::move(params),
             .requires_clauses = std::move(requires_clauses),
             .ensures = std::move(ensures),
+            .ghost_lets = std::move(ghost_lets),
             .return_type = return_type,
         };
         return fn;
@@ -1165,6 +1248,65 @@ class Parser
         const Token rbrace = previous();
 
         return Block{.span = span_cover(lbrace.span, rbrace.span), .stmts = std::move(stmts)};
+    }
+
+    // Parse `ghost let name[: Type] = expr;` — a verification-only snapshot
+    // binding used either as a body statement or as a contract-block clause
+    // (where it is stored in Function::ghost_lets). The type annotation is
+    // optional (inferred from the initializer).
+    [[nodiscard]] std::variant<GhostLetStmt, curlee::diag::Diagnostic> parse_ghost_let_clause()
+    {
+        if (auto err = consume(TokenKind::KwGhost, "expected 'ghost'"); err.has_value())
+        {
+            return *err;
+        }
+        if (auto err = consume(TokenKind::KwLet, "expected 'let' after 'ghost'"); err.has_value())
+        {
+            return *err;
+        }
+        if (!check(TokenKind::Identifier))
+        {
+            return error_at(peek(), "expected identifier after 'ghost let'");
+        }
+        const Token name = advance();
+
+        std::optional<TypeName> type;
+        if (match(TokenKind::Colon))
+        {
+            auto type_res = parse_type();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(type_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(type_res));
+            }
+            type = std::get<TypeName>(std::move(type_res));
+        }
+
+        if (auto err = consume(TokenKind::Equal, "expected '=' in ghost let statement");
+            err.has_value())
+        {
+            return *err;
+        }
+
+        auto expr_res = parse_expr();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(expr_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(expr_res));
+        }
+        Expr value = std::get<Expr>(std::move(expr_res));
+
+        if (auto err = consume(TokenKind::Semicolon, "expected ';' after ghost let statement");
+            err.has_value())
+        {
+            return *err;
+        }
+        const Token semi = previous();
+
+        GhostLetStmt ghost;
+        ghost.name = name.lexeme;
+        ghost.type = std::move(type);
+        ghost.value = std::move(value);
+        ghost.value.span = span_cover(name.span, semi.span);
+        return ghost;
     }
 
     [[nodiscard]] std::variant<Stmt, curlee::diag::Diagnostic> parse_stmt()
@@ -1203,6 +1345,24 @@ class Parser
             Stmt stmt;
             stmt.span = span_cover(kw.span, block.span);
             stmt.node = UnsafeStmt{.body = std::make_unique<Block>(std::move(block))};
+            return stmt;
+        }
+
+        if (check(TokenKind::KwGhost))
+        {
+            // `ghost let name[: Type] = expr;` — verification-only snapshot
+            // binding. The type annotation is optional (inferred from expr).
+            auto ghost_res = parse_ghost_let_clause();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(ghost_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(ghost_res));
+            }
+            GhostLetStmt ghost = std::get<GhostLetStmt>(std::move(ghost_res));
+
+            Stmt stmt{
+                .span = ghost.value.span,
+                .node = std::move(ghost),
+            };
             return stmt;
         }
 
@@ -2203,6 +2363,10 @@ class Dumper
         {
             out_ << "extern fn " << f.name << "(";
         }
+        else if (f.is_ghost)
+        {
+            out_ << "ghost fn " << f.name << "(";
+        }
         else
         {
             out_ << "fn " << f.name << "(";
@@ -2229,9 +2393,21 @@ class Dumper
             dump_type(*f.return_type);
         }
 
-        if (!f.requires_clauses.empty() || !f.ensures.empty())
+        if (!f.requires_clauses.empty() || !f.ensures.empty() || !f.ghost_lets.empty())
         {
             out_ << " [";
+            for (const auto& g : f.ghost_lets)
+            {
+                out_ << " ghost let " << g.name;
+                if (g.type.has_value())
+                {
+                    out_ << ": ";
+                    dump_type(*g.type);
+                }
+                out_ << " = ";
+                dump_expr(g.value);
+                out_ << ";";
+            }
             for (const auto& r : f.requires_clauses)
             {
                 out_ << " requires ";
@@ -2281,6 +2457,19 @@ class Dumper
         {
             out_ << " where ";
             dump_pred(*s.refinement);
+        }
+        out_ << " = ";
+        dump_expr(s.value);
+        out_ << ";";
+    }
+
+    void dump_stmt_node(const GhostLetStmt& s)
+    {
+        out_ << "ghost let " << s.name;
+        if (s.type.has_value())
+        {
+            out_ << ": ";
+            dump_type(*s.type);
         }
         out_ << " = ";
         dump_expr(s.value);
@@ -2455,6 +2644,20 @@ class Dumper
     void dump_pred_node(const PredInt& p) { out_ << p.lexeme; }
     void dump_pred_node(const PredBool& p) { out_ << (p.value ? "true" : "false"); }
     void dump_pred_node(const PredName& p) { out_ << p.name; }
+
+    void dump_pred_node(const PredCall& p)
+    {
+        out_ << p.callee << "(";
+        for (std::size_t i = 0; i < p.args.size(); ++i)
+        {
+            if (i > 0)
+            {
+                out_ << ", ";
+            }
+            dump_pred(p.args[i]);
+        }
+        out_ << ")";
+    }
 
     void dump_pred_node(const PredGroup& p)
     {

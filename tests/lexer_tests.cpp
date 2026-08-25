@@ -191,6 +191,19 @@ int main()
     }
 
     {
+        const std::string src = "ghost fn g() -> Int;";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for ghost keyword");
+        }
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::KwGhost, "ghost");
+        expect_token(toks, 1, TokenKind::KwFn, "fn");
+        expect_token(toks, 2, TokenKind::Identifier, "g");
+    }
+
+    {
         const std::string src = "let b = true; let c = false;";
         const auto res = lex(src);
         if (!std::holds_alternative<std::vector<Token>>(res))

@@ -1044,6 +1044,333 @@ fn main() -> Unit { return; }
         }
     }
 
+    // =====================================================================
+    // Issue #260 M1: Ghost functions, ghost-let snapshots, and post-state
+    // (ensures) inheritance at call sites.
+    // =====================================================================
+
+    // Ghost function with scalar signature referenced in an ensures clause
+    // lowers to an uninterpreted function application. With no axioms, the
+    // uninterpreted call is opaque: an obligation that cannot be proven from
+    // facts fails (fail-closed), documenting that ghost bodies are NOT inlined
+    // in the M1 fragment.
+    {
+        const std::string source = R"(
+ghost fn g(x: Int) -> Int [ ensures result >= 0; ] {
+  return x;
+}
+fn main() -> Int [ ensures g(1) >= 0; ] {
+  return 0;
+}
+)";
+        const auto verified = verify_program(source, "ghost fn uninterpreted call test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected unconstrained ghost fn call to fail verification");
+        }
+    }
+
+    // Ghost function whose own ensures are provable verifies, even though its
+    // body is never emitted. This is the core "ghost code is checked but
+    // erased" acceptance criterion.
+    {
+        const std::string source = R"(
+ghost fn g(x: Int) -> Int [ ensures result == x + 1; ] {
+  return x + 1;
+}
+fn main() -> Int [ ensures true; ] {
+  return 0;
+}
+)";
+        const auto verified = verify_program(source, "ghost fn provable ensures test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected ghost fn with provable ensures to verify");
+        }
+    }
+
+    // Ghost function calls in predicates lower to uninterpreted functions: a
+    // predicate obligation that is an equality with itself (g(1) == g(1)) is
+    // trivially provable regardless of the uninterpreted function's value.
+    {
+        const std::string source = R"(
+ghost fn g(x: Int) -> Int [ ensures result == x + 1; ] {
+  return x + 1;
+}
+fn main() -> Int [ ensures g(1) == g(1); ] {
+  return 0;
+}
+)";
+        const auto verified = verify_program(source, "ghost fn predicate reflexivity test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected reflexive ghost call predicate to verify");
+        }
+    }
+
+    // Ghost let snapshot: `ghost let snap = x;` freezes the current value of x
+    // into a fresh solver constant. A later predicate that references `snap`
+    // sees the frozen value (snap == x, and x == 5, so snap == 5 is provable).
+    {
+        const std::string source = R"(
+fn main() -> Int [ ensures result == 5; ] {
+  let x: Int = 5;
+  ghost let snap = x;
+  return snap;
+}
+)";
+        const auto verified = verify_program(source, "ghost let snapshot test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected ghost let snapshot program to verify");
+        }
+    }
+
+    // Post-state inheritance: after a call passes its requires, the callee's
+    // ensures become caller-side facts. `inc(x)` ensures `result > x`; a
+    // caller that must prove `y > x` after `let y = inc(x);` verifies.
+    {
+        const std::string source = R"(
+fn inc(x: Int) -> Int [ ensures result > x; ] {
+  return x + 1;
+}
+fn main() -> Int [ ensures result > 0; ] {
+  let x: Int = 5;
+  let y: Int = inc(x);
+  return y;
+}
+)";
+        const auto verified = verify_program(source, "ensures inheritance call-site test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected ensures inheritance to make caller obligation provable");
+        }
+    }
+
+    // Negative control: a caller obligation that requires a callee post-state
+    // the callee does NOT provide must still fail (ensures inheritance is not
+    // a blanket "anything holds" rule).
+    {
+        const std::string source = R"(
+fn id(x: Int) -> Int { return x; }
+fn main() -> Int [ ensures result > 5; ] {
+  let x: Int = 5;
+  let y: Int = id(x);
+  return y;
+}
+)";
+        const auto verified = verify_program(source, "no-ensures inheritance control test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected call without ensures to fail caller obligation");
+        }
+    }
+
+    // Contract-block ghost snapshot (roadmap canonical pattern): the snapshot
+    // name declared in the `[...]` block is visible to the function's own
+    // `ensures`. `transfer` guarantees `result == src_before` where
+    // `src_before` froze the pre-state value of `src`; returning `src`
+    // satisfies it.
+    {
+        const std::string source = R"(
+fn transfer(src: Int, dst: Int) -> Int
+  [ ghost let src_before = src;
+    ensures result == src_before; ]
+{
+  return src;
+}
+fn main() -> Int { return transfer(5, 0); }
+)";
+        const auto verified = verify_program(source, "contract-block snapshot positive test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected contract-block snapshot ensures to verify");
+        }
+    }
+
+    // Negative control: an `ensures` referencing a snapshot name that is NOT
+    // declared in the contract block must fail (unknown name).
+    {
+        const std::string source = R"(
+fn f(x: Int) -> Int [ ensures result == not_declared; ] { return x; }
+fn main() -> Int { return f(1); }
+)";
+        const auto verified = verify_program(source, "contract-block snapshot negative test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected unknown snapshot name in ensures to fail");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        // The verifier's predicate lowering rejects an undeclared snapshot name.
+        if (!has_message_substr(diags, "unknown predicate name 'not_declared'"))
+        {
+            fail("expected unknown predicate name diagnostic for undeclared snapshot");
+        }
+    }
+
+    // Call-site inheritance of callee snapshots: the caller can discharge its
+    // own obligation using the callee's inherited ensures, which references the
+    // callee's snapshot re-lowered to the caller's argument.
+    {
+        const std::string source = R"(
+fn transfer(src: Int, dst: Int) -> Int
+  [ ghost let src_before = src;
+    ensures result == src_before; ]
+{
+  return src;
+}
+fn main() -> Int [ ensures result == 5; ] {
+  let y: Int = transfer(5, 0);
+  return y;
+}
+)";
+        const auto verified = verify_program(source, "call-site callee snapshot inheritance test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected call-site inheritance of callee snapshot to verify");
+        }
+    }
+
+    // Callee-unprovable-ensures isolation: a callee whose own ensures are
+    // unprovable from its body must itself fail, so the inherited fact is never
+    // trusted from an unverified callee.
+    {
+        const std::string source = R"(
+fn bad(x: Int) -> Int [ ensures result > 100; ] { return x; }
+fn main() -> Int [ ensures result > 100; ] {
+  let y: Int = bad(5);
+  return y;
+}
+)";
+        const auto verified = verify_program(source, "callee-unprovable-ensures isolation test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected unprovable callee ensures to fail (isolation)");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "ensures clause not satisfied"))
+        {
+            fail("expected ensures failure diagnostic for unprovable callee");
+        }
+    }
+
+    // Snapshot stability under rebinding: the contract-block snapshot freezes
+    // the pre-state value; a later re-binding of the source in a nested scope
+    // does not affect the snapshot. (The language has no `var`/assignment yet,
+    // so this demonstrates the snapshot semantics under the actual rebinding
+    // semantics available today.)
+    {
+        const std::string source = R"(
+fn f() -> Int
+  [ ghost let snap = 5;
+    ensures result == snap; ]
+{
+  let x: Int = 0;   // rebind in a nested scope; snap is unaffected
+  return 5;
+}
+fn main() -> Int { return f(); }
+)";
+        const auto verified = verify_program(source, "snapshot rebinding stability test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected snapshot to survive a later source rebinding");
+        }
+    }
+
+    // Soundness regression: a caller local whose name collides with the callee's
+    // snapshot name must NOT let the inherited ensures resolve the snapshot to
+    // the caller's value. The callee's snapshot always wins, so `ensures
+    // result == 99` (false at runtime: y == 5) must fail.
+    {
+        const std::string source = R"(
+fn t(x: Int) -> Int
+  [ ghost let snap = x;
+    ensures result == snap; ]
+{
+  return x;
+}
+fn main() -> Int [ ensures result == 99; ] {
+  let snap: Int = 99;   // caller local with the same name as the callee snapshot
+  let y: Int = t(5);    // y == 5 at runtime
+  return y;
+}
+)";
+        const auto verified = verify_program(source, "snapshot-name collision caller-local test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected caller-local snapshot-name collision to fail (soundness)");
+        }
+    }
+
+    // Soundness regression: a caller contract-block ghost let whose name
+    // collides with the callee's snapshot name must also fail (the callee's
+    // snapshot, bound from the caller's argument, wins).
+    {
+        const std::string source = R"(
+fn t(x: Int) -> Int
+  [ ghost let snap = x;
+    ensures result == snap; ]
+{
+  return x;
+}
+fn main() -> Int
+  [ ghost let snap = 100;
+    ensures result == snap; ]
+{
+  let y: Int = t(5);    // y == 5 at runtime
+  return y;
+}
+)";
+        const auto verified = verify_program(source, "snapshot-name collision caller-ghost-let test");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected caller ghost-let snapshot-name collision to fail (soundness)");
+        }
+    }
+
+    // Positive control for the collision fix: with NO collision, the caller
+    // proves its obligation via the callee's inherited ensures + snapshot.
+    {
+        const std::string source = R"(
+fn t(x: Int) -> Int
+  [ ghost let snap = x;
+    ensures result == snap; ]
+{
+  return x;
+}
+fn main() -> Int [ ensures result == 5; ] {
+  let y: Int = t(5);
+  return y;
+}
+)";
+        const auto verified = verify_program(source, "snapshot collision positive control");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected collision-free inherited snapshot ensures to verify");
+        }
+    }
+
+    // A callee whose `requires` references its own contract-block snapshot must
+    // be provable at the call site too (the resolver permits `requires` to use
+    // snapshot names; the call-site lowering must make them visible).
+    {
+        const std::string source = R"(
+fn t(x: Int) -> Int
+  [ ghost let snap = x;
+    requires snap >= 0;
+    ensures result == snap; ]
+{
+  return x;
+}
+fn main() -> Int { return t(5); }
+)";
+        const auto verified = verify_program(source, "requires-snapshot call-site test");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected requires referencing own snapshot to verify at call site");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

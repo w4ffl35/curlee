@@ -27,6 +27,7 @@ using curlee::parser::CallExpr;
 using curlee::parser::Expr;
 using curlee::parser::ExprStmt;
 using curlee::parser::Function;
+using curlee::parser::GhostLetStmt;
 using curlee::parser::IfStmt;
 using curlee::parser::LetStmt;
 using curlee::parser::MatchStmt;
@@ -94,6 +95,20 @@ std::string pred_to_string(const curlee::parser::Pred& pred)
             {
                 return std::string(node.name);
             }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PredCall>)
+            {
+                std::string out = std::string(node.callee) + "(";
+                for (std::size_t i = 0; i < node.args.size(); ++i)
+                {
+                    if (i > 0)
+                    {
+                        out += ", ";
+                    }
+                    out += pred_to_string(node.args[i]);
+                }
+                out += ")";
+                return out;
+            }
             else if constexpr (std::is_same_v<Node, curlee::parser::PredUnary>)
             {
                 return token_to_string(node.op) + pred_to_string(*node.rhs);
@@ -123,6 +138,13 @@ void collect_pred_names(const curlee::parser::Pred& pred,
             if constexpr (std::is_same_v<Node, curlee::parser::PredName>)
             {
                 names.insert(node.name);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PredCall>)
+            {
+                for (const auto& arg : node.args)
+                {
+                    collect_pred_names(arg, names);
+                }
             }
             else if constexpr (std::is_same_v<Node, curlee::parser::PredUnary>)
             {
@@ -235,6 +257,13 @@ struct FunctionSig
     const Function* decl = nullptr;
     std::vector<TypeKind> params;
     TypeKind result = TypeKind::Unit;
+
+    // Pointers to the callee's contract-block ghost snapshots (name + source
+    // expression), used at call sites to re-lower each snapshot's pre-state
+    // value in the caller's context so inherited ensures can reference it.
+    // Non-owning: the GhostLetStmt nodes live in the Program, which outlives
+    // the verifier.
+    std::vector<const curlee::parser::GhostLetStmt*> ghost_lets;
 };
 
 struct ScopeState
@@ -254,6 +283,9 @@ class Verifier
     explicit Verifier(const curlee::types::TypeInfo& type_info)
         : type_info_(type_info), solver_(), lower_ctx_(solver_.context())
     {
+        // Wire the ghost function table into the shared lowering context so
+        // predicate calls in requires/ensures lower to uninterpreted functions.
+        lower_ctx_.ghost_fns = &ghost_fns_;
     }
 
     VerificationResult run(const curlee::parser::Program& program)
@@ -299,6 +331,10 @@ class Verifier
     std::vector<z3::expr> facts_;
     std::vector<ScopeState> scopes_;
     std::unordered_map<std::string_view, FunctionSig> functions_;
+
+    // Ghost function signatures used to lower predicate calls to uninterpreted
+    // function applications. Populated during collect_signatures.
+    GhostFnTable ghost_fns_;
 
     // Phys<T> pointer variables (name -> element kind name), scoped like int/bool vars.
     std::unordered_map<std::string_view, std::string_view> phys_vars_;
@@ -404,7 +440,34 @@ class Verifier
 
             if (ok)
             {
+                for (const auto& g : f.ghost_lets)
+                {
+                    sig.ghost_lets.push_back(&g);
+                }
                 functions_.emplace(f.name, std::move(sig));
+            }
+
+            // Ghost functions are additionally exposed to predicate lowering as
+            // uninterpreted functions so they can be called from requires/ensures
+            // clauses (issue #260, M1 part A).
+            if (f.is_ghost)
+            {
+                GhostFnSig ghost_sig;
+                ghost_sig.result = *result;
+                for (const auto& p : f.params)
+                {
+                    auto param_t = supported_type(p.type);
+                    if (!param_t.has_value())
+                    {
+                        ok = false;
+                        break;
+                    }
+                    ghost_sig.params.push_back(*param_t);
+                }
+                if (ok)
+                {
+                    ghost_fns_.emplace(f.name, std::move(ghost_sig));
+                }
             }
         }
     }
@@ -523,6 +586,16 @@ class Verifier
                         found = true;
                     }
                 }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PredCall>)
+                {
+                    for (const auto& arg : node.args)
+                    {
+                        if (pred_mentions_opaque_read(arg))
+                        {
+                            found = true;
+                        }
+                    }
+                }
                 else if constexpr (std::is_same_v<Node, curlee::parser::PredUnary>)
                 {
                     if (node.rhs != nullptr && pred_mentions_opaque_read(*node.rhs))
@@ -566,6 +639,16 @@ class Verifier
                     if (node.name == "result")
                     {
                         found = true;
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PredCall>)
+                {
+                    for (const auto& arg : node.args)
+                    {
+                        if (pred_mentions_result(arg))
+                        {
+                            found = true;
+                        }
                     }
                 }
                 else if constexpr (std::is_same_v<Node, curlee::parser::PredUnary>)
@@ -997,7 +1080,65 @@ class Verifier
         solver_.pop();
     }
 
-    void check_call(const CallExpr& call)
+    // Re-lower a callee's contract-block snapshots into a call-site lowering
+    // context (`ctx`, which already maps the callee's params to the caller's
+    // argument expressions). Each snapshot name is bound to a fresh constant
+    // equal to its pre-state value; `insert_or_assign` guarantees the callee's
+    // snapshot WINS over any caller binding with the same name, so inherited
+    // requires/ensures resolve the snapshot to the callee's pre-state, never a
+    // colliding caller value (soundness).
+    void lower_callee_snapshots(const FunctionSig& sig, LoweringContext& ctx)
+    {
+        for (const auto* g : sig.ghost_lets)
+        {
+            if (g == nullptr)
+            {
+                continue;
+            }
+            // lower_expr reads the member lower_ctx_; temporarily substitute
+            // ctx's bindings so the snapshot's source expression (which may
+            // reference the callee's params) resolves to the caller's argument
+            // expressions.
+            auto saved_int = std::move(lower_ctx_.int_vars);
+            auto saved_bool = std::move(lower_ctx_.bool_vars);
+            lower_ctx_.int_vars = ctx.int_vars;
+            lower_ctx_.bool_vars = ctx.bool_vars;
+            auto snap = lower_expr(g->value);
+            lower_ctx_.int_vars = std::move(saved_int);
+            lower_ctx_.bool_vars = std::move(saved_bool);
+
+            if (std::holds_alternative<ExprValue>(snap))
+            {
+                auto value = std::get<ExprValue>(std::move(snap));
+                // The constant name must be unique PER CALL SITE (and distinct
+                // from the callee's own snapshot constant and any caller
+                // binding with the same name), otherwise two distinct snapshots
+                // would alias to the same Z3 constant and conflate values —
+                // producing a false proof. The caller-binding map key collision
+                // is handled by insert_or_assign; the constant-name collision
+                // is handled by this unique suffix.
+                const std::string snap_name = "ghost_" + std::string(g->name) + "_callsite_" +
+                                               std::to_string(snapshot_counter_++);
+                if (value.kind == TypeKind::Int)
+                {
+                    auto c = solver_.context().int_const(snap_name.c_str());
+                    ctx.int_vars.insert_or_assign(g->name, c);
+                    facts_.push_back(c == value.expr);
+                }
+                else if (value.kind == TypeKind::Bool)
+                {
+                    auto c = solver_.context().bool_const(snap_name.c_str());
+                    ctx.bool_vars.insert_or_assign(g->name, c);
+                    facts_.push_back(c == value.expr);
+                }
+            }
+        }
+    }
+
+    // Returns (via out param) the fresh call-result symbol when the callee has
+    // a scalar result, so a `let y = f(x);` binding can alias the result and
+    // inherit the callee's ensures facts.
+    void check_call(const CallExpr& call, std::optional<z3::expr>* out_result = nullptr)
     {
         const auto* callee_name = std::get_if<NameExpr>(&call.callee->node);
         if (callee_name == nullptr)
@@ -1070,6 +1211,7 @@ class Verifier
 
         std::vector<z3::expr> call_facts;
         LoweringContext call_ctx(solver_.context());
+        call_ctx.ghost_fns = &ghost_fns_;
 
         for (std::size_t i = 0; i < sig.decl->params.size(); ++i)
         {
@@ -1091,6 +1233,12 @@ class Verifier
             }
         }
 
+        // The callee's contract-block snapshots must be visible to the
+        // call-site `requires` lowering (the resolver permits `requires` to
+        // reference snapshot names), so re-lower them into call_ctx before the
+        // requires obligations are checked.
+        lower_callee_snapshots(sig, call_ctx);
+
         for (const auto& req : sig.decl->requires_clauses)
         {
             // A requires clause mentioning an opaque MMIO read value can never be proven;
@@ -1110,6 +1258,93 @@ class Verifier
 
             check_obligation(req, call_ctx, std::get<z3::expr>(lowered), req.span, call_facts,
                              "requires clause not satisfied");
+        }
+
+        // Post-state inheritance: once the call's requires are satisfied, the
+        // callee's `ensures` clauses become facts in the caller's scope. The
+        // callee's `result` symbol is bound to the fresh call-result symbol.
+        // This is what makes contracts compose at call sites (issue #260, M1
+        // part C).
+        //
+        // IMPORTANT: the ensures facts must reference the CALLER's argument
+        // expressions directly (not the fresh callee-param symbols from
+        // call_ctx), otherwise the pushed facts would mention unconstrained
+        // symbols and the caller could not discharge its own obligations. So a
+        // separate post_ctx maps each callee param name to the corresponding
+        // caller argument expression, plus the caller's visible snapshots.
+        //
+        // An opaque MMIO read value can never satisfy an ensures clause; reject
+        // before lowering (mirrors the requires path above).
+        if (!sig.decl->ensures.empty())
+        {
+            LoweringContext post_ctx(solver_.context());
+            post_ctx.ghost_fns = &ghost_fns_;
+            for (std::size_t i = 0; i < sig.decl->params.size() && i < arg_exprs.size(); ++i)
+            {
+                const auto& param = sig.decl->params[i];
+                if (sig.params[i] == TypeKind::Int)
+                {
+                    post_ctx.int_vars.emplace(param.name, arg_exprs[i]);
+                }
+                else if (sig.params[i] == TypeKind::Bool)
+                {
+                    post_ctx.bool_vars.emplace(param.name, arg_exprs[i]);
+                }
+            }
+            // Ghost snapshots visible in the caller scope must also resolve in
+            // the post context so ensures can reference them.
+            post_ctx.int_vars.insert(lower_ctx_.int_vars.begin(), lower_ctx_.int_vars.end());
+            post_ctx.bool_vars.insert(lower_ctx_.bool_vars.begin(), lower_ctx_.bool_vars.end());
+
+            // The callee's contract-block snapshots are re-lowered into the
+            // post context so inherited ensures referencing them resolve to the
+            // callee's pre-state (bound from the caller's argument), never a
+            // caller binding with the same name (see lower_callee_snapshots).
+            lower_callee_snapshots(sig, post_ctx);
+
+            // Bind the callee's `result` symbol to a fresh call-result constant.
+            // The name is fresh per call so multiple calls in one scope do not
+            // alias each other's results.
+            const std::string call_result_name =
+                callee_name_str + "::result_" + std::to_string(call_result_counter_++);
+            if (sig.result == TypeKind::Int)
+            {
+                auto result = solver_.context().int_const(call_result_name.c_str());
+                post_ctx.result_int = result;
+                if (out_result != nullptr)
+                {
+                    *out_result = result;
+                }
+            }
+            else if (sig.result == TypeKind::Bool)
+            {
+                auto result = solver_.context().bool_const(call_result_name.c_str());
+                post_ctx.result_bool = result;
+                if (out_result != nullptr)
+                {
+                    *out_result = result;
+                }
+            }
+
+            for (const auto& ens : sig.decl->ensures)
+            {
+                if (pred_mentions_opaque_read(ens))
+                {
+                    reject_opaque_read_contract(ens.span,
+                                                "cannot prove ensures on opaque MMIO read value");
+                    continue;
+                }
+                auto lowered_ens = lower_predicate(ens, post_ctx);
+                if (std::holds_alternative<Diagnostic>(lowered_ens))
+                {
+                    diags_.push_back(std::get<Diagnostic>(std::move(lowered_ens)));
+                    continue;
+                }
+                // Push the ensures clause as a fact in the caller's scope so later
+                // obligations (refinements, requires of subsequent calls, ensures
+                // of the enclosing function) can use it.
+                facts_.push_back(std::get<z3::expr>(lowered_ens));
+            }
         }
     }
 
@@ -1135,7 +1370,11 @@ class Verifier
         return base_name->name == "python_ffi" && member->member == "call";
     }
 
-    void check_expr_for_calls(const Expr& e)
+    // Check a call-heavy expression for requires/ensures obligations. When the
+    // expression is (or wraps) a plain function call, the outermost call's
+    // fresh result symbol is written to `out_result` (when non-null) so the
+    // caller can bind a let to it and inherit the callee's ensures facts.
+    void check_expr_for_calls(const Expr& e, std::optional<z3::expr>* out_result = nullptr)
     {
         std::visit(
             [&](const auto& node)
@@ -1143,51 +1382,58 @@ class Verifier
                 using Node = std::decay_t<decltype(node)>;
                 if constexpr (std::is_same_v<Node, CallExpr>)
                 {
+                    std::optional<z3::expr> call_result;
                     if (!is_python_ffi_call(node))
                     {
-                        check_call(node);
+                        check_call(node, &call_result);
                     }
                     for (const auto& arg : node.args)
                     {
-                        check_expr_for_calls(arg);
+                        check_expr_for_calls(arg, nullptr);
+                    }
+                    // The outermost call's result wins; nested call results are
+                    // discarded (they cannot be bound to this expression).
+                    if (out_result != nullptr && call_result.has_value())
+                    {
+                        *out_result = call_result;
                     }
                 }
                 else if constexpr (std::is_same_v<Node, MemberExpr>)
                 {
                     if (node.base)
                     {
-                        check_expr_for_calls(*node.base);
+                        check_expr_for_calls(*node.base, nullptr);
                     }
                 }
                 else if constexpr (std::is_same_v<Node, curlee::parser::UnaryExpr>)
                 {
-                    check_expr_for_calls(*node.rhs);
+                    check_expr_for_calls(*node.rhs, nullptr);
                 }
                 else if constexpr (std::is_same_v<Node, curlee::parser::BinaryExpr>)
                 {
-                    check_expr_for_calls(*node.lhs);
-                    check_expr_for_calls(*node.rhs);
+                    check_expr_for_calls(*node.lhs, nullptr);
+                    check_expr_for_calls(*node.rhs, nullptr);
                 }
                 else if constexpr (std::is_same_v<Node, curlee::parser::GroupExpr>)
                 {
-                    check_expr_for_calls(*node.inner);
+                    check_expr_for_calls(*node.inner, out_result);
                 }
                 else if constexpr (std::is_same_v<Node, curlee::parser::PhysReadExpr>)
                 {
                     if (node.base)
                     {
-                        check_expr_for_calls(*node.base);
+                        check_expr_for_calls(*node.base, nullptr);
                     }
                 }
                 else if constexpr (std::is_same_v<Node, curlee::parser::PhysWriteExpr>)
                 {
                     if (node.base)
                     {
-                        check_expr_for_calls(*node.base);
+                        check_expr_for_calls(*node.base, nullptr);
                     }
                     if (node.value)
                     {
-                        check_expr_for_calls(*node.value);
+                        check_expr_for_calls(*node.value, nullptr);
                     }
                 }
                 else
@@ -1288,6 +1534,52 @@ class Verifier
                    s.node);
     }
 
+    // Lower a ghost snapshot `ghost let x = e;` into a fresh solver constant
+    // bound to the name `x`, declared in `ctx` with an equality fact appended
+    // to `facts`. Used for both body statements and contract-block snapshot
+    // clauses. Returns the lowered snapshot expression, or std::nullopt if the
+    // snapshot is non-scalar (cannot be modeled in the solver fragment).
+    std::optional<z3::expr> lower_ghost_let(const GhostLetStmt& s, LoweringContext& ctx)
+    {
+        auto lowered = lower_expr(s.value);
+        if (std::holds_alternative<Diagnostic>(lowered))
+        {
+            diags_.push_back(std::get<Diagnostic>(std::move(lowered)));
+            return std::nullopt;
+        }
+        auto value = std::get<ExprValue>(std::move(lowered));
+
+        if (value.kind == TypeKind::Int)
+        {
+            const std::string snap_name = "ghost_" + std::string(s.name);
+            auto snap = solver_.context().int_const(snap_name.c_str());
+            ctx.int_vars.insert_or_assign(s.name, snap);
+            facts_.push_back(snap == value.expr);
+            return snap;
+        }
+        if (value.kind == TypeKind::Bool)
+        {
+            const std::string snap_name = "ghost_" + std::string(s.name);
+            auto snap = solver_.context().bool_const(snap_name.c_str());
+            ctx.bool_vars.insert_or_assign(s.name, snap);
+            facts_.push_back(snap == value.expr);
+            return snap;
+        }
+        // Non-scalar snapshots (structs/enums/Phys) cannot be modeled in the
+        // solver fragment; they are allowed as long as no contract references
+        // them. Do not declare a solver variable.
+        return std::nullopt;
+    }
+
+    void check_stmt_node(const GhostLetStmt& s, Span, TypeKind)
+    {
+        // Ghost code is verification-only: this statement never appears in
+        // emitted bodies (the emitter/codegen reject it as an internal error),
+        // so no runtime semantics are needed here.
+        (void)lower_ghost_let(s, lower_ctx_);
+        check_expr_for_calls(s.value);
+    }
+
     void check_stmt_node(const LetStmt& s, Span, TypeKind)
     {
         // Verification scope only reasons about Int/Bool values.
@@ -1371,7 +1663,54 @@ class Verifier
             add_fact(*s.refinement);
         }
 
-        check_expr_for_calls(s.value);
+        // For call-valued lets, `check_expr_for_calls` performs the requires
+        // check, pushes the callee's ensures facts, AND returns the fresh call
+        // result so the let can alias it (post-state inheritance, issue #260).
+        std::optional<z3::expr> call_result;
+        check_expr_for_calls(s.value, &call_result);
+
+        if (call_result.has_value() && core_t->kind != TypeKind::Unit)
+        {
+            // Bind the let to the call result so `let y = f(x);` makes `y`
+            // alias the call result and the inherited ensures facts apply to it.
+            if (core_t->kind == TypeKind::Int)
+            {
+                auto sym = solver_.context().int_const(std::string(s.name).c_str());
+                lower_ctx_.int_vars.insert_or_assign(s.name, sym);
+                facts_.push_back(sym == *call_result);
+            }
+            else if (core_t->kind == TypeKind::Bool)
+            {
+                auto sym = solver_.context().bool_const(std::string(s.name).c_str());
+                lower_ctx_.bool_vars.insert_or_assign(s.name, sym);
+                facts_.push_back(sym == *call_result);
+            }
+        }
+
+        // Non-call initializers: record an equality fact so later predicates can
+        // reason about the binding's value (e.g. `let x = 5;` makes `x == 5` a
+        // fact, and ghost snapshots of x freeze 5).
+        if (!call_result.has_value())
+        {
+            auto lowered = lower_expr(s.value);
+            if (std::holds_alternative<ExprValue>(lowered))
+            {
+                auto value = std::get<ExprValue>(std::move(lowered));
+                if (value.kind == core_t->kind)
+                {
+                    if (auto it = lower_ctx_.int_vars.find(s.name);
+                        it != lower_ctx_.int_vars.end())
+                    {
+                        facts_.push_back(it->second == value.expr);
+                    }
+                    else if (auto itb = lower_ctx_.bool_vars.find(s.name);
+                             itb != lower_ctx_.bool_vars.end())
+                    {
+                        facts_.push_back(itb->second == value.expr);
+                    }
+                }
+            }
+        }
     }
 
     void check_stmt_node(const ReturnStmt& s, Span, TypeKind expected_return)
@@ -1561,6 +1900,17 @@ class Verifier
             }
         }
 
+        // Contract-block ghost snapshots are lowered into the function's solver
+        // context BEFORE requires/ensures are added, so the function's own
+        // postcondition can reference them (the roadmap's pre-state snapshot
+        // pattern). The snapshot bindings are also copied into call-site
+        // post_ctx (via the callee's ghost_lets) so inherited ensures resolve
+        // them at the call site.
+        for (const auto& g : f.ghost_lets)
+        {
+            lower_ghost_let(g, lower_ctx_);
+        }
+
         for (const auto& req : f.requires_clauses)
         {
             add_fact(req);
@@ -1576,6 +1926,14 @@ class Verifier
     }
 
     std::optional<FunctionSig> current_function_;
+
+    // Fresh-name counter for call-result symbols created during post-state
+    // inheritance. Kept per-Verifier so names never collide across calls.
+    std::size_t call_result_counter_ = 0;
+
+    // Fresh-name counter for call-site snapshot constants. Kept per-Verifier so
+    // distinct call-site snapshot re-lowerings never alias the same Z3 constant.
+    std::size_t snapshot_counter_ = 0;
 };
 
 } // namespace

@@ -26,6 +26,7 @@ using curlee::parser::Expr;
 using curlee::parser::ExprStmt;
 using curlee::parser::Function;
 using curlee::parser::GroupExpr;
+using curlee::parser::GhostLetStmt;
 using curlee::parser::IfStmt;
 using curlee::parser::LetStmt;
 using curlee::parser::MatchStmt;
@@ -340,6 +341,14 @@ class Resolver
             }
         }
 
+        // Contract-block ghost snapshots are declared before requires/ensures so
+        // both can reference the snapshot names (the pre-state snapshot pattern
+        // from the roadmap: `[ ghost let src_before = src; ensures ...; ]`).
+        for (const auto& g : f.ghost_lets)
+        {
+            resolve_ghost_let(g, f.span);
+        }
+
         for (const auto& req : f.requires_clauses)
         {
             resolve_pred(req);
@@ -376,6 +385,22 @@ class Resolver
         {
             resolve_pred(*s.refinement);
         }
+    }
+
+    void resolve_ghost_let(const GhostLetStmt& s, Span stmt_span)
+    {
+        // A ghost snapshot is a normal name binding from the resolver's
+        // perspective: it declares the snapshot name in the current scope and
+        // resolves its initializer expression like any other binding. The
+        // verifier later treats the name as a fresh constant so later mutation
+        // of the source binding cannot affect it.
+        declare(s.name, stmt_span, "duplicate definition");
+        resolve_expr(s.value);
+    }
+
+    void resolve_stmt_node(const GhostLetStmt& s, Span stmt_span)
+    {
+        resolve_ghost_let(s, stmt_span);
     }
 
     void resolve_stmt_node(const ReturnStmt& s, Span)
@@ -628,6 +653,17 @@ class Resolver
             return;
         }
         use_name(p.name, span);
+    }
+
+    void resolve_pred_node(const curlee::parser::PredCall& p, Span span)
+    {
+        // The callee is a function name (ghost fn); resolve it like any other
+        // name. Argument predicates resolve as usual.
+        use_name(p.callee, span);
+        for (const auto& arg : p.args)
+        {
+            resolve_pred(arg);
+        }
     }
 
     void resolve_pred_node(const curlee::parser::PredInt&, Span) {}

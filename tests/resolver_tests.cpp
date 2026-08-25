@@ -820,6 +820,29 @@ fn main(v: E) -> Unit {
     }
 
     {
+        // A contract-block ghost snapshot whose name collides with a parameter
+        // name must be rejected loudly (duplicate definition), never silently
+        // shadowed.
+        const std::string src = R"(fn t(snap: Int) -> Int [
+  ghost let snap = snap;
+  ensures result == snap;
+] {
+  return snap;
+})";
+
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_snap_param_collide.curlee");
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
+        {
+            fail("expected resolver error on snapshot/param name collision");
+        }
+        const auto& ds = std::get<std::vector<diag::Diagnostic>>(res);
+        if (ds.empty())
+        {
+            fail("expected at least one diagnostic for snapshot/param collision");
+        }
+    }
+
+    {
         // Phys<T> nodes must not crash the resolver: `phys<U32>(lit)`, `.read()`, `.write(v)`
         // contain no unresolved variable references.
         const std::string src = R"(fn main(pm: cap phys.mem) -> Unit {
