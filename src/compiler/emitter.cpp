@@ -1380,6 +1380,12 @@ class Emitter
     {
         diags_.push_back(error_at(span, "Phys is freestanding-only and not supported in the VM"));
     }
+
+    void emit_expr_node(const curlee::parser::PortIOExpr&, Span span)
+    {
+        diags_.push_back(
+            error_at(span, "port I/O is freestanding-only and not supported in the VM"));
+    }
 };
 
 } // namespace
