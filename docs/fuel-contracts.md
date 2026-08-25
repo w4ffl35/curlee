@@ -89,25 +89,24 @@ reports `fuel_used` only on the out-of-fuel failure path. Because the cost model
 is now a sound over-approximation, a statically-verified program cannot exceed
 its declared bound at runtime under the current language (loopless bodies
 report `fuel_used == 0` on success); the oracle remains as a defense-in-depth
-signal for when assignment/bounded loops land and the cost model can drift.
+signal for when the cost model can drift.
 
 ## Current fragment limitations
 
-The MVP language has **no assignment statements** (variables are immutable
-`let` bindings), so a loop body cannot mutate a loop-carried variable. As a
-consequence:
-
-- A loop's `decreases` clause is currently provably unsatisfiable (see
-  `docs/loop-contracts.md`), which means a `fuel`-annotated function containing
-  a loop *without* `decreases` fails closed — the intended behavior — and the
-  loop-variant cost formula `(D_0 + 1) * (cost(c) + cost(B))` cannot yet be
-  exercised by a genuinely bounded loop.
+- A loop's `decreases` clause is satisfiable for genuinely bounded loops since
+  issue #268 landed assignment (loop-carried variables can be mutated), so the
+  loop-variant cost formula `(D_0 + 1) * (cost(c) + cost(B))` is exercisable:
+  `D_0` is the variant's value at loop ENTRY (the verifier records the
+  pre-loop lowering context at each `while`, so a body assignment that rebinds
+  a loop-carried name to a fresh symbol cannot leak a post-mutation value into
+  `D_0`). A `fuel`-annotated function containing a loop *without* `decreases`
+  still fails closed — the intended behavior.
 - The cost model is a **sound over-approximation**: every expression node
   (including calls nested inside operands, conditions, initializers, and
   arguments) is charged its callee fuel, so the static cost never under-charges.
 - A loop whose body shadows (rebinds) a name that the `decreases` variant
   references is rejected fail-closed: the termination and fuel bounds would
-  both be vacuous. This closes the previously-documented shadowing gap.
+  both be vacuous.
 - Recursive (or mutually recursive) calls fail closed with a clear diagnostic —
   re-charging a declared bound per nesting site is not a sound bound for
   unbounded recursion.
@@ -136,13 +135,6 @@ defects in the shipped M3 behavior.
   "fuel bound may be exceeded" rather than the recursion diagnostic. Future
   hardening: walk the fuel-table call graph for cycles during signature
   collection and emit the recursion diagnostic for mutual cycles too.
-- **Bounded-loop fuel formulas are not yet exercisable.** The
-  `(D_0 + 1) * (cost(c) + cost(B))` loop formula is implemented, but under the
-  current no-assignment language a `decreases` variant cannot be proven to
-  strictly decrease (the loop-carried variable cannot be mutated), so every
-  loop with a `fuel` obligation fails closed today. When assignment lands
-  (M3/M4 roadmap), the formula becomes the iteration bound for genuinely
-  bounded loops.
 - **Drift oracle fires only on the out-of-fuel path.** `VmProfile.fuel_used`
   is populated only when the VM exhausts the `--fuel` sandbox limit, so a run
   that completes successfully reports `fuel_used == 0` and can never trigger

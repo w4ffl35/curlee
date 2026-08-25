@@ -281,9 +281,8 @@ diagnostic style.
 > handling, and the CLI drift oracle shipped as of this roadmap revision. See
 > [`docs/fuel-contracts.md`](docs/fuel-contracts.md) for the current syntax,
 > the soundness guarantees, and the known limitations (mutual-recursion
-> diagnostics, bounded-loop formulas awaiting assignment support, and the
-> out-of-fuel-only drift oracle). The remaining subsections below are retained
-> as the historical design record.
+> diagnostics, and the out-of-fuel-only drift oracle). The remaining subsections
+> below are retained as the historical design record.
 
 ### 3.1 Missing components in the current architecture
 
@@ -531,17 +530,18 @@ The four directives are not independent. Implementation order matters:
    ghost-function uninterpreted lowering, post-state fact injection in
    [`checker.cpp`](src/verification/checker.cpp), callee-snapshot re-lowering
    at call sites). Ghost bodies are erased from VM bytecode and freestanding C;
-   ghost function calls from runnable code are rejected. Remaining for full M1:
-   inlining ghost function bodies into predicates (currently uninterpreted) and
-   a `var`/assignment form to exercise snapshot stability under mutation. M5
-   (`equiv`) and M6 (composition) build on this foundation.
+   ghost function calls from runnable code are rejected. Assignment (issue #268)
+   landed and exercises snapshot stability under mutation; remaining for full
+   M1: inlining ghost function bodies into predicates (currently
+   uninterpreted). M5 (`equiv`) and M6 (composition) build on this foundation.
 2. **M2 — Loop invariants & decreases** (foundation): enables bounded loops in
    the verifier; unblocks 3.
    **Status (issue #261): implemented.** `KwInvariant`/`KwDecreases` tokens,
    `WhileStmt::invariants`/`decreases`, entry/preservation/variant/post-state
-   obligations, and the single-pass fallback for unannotated loops landed. Under
-   the MVP's immutability, `decreases` is provably unsatisfiable (fail-closed),
-   which is the documented behavior until assignment lands.
+   obligations, and the single-pass fallback for unannotated loops landed. With
+   assignment (issue #268), loop-carried mutation makes `decreases` genuinely
+   satisfiable: bounded-sum loops verify and the invariant is re-checked against
+   the post-mutation state (fresh solver symbols per binding).
 3. **M3 — Static fuel bounds** (directive 3): cost model + `fuel` clause +
    loop variant proof + VM-profile oracle.
    **Status (issue #262): implemented.** `KwFuel` token, `Function::fuel_bound`,
@@ -551,8 +551,10 @@ The four directives are not independent. Implementation order matters:
    table, the `total_cost <= declared_fuel` obligation (span-precise
    counterexample), fail-closed rules (loops without `decreases`, extern
    without a declared cost), and the CLI profile-vs-declared drift warning.
-   The loop-variant formula `(D_0 + 1) * (cost(c) + cost(B))` is in place; its
-   full usability awaits the M3/M4 assignment work (see `docs/fuel-contracts.md`).
+   The loop-variant formula `(D_0 + 1) * (cost(c) + cost(B))` is in place and,
+   with assignment (issue #268), exercisable by genuinely bounded loops (the
+   verifier records pre-loop bindings per `while`, so `D_0` uses the entry value
+   — see `docs/fuel-contracts.md`).
 4. **M4 — Typestates / linear types** (directive 1): state-aware `Type`,
    state-transition analysis, `@linear` consumption pass.
 5. **M5 — Equivalence checking** (directive 2): `equiv` declarations, product

@@ -57,52 +57,70 @@ The intent is that contracts in scope requiring soundness will eventually
 reject unannotated loops (decide and document when that gate lands; see the
 Zero-External-Test roadmap's "no proof, no run" rule).
 
-## Current fragment limitations
+## Assignment and loop-carried mutation (issue #268)
 
-The MVP language has **no assignment statements** (variables are immutable
-`let` bindings), so a loop body cannot mutate a loop-carried variable. This has
-two consequences for the current implementation:
+Since issue #268, the language has **assignment statements** (`x = expr;`
+reassigns an existing local `let` binding). This is the mechanism that makes
+loop-carried mutation expressible:
 
-- **Preservation** is trivially satisfied for invariant-only loops (the state
-  never changes), and
-- **`decreases`** can never be satisfied: `D_after == D_before`, so a
-  non-decreasing variant fails loudly — the fail-closed behavior the
-  Zero-External-Test epic mandates.
+```curlee
+fn sum_to(n: Int) -> Int {
+  let total: Int = 0;
+  let i: Int = 0;
+  while (i < n)
+    [ invariant 0 <= i && i <= n && total >= 0;
+      decreases n - i; ]
+  {
+    i = i + 1;
+    total = total + i;
+  }
+  return total;
+}
+```
 
-Once assignment (or affine/typestate mutation) lands in the language, the same
-machinery proves real bounded-sum loops; the solver-side rename/fresh-symbol
-work is the M3/M4 roadmap's prerequisite.
+Here `i` (and `total`) are *loop-carried*: each iteration reassigns them, so the
+`decreases n - i` variant strictly decreases every iteration and the invariant
+is re-checked against the post-mutation state. Bounded sums, cursor walks
+(`p += (size + 7) & ~7`), and driver state machines are all expressible this
+way.
 
-## Preservation semantics under immutability (documented MVP semantic)
+**Verifier semantics.** Each declaration *and* each assignment binds the name to
+a **fresh solver symbol** (`name@N`), constrained to the RHS value
+([`fresh_symbol`](src/verification/checker.cpp:559) /
+[`assign_var`](src/verification/checker.cpp:588)). The pre-mutation symbol stays
+in the solver's history, so facts referencing it (a loop `decreases` variant
+lowered before the assignment) remain valid and the post-mutation re-check is
+non-vacuous. Assignment targets are limited to local `let` bindings: parameters
+and ghost snapshots are read-only (call-site `ensures` inheritance assumes
+callee parameters keep their entry values; ghost snapshots freeze a pre-state
+value).
 
-The preservation obligation runs the body **once** with `invariant ∧ cond`
-assumed as facts, then obligation-checks each invariant again at body end. Under
-the current language (no assignment, no mutation of loop-carried bindings), the
-invariant fact is assumed at entry and re-proven from itself, so preservation is
-**vacuously satisfied** — even a body that shadows the loop variable with an
-adversarial value (e.g. `let i: Int = -5;` inside the loop) verifies today. This
-is the intended fail-open-for-preservation behavior of the MVP.
+**Preservation against the post-mutation state.** The preservation obligation
+runs the body **once** with `invariant && cond` assumed as facts, then
+obligation-checks each invariant and the variant at body end. The loop-carried
+variables — the names the body *assigns*, collected by
+[`collect_assigned_names`](src/verification/checker.cpp:1950) — are first
+abstracted: each is rebound to a fresh *unconstrained* symbol before the
+invariant/cond facts are assumed, so the proof quantifies over every reachable
+iteration state (the standard partial-correctness induction hypothesis) rather
+than the specific entry values. A body that mutates a loop-carried variable in a
+way that breaks the invariant therefore **fails loudly** with a span-precise
+counterexample model. Because every `let` also binds a fresh symbol, a shadowing
+`let i: Int = -5;` inside the body is a *distinct* constant: the invariant is
+re-proven against the shadowed value, so shadowing can no longer make
+preservation vacuous.
 
-Two things will make preservation non-vacuous (and must be handled by M3/M4):
+**Fuel.** The static cost model lowers a loop's `decreases` variant against the
+PRE-loop bindings (recorded at loop entry), so the fuel formula
+`(D_0 + 1) * (cost(c) + cost(B))` is tied to the real entry value of the variant
+— see `docs/fuel-contracts.md`.
 
-1. **Opaque effects.** `vec.set` / `vec.push` / `phys write` are lowered to
-   uninterpreted functions today, so a `decreases`/`invariant` expression
-   referencing such a value is opaque to the solver. When effectful operations
-   land with real axioms, the preservation obligation will need to re-check the
-   invariant against the *post-effect* state, not the assumed fact.
-2. **Assignment / affine mutation.** Once loop-carried variables can be
-   reassigned, `D_after` and the invariant must be checked against the mutated
-   state; the current name-based Z3 constant reuse makes this sound only with
-   fresh symbols per binding.
+## Remaining limitations
 
-## Shadowing in a loop body (known limitation, not fixed)
-
-The verifier binds solver variables **by name** ([`declare_var`](src/verification/checker.cpp:497)).
-A `let` that shadows a loop-carried variable inside the body (`let i: Int = -5;`)
-reuses the *same* Z3 constant as the outer binding, and the preservation
-obligation re-proves the invariant from the invariant fact assumed at loop
-entry. The net effect: shadowing in a loop body **verifies today** even when it
-would break the invariant or variant. This is documented as a known limitation;
-M3/M4 must introduce fresh symbols per binding to make shadowing sound. A
-regression test in `tests/verification_checker_tests.cpp` locks in the current
-behavior so a future change cannot silently alter it.
+- **Opaque effects.** `vec.set` / `vec.push` / `phys write` are lowered to
+  uninterpreted functions, so a `decreases`/`invariant` expression referencing
+  such a value is opaque to the solver. Effectful operations with real axioms
+  (which would require re-checking invariants against a *post-effect* state)
+  are future work.
+- **No global mutable state / references.** Mutation is local to a function
+  body via assignment; affine/linear typing is tracked separately (issue #263).
