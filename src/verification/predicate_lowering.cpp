@@ -291,4 +291,21 @@ LoweringResult lower_predicate(const curlee::parser::Pred& pred, const LoweringC
     return typed.expr;
 }
 
+LoweringResult lower_predicate_int(const curlee::parser::Pred& pred, const LoweringContext& ctx)
+{
+    auto lowered = lower_node(pred, ctx);
+    if (std::holds_alternative<curlee::diag::Diagnostic>(lowered))
+    {
+        return std::get<curlee::diag::Diagnostic>(lowered);
+    }
+
+    auto typed = std::get<TypedExpr>(lowered);
+    if (typed.type != PredType::Int)
+    {
+        return error_at(pred.span, "decreases clause must resolve to Int");
+    }
+
+    return typed.expr;
+}
+
 } // namespace curlee::verification

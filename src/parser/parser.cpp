@@ -1504,6 +1504,57 @@ class Parser
                 return *err;
             }
 
+            // Optional loop contract block: `[ invariant ...; decreases ...; ]`.
+            // A loop with clauses is verified with the loop-invariant proof
+            // obligations; without them it keeps the legacy single-pass mode.
+            std::vector<Pred> invariants;
+            std::optional<Pred> decreases;
+            if (match(TokenKind::LBracket))
+            {
+                while (!check(TokenKind::RBracket) && !is_at_end())
+                {
+                    if (match(TokenKind::KwInvariant))
+                    {
+                        auto pred_res = parse_pred();
+                        if (std::holds_alternative<curlee::diag::Diagnostic>(pred_res))
+                        {
+                            return std::get<curlee::diag::Diagnostic>(std::move(pred_res));
+                        }
+                        invariants.push_back(std::get<Pred>(std::move(pred_res)));
+                    }
+                    else if (match(TokenKind::KwDecreases))
+                    {
+                        if (decreases.has_value())
+                        {
+                            return error_at(peek(), "duplicate 'decreases' clause in loop contract");
+                        }
+                        auto pred_res = parse_pred();
+                        if (std::holds_alternative<curlee::diag::Diagnostic>(pred_res))
+                        {
+                            return std::get<curlee::diag::Diagnostic>(std::move(pred_res));
+                        }
+                        decreases = std::get<Pred>(std::move(pred_res));
+                    }
+                    else
+                    {
+                        return error_at(peek(),
+                                        "expected 'invariant' or 'decreases' in loop contract block");
+                    }
+
+                    if (auto err = consume(TokenKind::Semicolon, "expected ';' after loop contract clause");
+                        err.has_value())
+                    {
+                        return *err;
+                    }
+                }
+
+                if (auto err = consume(TokenKind::RBracket, "expected ']' to end loop contract block");
+                    err.has_value())
+                {
+                    return *err;
+                }
+            }
+
             auto body_res = parse_block();
             if (std::holds_alternative<curlee::diag::Diagnostic>(body_res))
             {
@@ -1513,7 +1564,10 @@ class Parser
 
             Stmt stmt{
                 .span = span_cover(kw.span, body->span),
-                .node = WhileStmt{.cond = std::move(cond), .body = std::move(body)},
+                .node = WhileStmt{.cond = std::move(cond),
+                                  .body = std::move(body),
+                                  .invariants = std::move(invariants),
+                                  .decreases = std::move(decreases)},
             };
             return stmt;
         }
@@ -2521,6 +2575,23 @@ class Dumper
         out_ << "while (";
         dump_expr(s.cond);
         out_ << ") ";
+        if (!s.invariants.empty() || s.decreases.has_value())
+        {
+            out_ << "[ ";
+            for (const auto& inv : s.invariants)
+            {
+                out_ << "invariant ";
+                dump_pred(inv);
+                out_ << "; ";
+            }
+            if (s.decreases.has_value())
+            {
+                out_ << "decreases ";
+                dump_pred(*s.decreases);
+                out_ << "; ";
+            }
+            out_ << "] ";
+        }
         dump_block(*s.body);
     }
 

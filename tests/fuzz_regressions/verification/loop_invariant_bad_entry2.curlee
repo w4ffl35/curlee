@@ -1,0 +1,13 @@
+// Second bad-entry variant: the invariant `i >= 100` cannot hold at loop
+// entry (i == 5). This exercises the "loop invariant does not hold at loop
+// entry" obligation with a different shape than loop_invariant_bad_entry.curlee.
+fn main() -> Int {
+  let i: Int = 5;
+  let n: Int = 10;
+  while (i < n)
+    [ invariant i >= 100; ]
+  {
+    let _dummy: Int = i + 1;
+  }
+  return i;
+}

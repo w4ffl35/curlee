@@ -41,6 +41,8 @@ enum class TokenKind
     KwEnsures,
     KwWhere,
     KwGhost,
+    KwInvariant,
+    KwDecreases,
 
     KwUnsafe,
     KwCap,
@@ -138,6 +140,10 @@ struct Token
         return "kw_where";
     case TokenKind::KwGhost:
         return "kw_ghost";
+    case TokenKind::KwInvariant:
+        return "kw_invariant";
+    case TokenKind::KwDecreases:
+        return "kw_decreases";
 
     case TokenKind::KwUnsafe:
         return "kw_unsafe";

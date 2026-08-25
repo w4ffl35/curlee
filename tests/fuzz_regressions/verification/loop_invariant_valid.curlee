@@ -1,0 +1,13 @@
+fn main() -> Int {
+  let i: Int = 0;
+  let n: Int = 10;
+  // Invariant-only loop contract: entry + preservation + post-state are all
+  // discharged. (A `decreases` variant requires mutable loop-carried state,
+  // which needs assignment support; see docs/loop-contracts.md.)
+  while (i < n)
+    [ invariant 0 <= i && i <= n; ]
+  {
+    let _dummy: Int = i + 1;
+  }
+  return i;
+}

@@ -297,7 +297,7 @@ diagnostic style.
 ### 3.2 Proposed syntax additions
 
 **Static fuel contract clause** (extends the existing `[ ... ]` contract
-block in [`parser_impl.ipp`](src/parser/parser_impl.ipp:1014)):
+block in [`parser.cpp`](src/parser/parser.cpp:1507)):
 
 ```curlee
 fn accumulate(v: Vec<Int>) -> Int

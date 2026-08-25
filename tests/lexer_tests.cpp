@@ -44,6 +44,7 @@ int main()
             TokenKind::KwIf,          TokenKind::KwElse,     TokenKind::KwWhile,
             TokenKind::KwReturn,      TokenKind::KwTrue,     TokenKind::KwFalse,
             TokenKind::KwRequires,    TokenKind::KwEnsures,  TokenKind::KwWhere,
+            TokenKind::KwGhost,       TokenKind::KwInvariant, TokenKind::KwDecreases,
             TokenKind::KwUnsafe,      TokenKind::KwCap,      TokenKind::KwImport,
             TokenKind::KwAs,          TokenKind::KwPhys,     TokenKind::KwStruct,
             TokenKind::KwEnum,        TokenKind::KwMatch,    TokenKind::LParen,
@@ -201,6 +202,28 @@ int main()
         expect_token(toks, 0, TokenKind::KwGhost, "ghost");
         expect_token(toks, 1, TokenKind::KwFn, "fn");
         expect_token(toks, 2, TokenKind::Identifier, "g");
+    }
+
+    {
+        // Loop contract keywords (issue #261): `invariant` and `decreases`.
+        const std::string src = "invariant 0 <= i; decreases n - i;";
+        const auto res = lex(src);
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for loop contract keywords");
+        }
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::KwInvariant, "invariant");
+        expect_token(toks, 1, TokenKind::IntLiteral, "0");
+        expect_token(toks, 2, TokenKind::LessEqual, "<=");
+        expect_token(toks, 3, TokenKind::Identifier, "i");
+        expect_token(toks, 4, TokenKind::Semicolon, ";");
+        expect_token(toks, 5, TokenKind::KwDecreases, "decreases");
+        expect_token(toks, 6, TokenKind::Identifier, "n");
+        expect_token(toks, 7, TokenKind::Minus, "-");
+        expect_token(toks, 8, TokenKind::Identifier, "i");
+        expect_token(toks, 9, TokenKind::Semicolon, ";");
+        expect_token(toks, 10, TokenKind::Eof, "");
     }
 
     {

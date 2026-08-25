@@ -207,8 +207,8 @@ struct Expr
     std::size_t id = 0;
     curlee::source::Span span;
     std::variant<IntExpr, BoolExpr, StringExpr, NameExpr, UnaryExpr, BinaryExpr, CallExpr,
-                 MemberExpr, GroupExpr, ScopedNameExpr, StructLiteralExpr, PhysExpr,
-                 PhysReadExpr, PhysWriteExpr>
+                 MemberExpr, GroupExpr, ScopedNameExpr, StructLiteralExpr, PhysExpr, PhysReadExpr,
+                 PhysWriteExpr>
         node;
 };
 
@@ -260,11 +260,33 @@ struct IfStmt
     std::unique_ptr<Block> else_block;
 };
 
-/** @brief While loop statement. */
+/**
+ * @brief While loop statement with optional loop contract clauses.
+ *
+ * A loop with an explicit contract block carries:
+ *  - `invariants`: predicates that must hold at loop entry, be preserved by
+ *    every iteration (under `invariant && cond`), and hold after the loop
+ *    (alongside `!cond`).
+ *  - `decreases`: an integer variant expression that must be non-negative at
+ *    entry and strictly decrease each iteration, proving termination.
+ *
+ * Syntax:
+ * @code
+ * while (i < len)
+ *   [ invariant 0 <= i && i <= len;
+ *     decreases len - i; ]
+ * { ... }
+ * @endcode
+ *
+ * Loops without a contract block keep the legacy single-pass semantics (body
+ * checked once with the condition assumed, everything after discarded).
+ */
 struct WhileStmt
 {
     Expr cond;
     std::unique_ptr<Block> body;
+    std::vector<Pred> invariants;
+    std::optional<Pred> decreases;
 };
 
 /** @brief Match arm pattern: `Enum::Variant` or `Enum::Variant(payload)`. */

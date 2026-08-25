@@ -1,0 +1,11 @@
+fn main() -> Int {
+  let i: Int = 5;
+  let n: Int = 10;
+  while (i < n)
+    [ invariant i >= 100 && i <= n;
+      decreases n - i; ]
+  {
+    let _dummy: Int = i + 1;
+  }
+  return i;
+}

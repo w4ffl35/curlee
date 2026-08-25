@@ -1,0 +1,14 @@
+fn main() -> Int {
+  let i: Int = 0;
+  let n: Int = 10;
+  while (i < n)
+    [ invariant 0 <= i && i <= n; ]
+  {
+    let _dummy: Int = i + 1;
+  }
+  // Post-state: invariant && !cond are facts. Since the body cannot mutate i,
+  // i == 0 holds, but more importantly `i <= n` (from the invariant) is usable
+  // here even though it was only established inside the loop contract.
+  let done: Int = i;
+  return done;
+}

@@ -1021,6 +1021,38 @@ enum E { V; }
     }
 
     {
+        // Loop contract block (issue #261): invariant and decreases clauses
+        // parse and round-trip through the dumper.
+        const std::string src = R"(fn main() -> Unit {
+  while (i < n)
+    [ invariant 0 <= i && i <= n;
+      decreases n - i; ]
+  { return; }
+})";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on loop contract program");
+        }
+
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on loop contract program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("invariant") == std::string::npos ||
+            dumped.find("decreases") == std::string::npos)
+        {
+            fail("dump missing loop contract clauses");
+        }
+    }
+
+    {
         const std::string src = R"(fn main() -> Bool {
   let b: Bool = true;
   return b;

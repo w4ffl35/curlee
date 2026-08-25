@@ -1787,9 +1787,33 @@ class Verifier
         }
     }
 
+    // Lower a loop contract clause into a Z3 term with the opaque-read
+    // rejection applied first (an opaque MMIO value can never satisfy a
+    // contract). `int_clause` selects the Int-valued lowering used by
+    // `decreases` variant expressions.
+    std::optional<z3::expr> lower_loop_clause(const curlee::parser::Pred& pred,
+                                              bool int_clause = false)
+    {
+        if (pred_mentions_opaque_read(pred))
+        {
+            reject_opaque_read_contract(pred.span, "cannot prove contract on opaque MMIO read value");
+            return std::nullopt;
+        }
+        auto lowered = int_clause ? lower_predicate_int(pred, lower_ctx_)
+                                  : lower_predicate(pred, lower_ctx_);
+        if (std::holds_alternative<Diagnostic>(lowered))
+        {
+            diags_.push_back(std::get<Diagnostic>(std::move(lowered)));
+            return std::nullopt;
+        }
+        return std::get<z3::expr>(std::move(lowered));
+    }
+
     void check_stmt_node(const WhileStmt& s, Span, TypeKind expected_return)
     {
         check_expr_for_calls(s.cond);
+
+        const bool has_contract = !s.invariants.empty() || s.decreases.has_value();
 
         std::optional<z3::expr> cond_fact;
         {
@@ -1804,16 +1828,140 @@ class Verifier
             }
         }
 
-        push_scope();
+        // Loop without an explicit contract block: legacy single-pass mode.
+        // The body is checked exactly once with the loop condition assumed as
+        // a fact, then everything is discarded (the pre-loop facts remain).
+        // This matches the historical behavior and keeps existing programs
+        // (e.g. kernel infinite loops) verifying unchanged. The single-pass
+        // fallback is documented in docs/loop-contracts.md.
+        if (!has_contract)
+        {
+            push_scope();
+            if (cond_fact.has_value())
+            {
+                facts_.push_back(*cond_fact);
+            }
+            for (const auto& stmt : s.body->stmts)
+            {
+                check_stmt(stmt, expected_return);
+            }
+            pop_scope();
+            return;
+        }
+
+        // ----- Loop with a contract block: sound loop-invariant reasoning -----
+        //
+        // The language has no assignment statements (variables are immutable
+        // bindings), so the loop body cannot reassign loop-carried variables.
+        // Observable state can only change through opaque effects (e.g.
+        // `vec.set`, `push`), which the solver models as uninterpreted. The
+        // obligations below are nevertheless fully discharged, per loop:
+        //
+        //  1. ENTRY: each invariant must hold at loop entry (proved from the
+        //     pre-loop facts, not assumed).
+        //  2. PRESERVATION: assuming invariant && cond, one body pass must
+        //     re-establish each invariant (obligation-checked at body end).
+        //  3. VARIANT: `decreases(D)` is well-founded at entry (D >= 0) and
+        //     each iteration strictly decreases it (D_after < D_before).
+        //     Under immutability D_after == D_before unless an opaque effect
+        //     changed D's inputs, so a non-decreasing variant fails loudly.
+        //  4. POST-STATE: after the loop, invariant && !cond become facts for
+        //     the continuation (partial-correctness post-state; total
+        //     correctness is established by the variant obligation).
+
+        // Entry invariants: prove against pre-loop facts (checked, not assumed).
+        for (const auto& inv : s.invariants)
+        {
+            auto lowered_inv = lower_loop_clause(inv);
+            if (lowered_inv.has_value())
+            {
+                check_obligation(inv, lower_ctx_, *lowered_inv, inv.span, {},
+                                 "loop invariant does not hold at loop entry");
+            }
+        }
+
+        // Variant well-foundedness at entry: D >= 0.
+        std::optional<z3::expr> variant_before;
+        if (s.decreases.has_value())
+        {
+            auto lowered_v = lower_loop_clause(*s.decreases, /*int_clause=*/true);
+            if (lowered_v.has_value())
+            {
+                variant_before = *lowered_v;
+                const auto& d = *s.decreases;
+                check_obligation(d, lower_ctx_, *variant_before >= 0, d.span, {},
+                                 "decreases expression must be non-negative at loop entry");
+            }
+        }
+
+        // Preservation pass: assume invariant && cond, run the body once, then
+        // obligation-check each invariant and the variant decrease at the end.
+        // The push_scope isolates the body's bindings and facts; the pop below
+        // restores the pre-loop state (post-state facts are re-added after).
+        {
+            push_scope();
+
+            // Assume the invariants (facts) for the body.
+            for (const auto& inv : s.invariants)
+            {
+                auto lowered_inv = lower_loop_clause(inv);
+                if (lowered_inv.has_value())
+                {
+                    facts_.push_back(*lowered_inv);
+                }
+            }
+            if (cond_fact.has_value())
+            {
+                facts_.push_back(*cond_fact);
+            }
+
+            for (const auto& stmt : s.body->stmts)
+            {
+                check_stmt(stmt, expected_return);
+            }
+
+            // Preservation obligations: the invariant must hold again at the
+            // end of one body pass.
+            for (const auto& inv : s.invariants)
+            {
+                auto lowered_inv = lower_loop_clause(inv);
+                if (lowered_inv.has_value())
+                {
+                    check_obligation(inv, lower_ctx_, *lowered_inv, inv.span, {},
+                                     "loop invariant is not preserved by an iteration");
+                }
+            }
+
+            // Variant decrease obligation: D_after < D_before.
+            if (s.decreases.has_value() && variant_before.has_value())
+            {
+                auto lowered_v = lower_loop_clause(*s.decreases, /*int_clause=*/true);
+                if (lowered_v.has_value())
+                {
+                    const auto& d = *s.decreases;
+                    check_obligation(d, lower_ctx_, *lowered_v < *variant_before, d.span, {},
+                                     "decreases expression does not strictly decrease each iteration");
+                }
+            }
+
+            pop_scope();
+        }
+
+        // Post-state: the loop exits with invariant && !cond as facts in the
+        // continuation. Re-lower the invariants against the (restored) pre-loop
+        // bindings and keep them, then assert the negated condition.
+        for (const auto& inv : s.invariants)
+        {
+            auto lowered_inv = lower_loop_clause(inv);
+            if (lowered_inv.has_value())
+            {
+                facts_.push_back(*lowered_inv);
+            }
+        }
         if (cond_fact.has_value())
         {
-            facts_.push_back(*cond_fact);
+            facts_.push_back(!*cond_fact);
         }
-        for (const auto& stmt : s.body->stmts)
-        {
-            check_stmt(stmt, expected_return);
-        }
-        pop_scope();
     }
 
     void check_stmt_node(const MatchStmt& s, Span, TypeKind expected_return)

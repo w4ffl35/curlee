@@ -334,6 +334,14 @@ class Lexer
         {
             return TokenKind::KwGhost;
         }
+        if (lexeme == "invariant")
+        {
+            return TokenKind::KwInvariant;
+        }
+        if (lexeme == "decreases")
+        {
+            return TokenKind::KwDecreases;
+        }
         if (lexeme == "unsafe")
         {
             return TokenKind::KwUnsafe;

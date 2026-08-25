@@ -17,6 +17,7 @@ truth while Curlee is in "production-readiness stabilization":
 | --- | --- |
 | [`../README.md`](../README.md) | Project overview, build & run instructions |
 | [`cpp23-best-practices.md`](cpp23-best-practices.md) | C++23 reference for LLM agents contributing code |
+| [`loop-contracts.md`](loop-contracts.md) | Loop invariants and `decreases` variant clauses (issue #261) |
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Contributor guide |
 | [`../SECURITY.md`](../SECURITY.md) | Vulnerability reporting |
 | [`../.github/compatibility-policy.json`](../.github/compatibility-policy.json) | Semver/bundle-format compatibility policy |

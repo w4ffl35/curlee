@@ -63,4 +63,14 @@ using LoweringResult = std::variant<z3::expr, curlee::diag::Diagnostic>;
 [[nodiscard]] LoweringResult lower_predicate(const curlee::parser::Pred& pred,
                                              const LoweringContext& ctx);
 
+/**
+ * @brief Lower a parsed predicate into an Int Z3 expression.
+ *
+ * Used for integer-valued clauses such as the `decreases` variant expression
+ * in loop contracts. Unlike `lower_predicate`, the predicate must resolve to
+ * an Int (not Bool) term.
+ */
+[[nodiscard]] LoweringResult lower_predicate_int(const curlee::parser::Pred& pred,
+                                                 const LoweringContext& ctx);
+
 } // namespace curlee::verification

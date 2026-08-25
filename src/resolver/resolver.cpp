@@ -458,6 +458,18 @@ class Resolver
     {
         resolve_expr(s.cond);
 
+        // Loop contract clauses are resolved against the scope visible at the
+        // loop header (loop-carried variables, parameters, ghost snapshots),
+        // before the body's own bindings shadow anything.
+        for (const auto& inv : s.invariants)
+        {
+            resolve_pred(inv);
+        }
+        if (s.decreases.has_value())
+        {
+            resolve_pred(*s.decreases);
+        }
+
         push_scope();
         for (const auto& stmt : s.body->stmts)
         {
