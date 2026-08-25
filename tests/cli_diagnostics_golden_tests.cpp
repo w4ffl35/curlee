@@ -930,6 +930,16 @@ int main(int argc, char** argv)
         fs::path("tests/fixtures/check_fuel_nested_call_low.curlee");
     const fs::path rel_fuel_recursive =
         fs::path("tests/fixtures/check_fuel_recursive.curlee");
+    // Assignment statements (issue #268) diagnostics.
+    const fs::path rel_assign_bounded_sum =
+        fs::path("tests/fixtures/check_assign_bounded_sum.curlee");
+    const fs::path rel_assign_type_mismatch =
+        fs::path("tests/fixtures/check_assign_type_mismatch.curlee");
+    const fs::path rel_assign_unknown = fs::path("tests/fixtures/check_assign_unknown.curlee");
+    const fs::path rel_assign_param = fs::path("tests/fixtures/check_assign_param.curlee");
+    const fs::path rel_assign_shadowed_invariant =
+        fs::path("tests/fixtures/check_assign_shadowed_invariant.curlee");
+    const fs::path rel_run_assign = fs::path("tests/fixtures/run_assign.curlee");
 
     const fs::path check_requires_divide_golden = dir / "check_requires_divide.golden";
     const fs::path check_refinement_implies_golden = dir / "check_refinement_implies.golden";
@@ -1194,6 +1204,15 @@ int main(int argc, char** argv)
             return 1;
         }
 
+        // Assignment statements execute in the VM (issue #268): the bounded-sum
+        // loop + straight-line reassignment yield 6 + 2 = 8.
+        if (!run_stdio_case("run-assign", {"curlee", "run", rel_run_assign.string()},
+                            dir / "run_assign.stdout.golden", dir / "run_assign.stderr.golden",
+                            true))
+        {
+            return 1;
+        }
+
         if (!run_stdio_case("run-success-with-cap",
                             {"curlee", "run", "--cap", "python.ffi", rel_run_success.string()},
                             dir / "run_success.stdout.golden", dir / "run_success.stderr.golden",
@@ -1322,6 +1341,38 @@ int main(int argc, char** argv)
         if (!run_stderr_case("check-fuel-recursive",
                              {"curlee", "check", rel_fuel_recursive.string()},
                              dir / "check_fuel_recursive.golden", false))
+        {
+            return 1;
+        }
+
+        // Assignment statements (issue #268) diagnostics.
+        if (!run_stderr_case("check-assign-bounded-sum",
+                             {"curlee", "check", rel_assign_bounded_sum.string()},
+                             dir / "check_assign_bounded_sum.golden", true))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-assign-type-mismatch",
+                             {"curlee", "check", rel_assign_type_mismatch.string()},
+                             dir / "check_assign_type_mismatch.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-assign-unknown",
+                             {"curlee", "check", rel_assign_unknown.string()},
+                             dir / "check_assign_unknown.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-assign-param",
+                             {"curlee", "check", rel_assign_param.string()},
+                             dir / "check_assign_param.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-assign-shadowed-invariant",
+                             {"curlee", "check", rel_assign_shadowed_invariant.string()},
+                             dir / "check_assign_shadowed_invariant.golden", false))
         {
             return 1;
         }

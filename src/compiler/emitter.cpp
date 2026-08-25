@@ -14,6 +14,7 @@ namespace
 
 using curlee::diag::Diagnostic;
 using curlee::diag::Severity;
+using curlee::parser::AssignStmt;
 using curlee::parser::BinaryExpr;
 using curlee::parser::BlockStmt;
 using curlee::parser::BoolExpr;
@@ -430,6 +431,28 @@ class Emitter
         // Ghost snapshots are verification-only and produce no runtime code:
         // erase the statement from the bytecode (the verifier has already
         // discharged any obligations referencing it).
+    }
+
+    void emit_stmt_node(const AssignStmt& stmt, Span span)
+    {
+        // `x = expr;` reassigns an existing local: evaluate the RHS, then
+        // StoreLocal into the binding's existing slot (a `let` would allocate
+        // a NEW slot; an assignment reuses the slot so loop-carried mutation
+        // works and the VM's StoreLocal overwrites the slot in place).
+        emit_expr(stmt.value);
+        if (!diags_.empty())
+        {
+            return;
+        }
+
+        auto it = locals_.find(stmt.name);
+        if (it == locals_.end())
+        {
+            diags_.push_back(error_at(span, "unknown name '" + std::string(stmt.name) +
+                                                "' in runnable code"));
+            return;
+        }
+        chunk_.emit_local(OpCode::StoreLocal, it->second, span);
     }
 
     void emit_stmt_node(const ReturnStmt& stmt, Span span)

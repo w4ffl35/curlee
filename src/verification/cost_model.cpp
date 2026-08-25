@@ -17,6 +17,7 @@ namespace
 {
 
 using curlee::diag::Diagnostic;
+using curlee::parser::AssignStmt;
 using curlee::parser::BinaryExpr;
 using curlee::parser::Block;
 using curlee::parser::BlockStmt;
@@ -94,7 +95,8 @@ std::size_t binary_op_overhead(curlee::lexer::TokenKind op)
 
 CostResult
 CostModel::cost_function(const Function& f, const LoweringContext& ctx,
-                         const std::unordered_map<std::string_view, FuelEntry>& fuel_table)
+                         const std::unordered_map<std::string_view, FuelEntry>& fuel_table,
+                         const LoopEntryCtxMap* loop_entry_ctxs)
 {
     if (f.is_extern)
     {
@@ -106,18 +108,19 @@ CostModel::cost_function(const Function& f, const LoweringContext& ctx,
     // other functions) is detected as recursion and fails closed.
     call_stack_.clear();
     call_stack_.push_back(f.name);
-    auto cost = cost_block(f.body, ctx, fuel_table);
+    auto cost = cost_block(f.body, ctx, fuel_table, loop_entry_ctxs);
     call_stack_.pop_back();
     return cost;
 }
 
 CostResult CostModel::cost_block(const Block& block, const LoweringContext& ctx,
-                                 const std::unordered_map<std::string_view, FuelEntry>& fuel_table)
+                                 const std::unordered_map<std::string_view, FuelEntry>& fuel_table,
+                                 const LoopEntryCtxMap* loop_entry_ctxs)
 {
     z3::expr total = ctx.ctx.int_val(0);
     for (const auto& stmt : block.stmts)
     {
-        auto stmt_cost = cost_stmt(stmt, ctx, fuel_table);
+        auto stmt_cost = cost_stmt(stmt, ctx, fuel_table, loop_entry_ctxs);
         if (std::holds_alternative<Diagnostic>(stmt_cost))
         {
             return std::get<Diagnostic>(std::move(stmt_cost));
@@ -128,7 +131,8 @@ CostResult CostModel::cost_block(const Block& block, const LoweringContext& ctx,
 }
 
 CostResult CostModel::cost_stmt(const Stmt& stmt, const LoweringContext& ctx,
-                                const std::unordered_map<std::string_view, FuelEntry>& fuel_table)
+                                const std::unordered_map<std::string_view, FuelEntry>& fuel_table,
+                                const LoopEntryCtxMap* loop_entry_ctxs)
 {
     return std::visit(
         [&](const auto& node) -> CostResult
@@ -151,6 +155,18 @@ CostResult CostModel::cost_stmt(const Stmt& stmt, const LoweringContext& ctx,
                 // they cost zero at runtime.
                 return ctx.ctx.int_val(0);
             }
+            else if constexpr (std::is_same_v<Node, AssignStmt>)
+            {
+                // `x = expr;` costs 1 (the StoreLocal) plus the RHS cost, which
+                // recursively charges any nested calls — mirroring the emitter's
+                // instruction encoding for a reassignment.
+                auto rhs = cost_expr(node.value, ctx, fuel_table);
+                if (std::holds_alternative<Diagnostic>(rhs))
+                {
+                    return std::get<Diagnostic>(std::move(rhs));
+                }
+                return ctx.ctx.int_val(1) + std::get<z3::expr>(rhs);
+            }
             else if constexpr (std::is_same_v<Node, ReturnStmt>)
             {
                 z3::expr cost = ctx.ctx.int_val(1); // Return/Ret instruction
@@ -171,8 +187,9 @@ CostResult CostModel::cost_stmt(const Stmt& stmt, const LoweringContext& ctx,
             }
             else if constexpr (std::is_same_v<Node, BlockStmt>)
             {
-                return node.block != nullptr ? cost_block(*node.block, ctx, fuel_table)
-                                             : CostResult{ctx.ctx.int_val(0)};
+                return node.block != nullptr
+                           ? cost_block(*node.block, ctx, fuel_table, loop_entry_ctxs)
+                           : CostResult{ctx.ctx.int_val(0)};
             }
             else if constexpr (std::is_same_v<Node, IfStmt>)
             {
@@ -185,7 +202,7 @@ CostResult CostModel::cost_stmt(const Stmt& stmt, const LoweringContext& ctx,
                 }
                 z3::expr cond_total =
                     ctx.ctx.int_val(2) + std::get<z3::expr>(cond_cost); // cond + 2 branch instrs
-                auto then_cost = cost_block(*node.then_block, ctx, fuel_table);
+                auto then_cost = cost_block(*node.then_block, ctx, fuel_table, loop_entry_ctxs);
                 if (std::holds_alternative<Diagnostic>(then_cost))
                 {
                     return std::get<Diagnostic>(std::move(then_cost));
@@ -193,7 +210,7 @@ CostResult CostModel::cost_stmt(const Stmt& stmt, const LoweringContext& ctx,
                 auto else_cost = ctx.ctx.int_val(0);
                 if (node.else_block != nullptr)
                 {
-                    auto ec = cost_block(*node.else_block, ctx, fuel_table);
+                    auto ec = cost_block(*node.else_block, ctx, fuel_table, loop_entry_ctxs);
                     if (std::holds_alternative<Diagnostic>(ec))
                     {
                         return std::get<Diagnostic>(std::move(ec));
@@ -221,7 +238,10 @@ CostResult CostModel::cost_stmt(const Stmt& stmt, const LoweringContext& ctx,
                 // that the variant expression references: in that case the
                 // variant's termination proof and the fuel iteration bound are
                 // both vacuous (the body's fresh binding is solver-unconstrained),
-                // so accepting any bound would be unsound.
+                // so accepting any bound would be unsound. Note that a plain
+                // ASSIGNMENT in the body is the legitimate loop-carried mutation
+                // this feature exists for, and is not collected by
+                // collect_let_bindings.
                 std::unordered_set<std::string_view> body_bindings;
                 collect_let_bindings(*node.body, body_bindings);
                 if (!body_bindings.empty() && pred_mentions_name(*node.decreases, body_bindings))
@@ -232,7 +252,29 @@ CostResult CostModel::cost_stmt(const Stmt& stmt, const LoweringContext& ctx,
                                     "vacuous; rename the shadowed binding or the variant)");
                 }
 
-                auto variant = lower_predicate_int(*node.decreases, ctx);
+                // D_0 is the variant's value at LOOP ENTRY. The verifier records
+                // the entry lowering context at each `while` (assignment rebinds
+                // loop-carried names to fresh symbols); lower the variant against
+                // that snapshot when available so a genuinely bounded loop's fuel
+                // cost stays tied to the pre-loop values. Falls back to the
+                // passed ctx for direct unit-test callers.
+                const LoweringContext& variant_ctx =
+                    (loop_entry_ctxs != nullptr)
+                        ? ([&]() -> const LoweringContext& {
+                              // `node` is the SAME WhileStmt object the
+                              // verifier visited (std::get<WhileStmt> on the
+                              // shared AST), so the address matches the
+                              // recorded loop-entry snapshot.
+                              if (auto it = loop_entry_ctxs->find(&node);
+                                  it != loop_entry_ctxs->end())
+                              {
+                                  return it->second;
+                              }
+                              return ctx;
+                          }())
+                        : ctx;
+
+                auto variant = lower_predicate_int(*node.decreases, variant_ctx);
                 if (std::holds_alternative<Diagnostic>(variant))
                 {
                     return std::get<Diagnostic>(std::move(variant));
@@ -248,7 +290,7 @@ CostResult CostModel::cost_stmt(const Stmt& stmt, const LoweringContext& ctx,
                 {
                     return std::get<Diagnostic>(std::move(cond_cost));
                 }
-                auto body_cost = cost_block(*node.body, ctx, fuel_table);
+                auto body_cost = cost_block(*node.body, ctx, fuel_table, loop_entry_ctxs);
                 if (std::holds_alternative<Diagnostic>(body_cost))
                 {
                     return std::get<Diagnostic>(std::move(body_cost));
@@ -275,7 +317,7 @@ CostResult CostModel::cost_stmt(const Stmt& stmt, const LoweringContext& ctx,
                     {
                         continue;
                     }
-                    auto arm_cost = cost_block(*arm.body, ctx, fuel_table);
+                    auto arm_cost = cost_block(*arm.body, ctx, fuel_table, loop_entry_ctxs);
                     if (std::holds_alternative<Diagnostic>(arm_cost))
                     {
                         return std::get<Diagnostic>(std::move(arm_cost));
@@ -289,8 +331,9 @@ CostResult CostModel::cost_stmt(const Stmt& stmt, const LoweringContext& ctx,
             }
             else if constexpr (std::is_same_v<Node, UnsafeStmt>)
             {
-                return node.body != nullptr ? cost_block(*node.body, ctx, fuel_table)
-                                            : CostResult{ctx.ctx.int_val(0)};
+                return node.body != nullptr
+                           ? cost_block(*node.body, ctx, fuel_table, loop_entry_ctxs)
+                           : CostResult{ctx.ctx.int_val(0)};
             }
             return CostResult{ctx.ctx.int_val(0)};
         },

@@ -19,6 +19,7 @@ namespace
 using curlee::diag::Diagnostic;
 using curlee::diag::Related;
 using curlee::diag::Severity;
+using curlee::parser::AssignStmt;
 using curlee::parser::BinaryExpr;
 using curlee::parser::BlockStmt;
 using curlee::parser::CallExpr;
@@ -408,6 +409,16 @@ class Resolver
     void resolve_stmt_node(const GhostLetStmt& s, Span stmt_span)
     {
         resolve_ghost_let(s, stmt_span);
+    }
+
+    void resolve_stmt_node(const AssignStmt& s, Span span)
+    {
+        // Assignment does not declare: the target must resolve to an existing
+        // binding (the resolver reports `unknown name` otherwise). The
+        // read-only restriction on parameters/ghost snapshots is enforced by
+        // the type checker, which has the type-level scope information.
+        use_name(s.name, span);
+        resolve_expr(s.value);
     }
 
     void resolve_stmt_node(const ReturnStmt& s, Span)

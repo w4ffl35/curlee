@@ -1,0 +1,8 @@
+fn f(n: Int) -> Int {
+  n = 2;
+  return n;
+}
+
+fn main() -> Int {
+  return f(0);
+}

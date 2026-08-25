@@ -1,0 +1,4 @@
+tests/fixtures/check_assign_param.curlee:2:3: error: cannot assign to 'n': parameters and ghost snapshots are read-only (assignment targets must be local 'let' bindings)
+  |
+  |   n = 2;
+  |   ^^^^^^

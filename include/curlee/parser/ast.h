@@ -237,6 +237,23 @@ struct GhostLetStmt
     Expr value;
 };
 
+/**
+ * @brief Assignment statement (reassignment of an existing binding).
+ *
+ * `x = expr;` mutates the value of an already-declared binding `x` inside a
+ * function body. The target must be an in-scope binding (a fresh declaration
+ * is still a `let`); the binding's type is unchanged. The verifier rebinds
+ * `x` to a fresh solver symbol so pre- and post-mutation values can be
+ * reasoned about separately (loop `decreases` variants, invariant
+ * preservation). This is the mechanism that makes loop-carried mutation
+ * expressible (bounded sums, driver state machines).
+ */
+struct AssignStmt
+{
+    std::string_view name;
+    Expr value;
+};
+
 /** @brief Return statement (optional return value). */
 struct ReturnStmt
 {
@@ -331,8 +348,8 @@ struct BlockStmt
 struct Stmt
 {
     curlee::source::Span span;
-    std::variant<LetStmt, GhostLetStmt, ReturnStmt, ExprStmt, BlockStmt, IfStmt, WhileStmt,
-                 MatchStmt, UnsafeStmt>
+    std::variant<LetStmt, GhostLetStmt, AssignStmt, ReturnStmt, ExprStmt, BlockStmt, IfStmt,
+                 WhileStmt, MatchStmt, UnsafeStmt>
         node;
 };
 

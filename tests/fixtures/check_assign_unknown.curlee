@@ -1,0 +1,4 @@
+fn main() -> Int {
+  z = 4;
+  return 0;
+}

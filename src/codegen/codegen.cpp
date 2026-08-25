@@ -18,6 +18,7 @@ namespace
 
 using curlee::diag::Diagnostic;
 using curlee::diag::Severity;
+using curlee::parser::AssignStmt;
 using curlee::parser::BinaryExpr;
 using curlee::parser::BlockStmt;
 using curlee::parser::BoolExpr;
@@ -1136,6 +1137,20 @@ class CEmitter
             return;
         }
         writer_.line(text + ";");
+    }
+
+    void emit_stmt_node(const AssignStmt& stmt, Span span)
+    {
+        (void)span;
+        // A Curlee assignment is a plain C assignment: the target is an
+        // existing local binding (the front-end enforces this), so the C
+        // variable of the same name already exists.
+        const std::string value = emit_expr_as_text(stmt.value);
+        if (!diags_.empty())
+        {
+            return;
+        }
+        writer_.line(std::string(stmt.name) + " = " + value + ";");
     }
 
     void emit_stmt_node(const BlockStmt& stmt, Span span)

@@ -44,6 +44,21 @@ namespace curlee::verification
 using CostResult = std::variant<z3::expr, curlee::diag::Diagnostic>;
 
 /**
+ * @brief Loop-entry lowering contexts, keyed by the WhileStmt's address.
+ *
+ * The verifier records the name bindings in scope at each `while` loop's entry
+ * so the cost model can lower the loop's `decreases` variant (D_0 in the
+ * `(D_0 + 1) * (cost(c) + cost(B))` fuel formula) against the PRE-loop values
+ * of loop-carried variables. Assignment rebinds a name to a fresh symbol, so a
+ * context evaluated after the body would use a post-mutation symbol for D_0
+ * and spuriously fail a genuinely bounded loop. Keyed by the statement's
+ * address because the AST is stable and shared between the verifier's body
+ * check and the cost model's walk.
+ */
+using LoopEntryCtxMap =
+    std::unordered_map<const curlee::parser::WhileStmt*, LoweringContext>;
+
+/**
  * @brief Static WCET cost model over a parsed function body.
  *
  * The model computes a symbolic Z3 Int cost for a function body. It relies on:
@@ -102,14 +117,21 @@ class CostModel
     /**
      * @brief Compute the symbolic cost of a function body.
      *
-     * @param f          the function whose body is costed
-     * @param ctx        lowering context with parameter bindings already mapped
-     * @param fuel_table call-graph table; callees are looked up by name
-     * @param diagnostics on failure, a fail-closed diagnostic is returned
+     * @param f              the function whose body is costed
+     * @param ctx            lowering context with parameter bindings already mapped
+     * @param fuel_table     call-graph table; callees are looked up by name
+     * @param loop_entry_ctxs optional loop-entry lowering contexts recorded by
+     *                        the verifier (keyed by WhileStmt address). When
+     *                        present, each loop's `decreases` variant is
+     *                        lowered against its PRE-loop bindings (assignment
+     *                        rebinds names to fresh symbols); when null, the
+     *                        passed ctx is used (unit-test fallback).
+     * @param diagnostics    on failure, a fail-closed diagnostic is returned
      */
-    [[nodiscard]] CostResult
-    cost_function(const curlee::parser::Function& f, const LoweringContext& ctx,
-                  const std::unordered_map<std::string_view, FuelEntry>& fuel_table);
+    [[nodiscard]] CostResult cost_function(
+        const curlee::parser::Function& f, const LoweringContext& ctx,
+        const std::unordered_map<std::string_view, FuelEntry>& fuel_table,
+        const LoopEntryCtxMap* loop_entry_ctxs = nullptr);
 
   private:
     z3::context& ctx_;
@@ -121,12 +143,14 @@ class CostModel
     // model fails closed with a clear diagnostic instead of under-charging.
     std::vector<std::string_view> call_stack_;
 
-    [[nodiscard]] CostResult
-    cost_block(const curlee::parser::Block& block, const LoweringContext& ctx,
-               const std::unordered_map<std::string_view, FuelEntry>& fuel_table);
-    [[nodiscard]] CostResult
-    cost_stmt(const curlee::parser::Stmt& stmt, const LoweringContext& ctx,
-              const std::unordered_map<std::string_view, FuelEntry>& fuel_table);
+    [[nodiscard]] CostResult cost_block(
+        const curlee::parser::Block& block, const LoweringContext& ctx,
+        const std::unordered_map<std::string_view, FuelEntry>& fuel_table,
+        const LoopEntryCtxMap* loop_entry_ctxs);
+    [[nodiscard]] CostResult cost_stmt(
+        const curlee::parser::Stmt& stmt, const LoweringContext& ctx,
+        const std::unordered_map<std::string_view, FuelEntry>& fuel_table,
+        const LoopEntryCtxMap* loop_entry_ctxs);
     [[nodiscard]] CostResult
     cost_expr(const curlee::parser::Expr& expr, const LoweringContext& ctx,
               const std::unordered_map<std::string_view, FuelEntry>& fuel_table);

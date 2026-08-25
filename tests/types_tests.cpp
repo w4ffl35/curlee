@@ -55,6 +55,19 @@ static curlee::types::TypeInfo type_check_should_succeed(std::string_view source
     return std::get<curlee::types::TypeInfo>(typed);
 }
 
+static bool has_diag_containing(const std::vector<curlee::diag::Diagnostic>& diags,
+                                const std::string& needle)
+{
+    for (const auto& d : diags)
+    {
+        if (d.message.find(needle) != std::string::npos)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 int main()
 {
     using namespace curlee::types;
@@ -330,6 +343,52 @@ int main()
         {
             fail("expected if condition type mismatch diagnostic message");
         }
+    }
+
+    {
+        // Assignment (issue #268): reassigning an existing local binding with
+        // a value of a different type is a type error.
+        const std::string source =
+            "fn main() -> Int { let y: Int = 3; y = true; return y; }";
+        const auto diags = type_check_should_fail(source, "assignment type mismatch");
+        if (!has_diag_containing(diags, "type mismatch in assignment"))
+        {
+            fail("expected assignment type mismatch diagnostic");
+        }
+    }
+
+    {
+        // Assignment: parameters are read-only bindings; reassigning one is a
+        // type-checker error (not a silent no-op).
+        const std::string source = "fn f(n: Int) -> Int { n = 2; return n; } "
+                                   "fn main() -> Int { return f(0); }";
+        const auto diags = type_check_should_fail(source, "assignment to parameter");
+        if (!has_diag_containing(diags, "cannot assign to 'n'"))
+        {
+            fail("expected read-only parameter assignment diagnostic");
+        }
+    }
+
+    {
+        // Assignment: ghost snapshots are read-only too.
+        const std::string source =
+            "fn main() -> Int { ghost let g: Int = 0; g = 1; return g; }";
+        const auto diags = type_check_should_fail(source, "assignment to ghost snapshot");
+        if (!has_diag_containing(diags, "cannot assign to 'g'"))
+        {
+            fail("expected read-only ghost snapshot assignment diagnostic");
+        }
+    }
+
+    {
+        // Assignment: same-type reassignment of a local binding type-checks
+        // (Int and Bool both work).
+        (void)type_check_should_succeed(
+            "fn main() -> Int { let y: Int = 0; y = y + 1; return y; }",
+            "int assignment type checks");
+        (void)type_check_should_succeed(
+            "fn main() -> Bool { let b: Bool = true; b = false; return b; }",
+            "bool assignment type checks");
     }
 
     {

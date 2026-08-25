@@ -77,6 +77,10 @@ void assign_expr_ids_stmt(curlee::parser::Stmt& stmt, std::size_t& next_id)
             {
                 assign_expr_ids(node.value, next_id);
             }
+            else if constexpr (std::is_same_v<Node, curlee::parser::AssignStmt>)
+            {
+                assign_expr_ids(node.value, next_id);
+            }
             else if constexpr (std::is_same_v<Node, curlee::parser::ReturnStmt>)
             {
                 if (node.value.has_value())
@@ -1852,7 +1856,7 @@ class Parser
             return stmt;
         }
 
-        // Expression statement
+        // Expression statement (or assignment target when followed by '=').
         auto expr_res = parse_expr();
         if (std::holds_alternative<curlee::diag::Diagnostic>(expr_res))
         {
@@ -1860,6 +1864,40 @@ class Parser
         }
         Expr expr = std::get<Expr>(std::move(expr_res));
 
+        // Assignment statement: a bare name followed by '=' is `name = expr;`.
+        // `=` is not an expression operator, so the expression parser stops
+        // before it; only a plain NameExpr target is accepted (member/scoped
+        // targets are out of the MVP scope). The target must name an existing
+        // binding — the resolver/type-checker reject unknown names.
+        if (const auto* name = std::get_if<NameExpr>(&expr.node);
+            name != nullptr && check(TokenKind::Equal))
+        {
+            advance(); // consume '='
+
+            auto rhs_res = parse_expr();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
+            }
+            Expr value = std::get<Expr>(std::move(rhs_res));
+
+            if (auto err = consume(TokenKind::Semicolon, "expected ';' after assignment");
+                err.has_value())
+            {
+                return *err;
+            }
+            const Token semi = previous();
+
+            // Span: cover from first token of statement to semicolon.
+            const Token first = tokens_[start_pos];
+            Stmt stmt{
+                .span = span_cover(first.span, semi.span),
+                .node = AssignStmt{.name = name->name, .value = std::move(value)},
+            };
+            return stmt;
+        }
+
+        // Expression statement
         if (auto err = consume(TokenKind::Semicolon, "expected ';' after expression");
             err.has_value())
         {
@@ -2827,6 +2865,13 @@ class Dumper
 
         out_ << "return ";
         dump_expr(*s.value);
+        out_ << ";";
+    }
+
+    void dump_stmt_node(const AssignStmt& s)
+    {
+        out_ << s.name << " = ";
+        dump_expr(s.value);
         out_ << ";";
     }
 
