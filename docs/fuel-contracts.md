@@ -119,6 +119,40 @@ Backward compatibility: programs without `fuel` clauses are completely
 unaffected — no fuel obligation is emitted, and the runtime `--fuel` sandbox
 behaves exactly as before.
 
+## Known limitations and future work
+
+The following are tracked as future work in
+[issue #267](https://github.com/w4ffl35/curlee/issues/267); they are not
+defects in the shipped M3 behavior.
+
+- **Mutual-recursion diagnostics.** Self-recursion is detected at the call
+  site (`call_stack_` in `cost_model.cpp`) and fails closed with a clear
+  `recursive call: fuel cost is not bounded` diagnostic. *Mutual* recursion
+  (`a -> b -> a`) is not yet detected as a cycle: because the cost model
+  charges a callee's *declared bound* rather than walking its body, the cycle
+  is charged one level deep. In practice the whole program still fails closed
+  (each cycle member's own obligation includes the other member's declared
+  bound, so a cycle can never verify), but the diagnostic is the generic
+  "fuel bound may be exceeded" rather than the recursion diagnostic. Future
+  hardening: walk the fuel-table call graph for cycles during signature
+  collection and emit the recursion diagnostic for mutual cycles too.
+- **Bounded-loop fuel formulas are not yet exercisable.** The
+  `(D_0 + 1) * (cost(c) + cost(B))` loop formula is implemented, but under the
+  current no-assignment language a `decreases` variant cannot be proven to
+  strictly decrease (the loop-carried variable cannot be mutated), so every
+  loop with a `fuel` obligation fails closed today. When assignment lands
+  (M3/M4 roadmap), the formula becomes the iteration bound for genuinely
+  bounded loops.
+- **Drift oracle fires only on the out-of-fuel path.** `VmProfile.fuel_used`
+  is populated only when the VM exhausts the `--fuel` sandbox limit, so a run
+  that completes successfully reports `fuel_used == 0` and can never trigger
+  the advisory. The oracle is defense-in-depth; it becomes a live signal when
+  the VM reports consumed fuel on successful runs too.
+- **Fuel bounds are Int-expressions over inputs.** The bound itself is not
+  a *proof of termination* — termination comes from `decreases`. A `fuel`
+  clause on a non-terminating function is meaningless; the fail-closed paths
+  above (loops without `decreases`, recursion) are what keep it sound.
+
 ## See also
 
 - `docs/loop-contracts.md` — loop invariants and `decreases` variants (#261).

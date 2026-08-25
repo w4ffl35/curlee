@@ -276,6 +276,15 @@ diagnostic style.
 
 ## 3. Resource / Fuel Bounds (Replaces Performance Tests)
 
+> **Status: implemented (issue #262, merged).** Static `fuel` contract clauses,
+> the call-graph cost model, the WCET obligation, fail-closed loop/recursion
+> handling, and the CLI drift oracle shipped as of this roadmap revision. See
+> [`docs/fuel-contracts.md`](docs/fuel-contracts.md) for the current syntax,
+> the soundness guarantees, and the known limitations (mutual-recursion
+> diagnostics, bounded-loop formulas awaiting assignment support, and the
+> out-of-fuel-only drift oracle). The remaining subsections below are retained
+> as the historical design record.
+
 ### 3.1 Missing components in the current architecture
 
 1. **Fuel is runtime-only.** [`vm.cpp`](src/vm/vm.cpp:600) decrements a
