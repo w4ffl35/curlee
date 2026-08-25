@@ -1,0 +1,11 @@
+// Negative (review regression): a call nested inside a binary expression must
+// charge the callee's declared fuel. `helper` declares fuel 5; `helper(1) + 2`
+// has a true cost well above 7, so the fuel 7 bound on `main` must fail.
+fn helper(x: Int) -> Int [ fuel 5; ] { return x + 1; }
+
+fn main() -> Int
+  [ fuel 7; ]
+{
+  let a: Int = helper(1) + 2;
+  return a;
+}

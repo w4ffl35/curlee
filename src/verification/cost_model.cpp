@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -19,6 +20,7 @@ using curlee::diag::Diagnostic;
 using curlee::parser::BinaryExpr;
 using curlee::parser::Block;
 using curlee::parser::BlockStmt;
+using curlee::parser::BoolExpr;
 using curlee::parser::CallExpr;
 using curlee::parser::Expr;
 using curlee::parser::ExprStmt;
@@ -26,6 +28,7 @@ using curlee::parser::Function;
 using curlee::parser::GhostLetStmt;
 using curlee::parser::GroupExpr;
 using curlee::parser::IfStmt;
+using curlee::parser::IntExpr;
 using curlee::parser::LetStmt;
 using curlee::parser::MatchStmt;
 using curlee::parser::MemberExpr;
@@ -36,6 +39,7 @@ using curlee::parser::PhysWriteExpr;
 using curlee::parser::ReturnStmt;
 using curlee::parser::ScopedNameExpr;
 using curlee::parser::Stmt;
+using curlee::parser::StringExpr;
 using curlee::parser::StructLiteralExpr;
 using curlee::parser::UnaryExpr;
 using curlee::parser::UnsafeStmt;
@@ -57,89 +61,33 @@ z3::expr z3_max(const z3::expr& a, const z3::expr& b)
     return z3::ite(a > b, a, b);
 }
 
-// Cost of an expression's own instructions (excluding callee bodies, which are
-// charged via the call-graph fuel table). The emitter emits one instruction per
-// expression node (constants, loads, arithmetic ops, comparisons, jumps for
-// short-circuit operators), so the node count is the symbolic instruction cost.
-std::size_t expr_instruction_cost(const Expr& e)
+// Instruction cost of a leaf expression (constants, names, phys addresses).
+// Non-leaf nodes are walked recursively by cost_expr so nested calls are
+// charged through the call-graph fuel table; this helper only prices the
+// leaf/op overhead that is not a call.
+std::size_t leaf_instruction_cost(const Expr& e)
 {
     return std::visit(
         [&](const auto& node) -> std::size_t
         {
             using Node = std::decay_t<decltype(node)>;
-            if constexpr (std::is_same_v<Node, curlee::parser::IntExpr> ||
-                          std::is_same_v<Node, curlee::parser::BoolExpr> ||
-                          std::is_same_v<Node, curlee::parser::StringExpr> ||
-                          std::is_same_v<Node, NameExpr> || std::is_same_v<Node, PhysExpr>)
+            if constexpr (std::is_same_v<Node, IntExpr> || std::is_same_v<Node, BoolExpr> ||
+                          std::is_same_v<Node, StringExpr> || std::is_same_v<Node, NameExpr> ||
+                          std::is_same_v<Node, PhysExpr> || std::is_same_v<Node, ScopedNameExpr>)
             {
                 // Constant/name/phys-address load: one instruction.
                 return 1;
             }
-            else if constexpr (std::is_same_v<Node, ScopedNameExpr>)
-            {
-                return 1;
-            }
-            else if constexpr (std::is_same_v<Node, UnaryExpr>)
-            {
-                // Unary op: operand cost + one op instruction.
-                return 1 + expr_instruction_cost(*node.rhs);
-            }
-            else if constexpr (std::is_same_v<Node, BinaryExpr>)
-            {
-                // Binary op: both operands + one op instruction. Short-circuit
-                // logical ops additionally emit branch/constant instructions,
-                // approximated as a flat +1.
-                const std::size_t op_cost = (node.op == curlee::lexer::TokenKind::AndAnd ||
-                                             node.op == curlee::lexer::TokenKind::OrOr)
-                                                ? 3
-                                                : 1;
-                return op_cost + expr_instruction_cost(*node.lhs) +
-                       expr_instruction_cost(*node.rhs);
-            }
-            else if constexpr (std::is_same_v<Node, MemberExpr>)
-            {
-                return 1 + expr_instruction_cost(*node.base);
-            }
-            else if constexpr (std::is_same_v<Node, CallExpr>)
-            {
-                // The callee's own cost is charged through the fuel table (see
-                // cost_expr); the argument evaluation instructions are counted
-                // here.
-                std::size_t cost = 1; // the Call instruction itself
-                for (const auto& arg : node.args)
-                {
-                    cost += expr_instruction_cost(arg);
-                }
-                return cost;
-            }
-            else if constexpr (std::is_same_v<Node, GroupExpr>)
-            {
-                return expr_instruction_cost(*node.inner);
-            }
-            else if constexpr (std::is_same_v<Node, StructLiteralExpr>)
-            {
-                std::size_t cost = 1;
-                for (const auto& f : node.fields)
-                {
-                    if (f.value != nullptr)
-                    {
-                        cost += expr_instruction_cost(*f.value);
-                    }
-                }
-                return cost;
-            }
-            else if constexpr (std::is_same_v<Node, PhysReadExpr>)
-            {
-                return 1 + (node.base != nullptr ? expr_instruction_cost(*node.base) : 0);
-            }
-            else if constexpr (std::is_same_v<Node, PhysWriteExpr>)
-            {
-                return 1 + (node.base != nullptr ? expr_instruction_cost(*node.base) : 0) +
-                       (node.value != nullptr ? expr_instruction_cost(*node.value) : 0);
-            }
             return 0;
         },
         e.node);
+}
+
+// Number of extra instructions emitted for a binary operator (the operator
+// itself plus short-circuit branch/constant sequences for &&/||).
+std::size_t binary_op_overhead(curlee::lexer::TokenKind op)
+{
+    return (op == curlee::lexer::TokenKind::AndAnd || op == curlee::lexer::TokenKind::OrOr) ? 3 : 1;
 }
 
 } // namespace
@@ -154,7 +102,13 @@ CostModel::cost_function(const Function& f, const LoweringContext& ctx,
         // (checked by the verifier); the model never costs an opaque body.
         return ctx.ctx.int_val(0);
     }
-    return cost_block(f.body, ctx, fuel_table);
+    // Push the function's own name so a call to itself (or a cycle through
+    // other functions) is detected as recursion and fails closed.
+    call_stack_.clear();
+    call_stack_.push_back(f.name);
+    auto cost = cost_block(f.body, ctx, fuel_table);
+    call_stack_.pop_back();
+    return cost;
 }
 
 CostResult CostModel::cost_block(const Block& block, const LoweringContext& ctx,
@@ -183,9 +137,7 @@ CostResult CostModel::cost_stmt(const Stmt& stmt, const LoweringContext& ctx,
             if constexpr (std::is_same_v<Node, LetStmt>)
             {
                 // `let x = e;` costs 1 (the StoreLocal) plus the initializer's
-                // own cost. The initializer is routed through cost_expr so a
-                // call inside the initializer propagates the callee's declared
-                // fuel via the call-graph table (fail closed when unbounded).
+                // cost, which recursively charges any nested calls.
                 auto init = cost_expr(node.value, ctx, fuel_table);
                 if (std::holds_alternative<Diagnostic>(init))
                 {
@@ -264,6 +216,22 @@ CostResult CostModel::cost_stmt(const Stmt& stmt, const LoweringContext& ctx,
                                     "fuel cost requires a 'decreases' variant on every loop "
                                     "(add '[ decreases <expr>; ]' to the loop contract)");
                 }
+
+                // Fail closed if the loop body shadows (rebinds via `let`) a name
+                // that the variant expression references: in that case the
+                // variant's termination proof and the fuel iteration bound are
+                // both vacuous (the body's fresh binding is solver-unconstrained),
+                // so accepting any bound would be unsound.
+                std::unordered_set<std::string_view> body_bindings;
+                collect_let_bindings(*node.body, body_bindings);
+                if (!body_bindings.empty() && pred_mentions_name(*node.decreases, body_bindings))
+                {
+                    return error_at(stmt.span,
+                                    "decreases/fuel variant references a name shadowed in the "
+                                    "loop body (the termination and fuel bounds would be "
+                                    "vacuous; rename the shadowed binding or the variant)");
+                }
+
                 auto variant = lower_predicate_int(*node.decreases, ctx);
                 if (std::holds_alternative<Diagnostic>(variant))
                 {
@@ -329,15 +297,106 @@ CostResult CostModel::cost_stmt(const Stmt& stmt, const LoweringContext& ctx,
         stmt.node);
 }
 
+// The single recursive expression cost walker. Every non-leaf node recurses
+// into its children via cost_expr so that a CallExpr ANYWHERE in the tree is
+// charged its declared callee fuel (DEFECT 1 fix). Leaf nodes price a flat
+// instruction count.
 CostResult CostModel::cost_expr(const Expr& expr, const LoweringContext& ctx,
                                 const std::unordered_map<std::string_view, FuelEntry>& fuel_table)
 {
-    const auto* call = std::get_if<CallExpr>(&expr.node);
-    if (call != nullptr)
-    {
-        return cost_call(*call, ctx, fuel_table);
-    }
-    return CostResult{ctx.ctx.int_val(static_cast<int>(expr_instruction_cost(expr)))};
+    return std::visit(
+        [&](const auto& node) -> CostResult
+        {
+            using Node = std::decay_t<decltype(node)>;
+            if constexpr (std::is_same_v<Node, CallExpr>)
+            {
+                return cost_call(node, ctx, fuel_table);
+            }
+            else if constexpr (std::is_same_v<Node, UnaryExpr>)
+            {
+                // Unary op: operand cost + one op instruction.
+                auto rhs = cost_expr(*node.rhs, ctx, fuel_table);
+                if (std::holds_alternative<Diagnostic>(rhs))
+                {
+                    return std::get<Diagnostic>(std::move(rhs));
+                }
+                return ctx.ctx.int_val(1) + std::get<z3::expr>(rhs);
+            }
+            else if constexpr (std::is_same_v<Node, BinaryExpr>)
+            {
+                // Binary op: both operands + op overhead. Operands are walked
+                // recursively so nested calls in either operand are charged.
+                auto lhs = cost_expr(*node.lhs, ctx, fuel_table);
+                if (std::holds_alternative<Diagnostic>(lhs))
+                {
+                    return std::get<Diagnostic>(std::move(lhs));
+                }
+                auto rhs = cost_expr(*node.rhs, ctx, fuel_table);
+                if (std::holds_alternative<Diagnostic>(rhs))
+                {
+                    return std::get<Diagnostic>(std::move(rhs));
+                }
+                z3::expr total = ctx.ctx.int_val(static_cast<int>(binary_op_overhead(node.op)));
+                return total + std::get<z3::expr>(lhs) + std::get<z3::expr>(rhs);
+            }
+            else if constexpr (std::is_same_v<Node, MemberExpr>)
+            {
+                auto base = cost_expr(*node.base, ctx, fuel_table);
+                if (std::holds_alternative<Diagnostic>(base))
+                {
+                    return std::get<Diagnostic>(std::move(base));
+                }
+                return ctx.ctx.int_val(1) + std::get<z3::expr>(base);
+            }
+            else if constexpr (std::is_same_v<Node, GroupExpr>)
+            {
+                return cost_expr(*node.inner, ctx, fuel_table);
+            }
+            else if constexpr (std::is_same_v<Node, StructLiteralExpr>)
+            {
+                z3::expr total = ctx.ctx.int_val(1);
+                for (const auto& field : node.fields)
+                {
+                    if (field.value == nullptr)
+                    {
+                        continue;
+                    }
+                    auto fcost = cost_expr(*field.value, ctx, fuel_table);
+                    if (std::holds_alternative<Diagnostic>(fcost))
+                    {
+                        return std::get<Diagnostic>(std::move(fcost));
+                    }
+                    total = total + std::get<z3::expr>(fcost);
+                }
+                return total;
+            }
+            else if constexpr (std::is_same_v<Node, PhysReadExpr>)
+            {
+                auto base = cost_expr(*node.base, ctx, fuel_table);
+                if (std::holds_alternative<Diagnostic>(base))
+                {
+                    return std::get<Diagnostic>(std::move(base));
+                }
+                return ctx.ctx.int_val(1) + std::get<z3::expr>(base);
+            }
+            else if constexpr (std::is_same_v<Node, PhysWriteExpr>)
+            {
+                auto base = cost_expr(*node.base, ctx, fuel_table);
+                if (std::holds_alternative<Diagnostic>(base))
+                {
+                    return std::get<Diagnostic>(std::move(base));
+                }
+                auto value = cost_expr(*node.value, ctx, fuel_table);
+                if (std::holds_alternative<Diagnostic>(value))
+                {
+                    return std::get<Diagnostic>(std::move(value));
+                }
+                return ctx.ctx.int_val(1) + std::get<z3::expr>(base) + std::get<z3::expr>(value);
+            }
+            // Leaf nodes: flat instruction cost.
+            return CostResult{ctx.ctx.int_val(static_cast<int>(leaf_instruction_cost(expr)))};
+        },
+        expr.node);
 }
 
 CostResult CostModel::cost_call(const CallExpr& call, const LoweringContext& ctx,
@@ -351,6 +410,22 @@ CostResult CostModel::cost_call(const CallExpr& call, const LoweringContext& ctx
         return error_at(call.callee->span, "fuel cost: calls must name a function directly");
     }
 
+    // Recursion / call-graph cycle detection: if the callee is already on the
+    // cost path, the call is (mutually) recursive. Re-charging the declared
+    // bound per nesting site is NOT a sound bound — the recursion is unbounded —
+    // so fail closed with a clear diagnostic instead of the misleading
+    // "fuel bound may be exceeded".
+    for (const auto& on_path : call_stack_)
+    {
+        if (on_path == callee->name)
+        {
+            return error_at(call.callee->span,
+                            "recursive call: fuel cost is not bounded; declare a "
+                            "'decreases'-based termination argument or an explicit "
+                            "recursion bound");
+        }
+    }
+
     auto it = fuel_table.find(callee->name);
     if (it == fuel_table.end())
     {
@@ -360,10 +435,18 @@ CostResult CostModel::cost_call(const CallExpr& call, const LoweringContext& ctx
                             "' (declare a '[ fuel <bound>; ]' contract on the callee)");
     }
 
-    std::size_t arg_cost = 1; // Call instruction
+    // Argument evaluation cost: 1 per argument for the load/instruction plus the
+    // recursively-walked cost of each argument (so nested calls in arguments are
+    // charged too).
+    z3::expr arg_cost = ctx.ctx.int_val(1); // the Call instruction itself
     for (const auto& arg : call.args)
     {
-        arg_cost += expr_instruction_cost(arg);
+        auto acost = cost_expr(arg, ctx, fuel_table);
+        if (std::holds_alternative<Diagnostic>(acost))
+        {
+            return std::get<Diagnostic>(std::move(acost));
+        }
+        arg_cost = arg_cost + std::get<z3::expr>(acost);
     }
 
     const FuelEntry& entry = it->second;
@@ -402,7 +485,7 @@ CostResult CostModel::cost_call(const CallExpr& call, const LoweringContext& ctx
                                 "fuel cost: cannot evaluate argument for callee '" +
                                     std::string(callee->name) + "'");
             }
-            auto arg = lower_expr_(call.args[i]);
+            auto arg = lower_expr_(call.args[i], sub_ctx);
             if (!arg.has_value())
             {
                 return error_at(call.callee->span,
@@ -419,7 +502,115 @@ CostResult CostModel::cost_call(const CallExpr& call, const LoweringContext& ctx
         return std::get<Diagnostic>(std::move(bound_res));
     }
 
-    return ctx.ctx.int_val(static_cast<int>(arg_cost)) + std::get<z3::expr>(bound_res);
+    return arg_cost + std::get<z3::expr>(bound_res);
+}
+
+void CostModel::collect_let_bindings(const Block& block, std::unordered_set<std::string_view>& out)
+{
+    for (const auto& stmt : block.stmts)
+    {
+        std::visit(
+            [&](const auto& node)
+            {
+                using Node = std::decay_t<decltype(node)>;
+                if constexpr (std::is_same_v<Node, LetStmt>)
+                {
+                    out.insert(node.name);
+                }
+                else if constexpr (std::is_same_v<Node, GhostLetStmt>)
+                {
+                    out.insert(node.name);
+                }
+                else if constexpr (std::is_same_v<Node, BlockStmt>)
+                {
+                    if (node.block != nullptr)
+                    {
+                        collect_let_bindings(*node.block, out);
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, IfStmt>)
+                {
+                    collect_let_bindings(*node.then_block, out);
+                    if (node.else_block != nullptr)
+                    {
+                        collect_let_bindings(*node.else_block, out);
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, WhileStmt>)
+                {
+                    collect_let_bindings(*node.body, out);
+                }
+                else if constexpr (std::is_same_v<Node, MatchStmt>)
+                {
+                    for (const auto& arm : node.arms)
+                    {
+                        if (arm.body != nullptr)
+                        {
+                            collect_let_bindings(*arm.body, out);
+                        }
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, UnsafeStmt>)
+                {
+                    if (node.body != nullptr)
+                    {
+                        collect_let_bindings(*node.body, out);
+                    }
+                }
+            },
+            stmt.node);
+    }
+}
+
+bool CostModel::pred_mentions_name(const curlee::parser::Pred& pred,
+                                   const std::unordered_set<std::string_view>& names)
+{
+    bool found = false;
+    std::visit(
+        [&](const auto& node)
+        {
+            using Node = std::decay_t<decltype(node)>;
+            if constexpr (std::is_same_v<Node, curlee::parser::PredName>)
+            {
+                if (names.count(node.name) != 0)
+                {
+                    found = true;
+                }
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PredCall>)
+            {
+                for (const auto& arg : node.args)
+                {
+                    if (pred_mentions_name(arg, names))
+                    {
+                        found = true;
+                    }
+                }
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PredUnary>)
+            {
+                if (pred_mentions_name(*node.rhs, names))
+                {
+                    found = true;
+                }
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PredBinary>)
+            {
+                if (pred_mentions_name(*node.lhs, names) || pred_mentions_name(*node.rhs, names))
+                {
+                    found = true;
+                }
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PredGroup>)
+            {
+                if (pred_mentions_name(*node.inner, names))
+                {
+                    found = true;
+                }
+            }
+        },
+        pred.node);
+    return found;
 }
 
 } // namespace curlee::verification

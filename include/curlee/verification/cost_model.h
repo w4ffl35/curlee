@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <z3++.h>
 
@@ -87,10 +88,11 @@ class CostModel
      * declared fuel bound (an expression over the callee's parameters) can be
      * evaluated at the call site with the caller's argument expressions
      * substituted. `lower_expr` returns the Z3 expression for the given Expr
-     * when lowering succeeds, or std::nullopt (with a diagnostic emitted by the
-     * caller) when it fails.
+     * (lowered against `ctx`) when lowering succeeds, or std::nullopt (with a
+     * diagnostic emitted by the caller) when it fails.
      */
-    using ExprLowerFn = std::function<std::optional<z3::expr>(const curlee::parser::Expr&)>;
+    using ExprLowerFn = std::function<std::optional<z3::expr>(const curlee::parser::Expr&,
+                                                              const LoweringContext& ctx)>;
 
     explicit CostModel(z3::context& context, ExprLowerFn lower_expr = {})
         : ctx_(context), lower_expr_(std::move(lower_expr))
@@ -113,6 +115,12 @@ class CostModel
     z3::context& ctx_;
     ExprLowerFn lower_expr_;
 
+    // Call path currently being costed, for recursion/cycle detection. A call
+    // to a callee already on the path is a recursive (unbounded) call: its
+    // static fuel cost is not bounded by re-charging the declared bound, so the
+    // model fails closed with a clear diagnostic instead of under-charging.
+    std::vector<std::string_view> call_stack_;
+
     [[nodiscard]] CostResult
     cost_block(const curlee::parser::Block& block, const LoweringContext& ctx,
                const std::unordered_map<std::string_view, FuelEntry>& fuel_table);
@@ -125,6 +133,19 @@ class CostModel
     [[nodiscard]] CostResult
     cost_call(const curlee::parser::CallExpr& call, const LoweringContext& ctx,
               const std::unordered_map<std::string_view, FuelEntry>& fuel_table);
+
+    /**
+     * @brief Collect the set of names a predicate (or expression subtree) binds.
+     *
+     * Used to detect when a loop body shadows (rebinds via `let`) a name that a
+     * `decreases` variant references: the variant's termination proof and the
+     * fuel iteration bound would both be vacuous in that case, so the cost model
+     * rejects the loop (fail closed).
+     */
+    static void collect_let_bindings(const curlee::parser::Block& block,
+                                     std::unordered_set<std::string_view>& out);
+    [[nodiscard]] static bool pred_mentions_name(const curlee::parser::Pred& pred,
+                                                 const std::unordered_set<std::string_view>& names);
 };
 
 } // namespace curlee::verification

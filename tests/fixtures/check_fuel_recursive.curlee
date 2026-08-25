@@ -1,0 +1,14 @@
+// Negative (review regression): recursion fails closed with a clear diagnostic
+// instead of the misleading "fuel bound may be exceeded" (re-charging the
+// declared bound per nesting site is not a sound bound for unbounded recursion).
+fn count(n: Int) -> Int
+  [ fuel 5; ]
+{
+  return count(n - 1);
+}
+
+fn main() -> Int
+  [ fuel 100; ]
+{
+  return count(10);
+}

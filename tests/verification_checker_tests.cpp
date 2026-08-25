@@ -1733,6 +1733,153 @@ fn main() -> Int
         }
     }
 
+    // --- Review regressions (soundness fixes) ---
+
+    // DEFECT 1a: a call nested inside a binary expression must charge the
+    // callee's declared fuel. `helper` declares fuel 5; the nested call in
+    // `helper(1) + 2` pushes the true cost well above 7, so fuel 7 must FAIL.
+    {
+        const std::string source = R"(
+fn helper(x: Int) -> Int
+  [ fuel 5; ]
+{
+  return x + 1;
+}
+
+fn main() -> Int
+  [ fuel 7; ]
+{
+  let a: Int = helper(1) + 2;
+  return a;
+}
+)";
+        const auto verified = verify_program(source, "fuel nested call low");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected nested-call fuel bound too low to fail");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "fuel bound may be exceeded"))
+        {
+            fail("expected nested-call fuel bound diagnostic");
+        }
+    }
+
+    // DEFECT 1b: with a sufficient bound, the same nested call verifies.
+    {
+        const std::string source = R"(
+fn helper(x: Int) -> Int
+  [ fuel 5; ]
+{
+  return x + 1;
+}
+
+fn main() -> Int
+  [ fuel 20; ]
+{
+  let a: Int = helper(1) + 2;
+  return a;
+}
+)";
+        const auto verified = verify_program(source, "fuel nested call ok");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected sufficient nested-call fuel bound to verify");
+        }
+    }
+
+    // DEFECT 1c: a call nested inside an if-condition must be charged too.
+    {
+        const std::string source = R"(
+fn helper(x: Int) -> Int
+  [ fuel 5; ]
+{
+  return x + 1;
+}
+
+fn main() -> Int
+  [ fuel 7; ]
+{
+  if (helper(1) > 0) {
+    let a: Int = 1;
+  } else {
+    let b: Int = 2;
+  }
+  return 0;
+}
+)";
+        const auto verified = verify_program(source, "fuel if-condition call");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected if-condition call fuel bound to be charged (fail)");
+        }
+    }
+
+    // DEFECT 2a: a loop whose body shadows (rebinds) a name referenced by the
+    // `decreases` variant must fail closed — the termination and fuel bounds
+    // would otherwise be vacuous.
+    {
+        const std::string source = R"(
+fn helper(x: Int) -> Int
+  [ fuel 500; ]
+{
+  return x + 1;
+}
+
+fn main() -> Int
+  [ fuel 1; ]
+{
+  let i: Int = 0;
+  while (i < 3)
+    [ invariant 0 <= i && i <= 3;
+      decreases 3 - i; ]
+  {
+    let i: Int = i + 1;
+    let x: Int = helper(1);
+  }
+  return i;
+}
+)";
+        const auto verified = verify_program(source, "fuel shadowed loop variant");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected shadowed-loop variant to fail closed");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "shadowed in the loop body"))
+        {
+            fail("expected shadowed-variant diagnostic");
+        }
+    }
+
+    // Secondary: recursion fails closed with a clear diagnostic instead of the
+    // misleading "fuel bound may be exceeded".
+    {
+        const std::string source = R"(
+fn count(n: Int) -> Int
+  [ fuel 5; ]
+{
+  return count(n - 1);
+}
+
+fn main() -> Int
+  [ fuel 100; ]
+{
+  return count(10);
+}
+)";
+        const auto verified = verify_program(source, "fuel recursive call");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected recursive fuel cost to fail closed");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "recursive call: fuel cost is not bounded"))
+        {
+            fail("expected recursion fuel diagnostic");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

@@ -285,7 +285,7 @@ class Verifier
     explicit Verifier(const curlee::types::TypeInfo& type_info)
         : type_info_(type_info), solver_(), lower_ctx_(solver_.context()),
           cost_model_(solver_.context(),
-                      [this](const curlee::parser::Expr& e)
+                      [this](const curlee::parser::Expr& e, const LoweringContext&)
                       {
                           auto lowered = lower_expr(e);
                           if (std::holds_alternative<ExprValue>(lowered))
@@ -2137,16 +2137,52 @@ class Verifier
     {
         const auto& bound_pred = *f.fuel_bound;
 
-        // Lower the declared bound to a Z3 Int expression over the function's
-        // inputs.
-        auto lowered_bound = lower_predicate_int_named(bound_pred, lower_ctx_, "fuel");
+        // Build a RESTRICTED lowering context for the DECLARED FUEL BOUND only:
+        // parameters + contract-block ghost snapshots are in scope; local `let`
+        // bindings from the body are NOT. This prevents a fuel clause from
+        // silently depending on a local binding whose value the solver can shift
+        // to weaken the obligation.
+        LoweringContext fuel_ctx(solver_.context());
+        fuel_ctx.ghost_fns = &ghost_fns_;
+        for (std::size_t i = 0; i < sig.params.size() && i < f.params.size(); ++i)
+        {
+            const auto& param = f.params[i];
+            const auto kind = sig.params[i];
+            if (kind == TypeKind::Int)
+            {
+                auto sym = solver_.context().int_const(std::string(param.name).c_str());
+                fuel_ctx.int_vars.emplace(param.name, sym);
+            }
+            else if (kind == TypeKind::Bool)
+            {
+                auto sym = solver_.context().bool_const(std::string(param.name).c_str());
+                fuel_ctx.bool_vars.emplace(param.name, sym);
+            }
+        }
+        for (const auto& g : f.ghost_lets)
+        {
+            auto saved_int = std::move(lower_ctx_.int_vars);
+            auto saved_bool = std::move(lower_ctx_.bool_vars);
+            lower_ctx_.int_vars = fuel_ctx.int_vars;
+            lower_ctx_.bool_vars = fuel_ctx.bool_vars;
+            lower_ghost_let(g, fuel_ctx);
+            lower_ctx_.int_vars = std::move(saved_int);
+            lower_ctx_.bool_vars = std::move(saved_bool);
+        }
+
+        // Lower the declared bound against the restricted scope.
+        auto lowered_bound = lower_predicate_int_named(bound_pred, fuel_ctx, "fuel");
         if (std::holds_alternative<Diagnostic>(lowered_bound))
         {
             diags_.push_back(std::get<Diagnostic>(std::move(lowered_bound)));
             return;
         }
 
-        // Compute the symbolic cost of the body.
+        // Compute the symbolic cost of the body against the FULL lowering
+        // context: the cost walker needs the loop-entry bindings (local lets in
+        // scope at each WhileStmt) to lower the `decreases` variant soundly. The
+        // shadowing rejection in the cost model guards against a vacuous variant;
+        // call arguments legitimately reference local lets.
         auto cost_res = cost_model_.cost_function(f, lower_ctx_, fuel_table_);
         if (std::holds_alternative<Diagnostic>(cost_res))
         {

@@ -1,0 +1,4 @@
+tests/fixtures/check_fuel_loop_shadowed_variant.curlee:12:3: error: decreases/fuel variant references a name shadowed in the loop body (the termination and fuel bounds would be vacuous; rename the shadowed binding or the variant)
+  |
+  |   while (i < 3)
+  |   ^

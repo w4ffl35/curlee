@@ -924,6 +924,12 @@ int main(int argc, char** argv)
     const fs::path rel_fuel_extern_ok = fs::path("tests/fixtures/check_fuel_extern_ok.curlee");
     const fs::path rel_fuel_extern_missing =
         fs::path("tests/fixtures/check_fuel_extern_missing.curlee");
+    const fs::path rel_fuel_loop_shadowed_variant =
+        fs::path("tests/fixtures/check_fuel_loop_shadowed_variant.curlee");
+    const fs::path rel_fuel_nested_call_low =
+        fs::path("tests/fixtures/check_fuel_nested_call_low.curlee");
+    const fs::path rel_fuel_recursive =
+        fs::path("tests/fixtures/check_fuel_recursive.curlee");
 
     const fs::path check_requires_divide_golden = dir / "check_requires_divide.golden";
     const fs::path check_refinement_implies_golden = dir / "check_refinement_implies.golden";
@@ -1298,6 +1304,24 @@ int main(int argc, char** argv)
         if (!run_stderr_case("check-fuel-extern-missing",
                              {"curlee", "check", rel_fuel_extern_missing.string()},
                              dir / "check_fuel_extern_missing.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-fuel-loop-shadowed-variant",
+                             {"curlee", "check", rel_fuel_loop_shadowed_variant.string()},
+                             dir / "check_fuel_loop_shadowed_variant.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-fuel-nested-call-low",
+                             {"curlee", "check", rel_fuel_nested_call_low.string()},
+                             dir / "check_fuel_nested_call_low.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-fuel-recursive",
+                             {"curlee", "check", rel_fuel_recursive.string()},
+                             dir / "check_fuel_recursive.golden", false))
         {
             return 1;
         }

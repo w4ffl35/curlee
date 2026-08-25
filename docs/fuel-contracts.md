@@ -85,9 +85,11 @@ curlee warning: runtime fuel_used (200) exceeds the declared static fuel bound (
 
 The warning is **non-gating**: the static proof is the primary gate, and the
 runtime profile only surfaces cost-model drift. Note that the VM currently
-reports `fuel_used` only on the out-of-fuel failure path, so the oracle fires
-when a run exhausts a `--fuel` limit larger than the declared static bound —
-exactly the drift signal the roadmap intends.
+reports `fuel_used` only on the out-of-fuel failure path. Because the cost model
+is now a sound over-approximation, a statically-verified program cannot exceed
+its declared bound at runtime under the current language (loopless bodies
+report `fuel_used == 0` on success); the oracle remains as a defense-in-depth
+signal for when assignment/bounded loops land and the cost model can drift.
 
 ## Current fragment limitations
 
@@ -100,10 +102,18 @@ consequence:
   a loop *without* `decreases` fails closed — the intended behavior — and the
   loop-variant cost formula `(D_0 + 1) * (cost(c) + cost(B))` cannot yet be
   exercised by a genuinely bounded loop.
-- The documented shadowing behavior (binding a same-named `let` inside the loop
-  body) makes the variant-decrease proof vacuous and *does* let a loop pass the
-  static fuel obligation; this is a documented MVP semantic, not a soundness
-  guarantee, and must be revisited when assignment (M3/M4) lands.
+- The cost model is a **sound over-approximation**: every expression node
+  (including calls nested inside operands, conditions, initializers, and
+  arguments) is charged its callee fuel, so the static cost never under-charges.
+- A loop whose body shadows (rebinds) a name that the `decreases` variant
+  references is rejected fail-closed: the termination and fuel bounds would
+  both be vacuous. This closes the previously-documented shadowing gap.
+- Recursive (or mutually recursive) calls fail closed with a clear diagnostic —
+  re-charging a declared bound per nesting site is not a sound bound for
+  unbounded recursion.
+- A `fuel` clause (and its call-argument substitution) is lowered against the
+  function's parameters + ghost snapshots only; it cannot silently depend on
+  local `let` bindings.
 
 Backward compatibility: programs without `fuel` clauses are completely
 unaffected — no fuel obligation is emitted, and the runtime `--fuel` sandbox

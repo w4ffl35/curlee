@@ -461,42 +461,42 @@ int main()
         expect_contains(err, "expected --profile-format= to be one of: text, json", "stderr");
     }
 
-    // Static-fuel drift oracle (issue #262): when the runtime profile shows
-    // fuel_used exceeding the declared static fuel bound on `main`, an advisory
-    // warning is emitted on stderr WITHOUT changing pass/fail semantics (the
-    // out-of-fuel failure still exits non-zero).
+    // Static-fuel drift oracle (issue #262): the profile-vs-declared warning is
+    // advisory and NON-gating. After the soundness fixes (shadowed loop variants
+    // fail closed), a fuel-annotated main that passes static verification cannot
+    // exceed its declared bound at runtime (the cost model is now a sound
+    // over-approximation), so a successful within-bound run must succeed with NO
+    // warning, and the mechanism never changes exit semantics.
     {
         std::string out;
         std::string err;
         const int rc = run_cli_capture(
-            {"curlee", "run", "--profile", "--fuel", "200", fuel_drift.string()}, out, err);
-        if (rc == 0)
-        {
-            fail("expected drift fixture to exhaust fuel and fail");
-        }
-        expect_contains(err, "out of fuel", "stderr");
-        expect_contains(err, "curlee profile: steps=200", "stderr");
-        expect_contains(err,
-                        "curlee warning: runtime fuel_used (200) exceeds the declared static "
-                        "fuel bound (100) on 'main'",
-                        "stderr");
-    }
-
-    // No drift warning when the runtime fuel stays within the declared bound:
-    // a successful run (fuel_used == 0) must not emit the advisory.
-    {
-        std::string out;
-        std::string err;
-        const int rc = run_cli_capture(
-            {"curlee", "run", "--profile", "--fuel", "100", run_success.string()}, out, err);
+            {"curlee", "run", "--profile", "--fuel", "1000", fuel_drift.string()}, out, err);
         if (rc != 0)
         {
-            fail("expected successful run; stderr=" + err);
+            fail("expected drift fixture to run successfully; stderr=" + err);
         }
+        expect_contains(out, "curlee profile:", "stdout");
         if (err.find("curlee warning: runtime fuel_used") != std::string::npos)
         {
             fail("expected no fuel drift warning on a within-bound successful run");
         }
+    }
+
+    // The out-of-fuel failure path still emits the profile (and any advisory
+    // warning) without the warning being gating: the run fails due to the VM
+    // sandbox, and the profile reflects the consumed fuel.
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "run", "--profile", "--fuel", "2", fuel_drift.string()}, out, err);
+        if (rc == 0)
+        {
+            fail("expected drift fixture to exhaust fuel under a tiny sandbox limit");
+        }
+        expect_contains(err, "out of fuel", "stderr");
+        expect_contains(err, "curlee profile: steps=2 fuel_limit=2 fuel_used=2", "stderr");
     }
 
     std::cout << "OK\n";

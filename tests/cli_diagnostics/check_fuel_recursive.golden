@@ -1,0 +1,4 @@
+tests/fixtures/check_fuel_recursive.curlee:7:10: error: recursive call: fuel cost is not bounded; declare a 'decreases'-based termination argument or an explicit recursion bound
+  |
+  |   return count(n - 1);
+  |          ^^^^^

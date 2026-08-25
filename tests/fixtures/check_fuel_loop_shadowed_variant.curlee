@@ -1,0 +1,20 @@
+// Negative (review regression): a loop whose body shadows (rebinds via `let`) a
+// name referenced by the `decreases` variant must FAIL CLOSED. Otherwise the
+// termination proof AND the fuel iteration bound are vacuous (the body's fresh
+// binding is solver-unconstrained), letting a huge body cost pass at a tiny
+// declared fuel bound.
+fn helper(x: Int) -> Int [ fuel 500; ] { return x + 1; }
+
+fn main() -> Int
+  [ fuel 1; ]
+{
+  let i: Int = 0;
+  while (i < 3)
+    [ invariant 0 <= i && i <= 3;
+      decreases 3 - i; ]
+  {
+    let i: Int = i + 1;
+    let x: Int = helper(1);
+  }
+  return i;
+}
