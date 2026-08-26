@@ -218,11 +218,15 @@ std::vector<z3::expr> model_vars_for_pred(const curlee::parser::Pred& pred,
 }
 
 // True for the unsigned fixed-width integer types the verifier lowers to their
-// Int value (issue #274): U8/U16/U32. U64 is excluded — widening a 64-bit
-// unsigned value to Int is not value-preserving (out of scope for the MVP).
+// Int value: U8/U16/U32 (issue #274) and, since issue #277, U64. A U64 binding
+// is constructed from an Int (widening) or a literal in the MVP — its value IS
+// the Int value (no wraparound, no overflow cases in scope) — so the same
+// Int-sort lowering applies. (The front-end's operator rules still keep U64
+// out of arithmetic/mixed comparisons; this only affects solver bindings.)
 static bool is_widening_unsigned(TypeKind kind)
 {
-    return kind == TypeKind::U8 || kind == TypeKind::U16 || kind == TypeKind::U32;
+    return kind == TypeKind::U8 || kind == TypeKind::U16 || kind == TypeKind::U32 ||
+           kind == TypeKind::U64;
 }
 
 struct ExprValue
@@ -603,10 +607,11 @@ class Verifier
             lower_ctx_.int_vars.insert_or_assign(name, fresh_symbol(name, TypeKind::Int));
             return;
         }
-        // U8/U16/U32 values lower to their Int value in the solver (issue #274):
-        // the read stays opaque (uninterpreted), but its *type* is usable — a
-        // port read can be bit-tested, compared, and arithmetically widened.
-        // U64 is excluded (widening is not value-preserving; out of scope).
+        // U8/U16/U32/U64 values lower to their Int value in the solver
+        // (issues #274/#277): the read stays opaque (uninterpreted), but its
+        // *type* is usable — a port read can be bit-tested, compared, and
+        // arithmetically widened, and a U64 binding (constructed from an Int
+        // or literal) is a normal Int-valued binding.
         if (is_widening_unsigned(kind))
         {
             lower_ctx_.int_vars.insert_or_assign(name, fresh_symbol(name, TypeKind::Int));
@@ -2156,11 +2161,12 @@ class Verifier
                     is_port);
             }
 
-            // U8/U16/U32 values lower to their Int value in the solver (issue #274):
-            // declare an Int-sort symbol and bind it to the (opaque) initializer, so
-            // the read can be bit-tested, compared, and arithmetically widened while
-            // its VALUE stays uninterpreted. U64 remains uninterpreted (no solver
-            // variable; widening is not value-preserving and is out of scope).
+            // U8/U16/U32/U64 values lower to their Int value in the solver
+            // (issues #274/#277): declare an Int-sort symbol and bind it to the
+            // initializer, so the read can be bit-tested, compared, and
+            // arithmetically widened while its VALUE stays uninterpreted, and a
+            // U64 binding (constructed from an Int or literal) is a normal
+            // Int-valued binding.
             if (is_widening_unsigned(core_t->kind))
             {
                 declare_var(s.name, TypeKind::Int);

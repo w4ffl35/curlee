@@ -124,6 +124,14 @@ run_smoke_for_preset() {
   # port I/O), plus the freestanding codegen fixture below in codegen_tests.
   expect_ok "check: check_unsigned_inspect.curlee" "$bin" check tests/fixtures/check_unsigned_inspect.curlee
 
+  # Issue #277: construct a U64 from an Int or a literal — Int -> U64 widening
+  # in `let`/struct fields, U64 literal adaptation, and U64 == U64 comparisons.
+  # A literal at or above 2^32 is rejected (out of range) rather than silently
+  # truncated; the freestanding codegen fixture (u64_widen) asserts uint64_t
+  # storage.
+  expect_ok "check: check_u64_widen.curlee" "$bin" check tests/fixtures/check_u64_widen.curlee
+  expect_fail "check: check_u64_widen_oob.curlee" "$bin" check tests/fixtures/check_u64_widen_oob.curlee
+
   # Examples (also expected success).
   expect_ok "check: mvp_run_int" "$bin" check examples/mvp_run_int.curlee
   expect_ok "run: mvp_run_control_flow" "$bin" run examples/mvp_run_control_flow.curlee

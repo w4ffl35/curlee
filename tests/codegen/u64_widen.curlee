@@ -1,0 +1,50 @@
+// Issue #277: construct a U64 from an Int or a literal. Codegen asserts the
+// emitted `uint64_t` storage for the virtio_net.c vring descriptor `addr`
+// fill pattern:
+//   rx_desc[s].addr = (uint64_t)(unsigned long)rx_buf[s];
+//   tx_desc[desc_id].addr = (uint64_t)(unsigned long)tx_buf[tx_stage];
+// where net_vring_desc.addr is a uint64_t and the physical addresses are
+// 32-bit Int values.
+
+struct net_vring_desc {
+  addr: U64;
+  len: U32;
+  flags: U16;
+}
+
+fn vring_fill(pm: cap phys.mem) -> Int {
+  unsafe {
+    let rx_buf: Int = 1048576;         // 0x100000: 32-bit physical address
+    let addr: U64 = rx_buf;            // Int -> U64 widening (acceptance #1)
+    let len: U32 = port_inl(0xCFC);    // vring buffer length (opaque read)
+    let flags: U16 = port_inw(0x1CF);  // vring flags (opaque read)
+    let desc: net_vring_desc = net_vring_desc{ addr: addr, len: len, flags: flags };
+    if ((desc.flags + 0) != 0) {
+      port_outb(0x3F8, 0x41);
+    }
+    return desc.len + 0;
+  }
+}
+
+fn widen_probe() -> Int {
+  let base: Int = 1048576;
+  let addr: U64 = base;                // probe 1: Int -> U64 widening
+  let lit: U64 = 1048576;              // probe 2: U64 from a plain literal
+  if (addr == lit) {                   // U64 == U64 comparison stays legal
+    return 0;
+  }
+  return 1;
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let w: U64 = 2097152;              // U64 literal adaptation in main too
+    let len: U32 = port_inl(0xCFC);
+    let flags: U16 = port_inw(0x1CF);
+    let d: net_vring_desc = net_vring_desc{ addr: w, len: len, flags: flags };
+    if ((d.len + 0) == 0) {
+      port_outb(0x3F8, 0x41);
+    }
+    return vring_fill(pm) + widen_probe() + 1;
+  }
+}
