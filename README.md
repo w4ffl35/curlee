@@ -167,7 +167,13 @@ bootable **x86-64 multiboot2 kernel ELF**:
 - The **verification gate applies**: no proof, no build (nothing is emitted on failure).
 - The freestanding target is **Linux/x86-64 only** and has **no hosted builtins** (no `print`,
   no `String`, no `Vec`). Physical memory access uses `Phys<T>` + `read()`/`write()` under
-  `unsafe` and requires the `phys.mem` capability. The x86 **port I/O** builtins
+  `unsafe` and requires the `phys.mem` capability. The **runtime-address reads**
+  `phys_read_u8`/`phys_read_u16`/`phys_read_u32`/`phys_read_u64` (issue #279) read from a
+  **runtime** physical address — a general `Int`/`U64` expression such as the multiboot2 info
+  base the boot stub captures into a global at boot time (`mb2.c`), plus a mutable byte cursor
+  advanced by assignment — where `Phys<T>` requires a compile-time literal; each emits a
+  `volatile` deref of the address expression and is gated/opaque exactly like `Phys<T>.read()`.
+  The x86 **port I/O** builtins
   (`port_inb`/`port_outb`/`port_inw`/`port_outw`/`port_inl`/`port_outl`) accept either a
   **constant port** or a **`let`-bound base + constant offset** (issue #276, the virtio_net.c
   pattern) and are gated the same way; constant ports codegen with an 8-bit immediate where

@@ -43,6 +43,7 @@ using curlee::parser::PhysReadExpr;
 using curlee::parser::PhysWriteExpr;
 using curlee::parser::PortIOExpr;
 using curlee::parser::Program;
+using curlee::parser::RuntimePhysReadExpr;
 using curlee::parser::ReturnStmt;
 using curlee::parser::ScopedNameExpr;
 using curlee::parser::Stmt;
@@ -282,6 +283,13 @@ bool expr_uses_port_io(const Expr& e)
             {
                 return (node.base != nullptr && expr_uses_port_io(*node.base)) ||
                        (node.value != nullptr && expr_uses_port_io(*node.value));
+            }
+            else if constexpr (std::is_same_v<Node, RuntimePhysReadExpr>)
+            {
+                // A runtime phys read is not itself port I/O, but its address
+                // expression is general (issue #279) and could nest port I/O;
+                // scan it so the prologue helpers are still emitted.
+                return node.addr != nullptr && expr_uses_port_io(*node.addr);
             }
             return false;
         },
@@ -2374,6 +2382,54 @@ class CEmitter
             return "0";
         }
         return helper + "((uint16_t)(" + port + "), (" + value + "))";
+    }
+
+    // Runtime-address physical memory read (issue #279):
+    // `phys_read_u8(addr)` -> `(*(volatile uint8_t*)(uintptr_t)(addr))`,
+    // `phys_read_u16(addr)` -> `(*(volatile uint16_t*)(uintptr_t)(addr))`,
+    // `phys_read_u32(addr)` -> `(*(volatile uint32_t*)(uintptr_t)(addr))`,
+    // `phys_read_u64(addr)` -> `(*(volatile uint64_t*)(uintptr_t)(addr))`.
+    // The address is a general Int/U64 expression (a runtime value such as
+    // the boot-stub-captured multiboot2 info base plus a mutable byte cursor),
+    // so the C text embeds the expression, mirroring how a runtime port emits
+    // its expression into the helper call.
+    std::string emit_expr_node(const RuntimePhysReadExpr& expr, Span span)
+    {
+        if (expr.addr == nullptr)
+        {
+            push_error(span, "missing runtime phys read address");
+            return "0";
+        }
+        std::string_view element_kind;
+        if (expr.op == "phys_read_u8")
+        {
+            element_kind = "U8";
+        }
+        else if (expr.op == "phys_read_u16")
+        {
+            element_kind = "U16";
+        }
+        else if (expr.op == "phys_read_u32")
+        {
+            element_kind = "U32";
+        }
+        else if (expr.op == "phys_read_u64")
+        {
+            element_kind = "U64";
+        }
+        else
+        {
+            push_error(span, "unknown runtime phys read builtin '" + std::string(expr.op) + "'");
+            return "0";
+        }
+
+        const std::string addr = emit_expr_as_text(*expr.addr);
+        if (!diags_.empty())
+        {
+            return "0";
+        }
+        const std::string c_type = std::string(c_type_for_phys_element(element_kind));
+        return "(*(volatile " + c_type + "*)(uintptr_t)(" + addr + "))";
     }
 };
 

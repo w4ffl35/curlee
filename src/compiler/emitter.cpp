@@ -1409,6 +1409,12 @@ class Emitter
             error_at(span, "port I/O is freestanding-only and not supported in the VM"));
     }
 
+    void emit_expr_node(const curlee::parser::RuntimePhysReadExpr&, Span span)
+    {
+        diags_.push_back(
+            error_at(span, "physical memory reads are freestanding-only and not supported in the VM"));
+    }
+
     void emit_expr_node(const curlee::parser::IndexExpr&, Span span)
     {
         diags_.push_back(error_at(span, "arrays are freestanding-only and not supported in the VM"));

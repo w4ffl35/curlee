@@ -108,7 +108,8 @@ void print_usage(std::ostream& out)
     out << "            (requires a C compiler and ld; x86-64 multiboot2 image)\n";
     out << "    -o <path>: output path (default out.c; --link requires -o).\n";
     out << "  curlee run --cap phys.mem <file.curlee>  # phys.mem is freestanding-only\n";
-    out << "    phys.mem: grants Phys<T> read()/write() MMIO access and the x86 port I/O\n";
+    out << "    phys.mem: grants Phys<T> read()/write() MMIO access, the runtime-address\n";
+    out << "    reads (phys_read_u8/u16/u32/u64, issue #279), and the x86 port I/O\n";
     out << "    builtins (port_inb/port_outb/port_inw/port_outw/port_inl/port_outl). Port\n";
     out << "    programs are rejected by the VM (freestanding-only); use `curlee build`.\n";
     out << "  curlee fmt [--check] <file>\n";
@@ -143,7 +144,9 @@ void print_build_usage(std::ostream& out)
     out << "freestanding subset (no hosted builtins):\n";
     out << "  - Supported: Int, Bool, U8/U16/U32/U64 arithmetic, structs/enums (storable\n";
     out << "    payloads only), match, if/else, while, verified contracts, extern fn,\n";
-    out << "    Phys<T> + read()/write() and the x86 port I/O builtins\n";
+    out << "    Phys<T> + read()/write(), the runtime-address reads\n";
+    out << "    (phys_read_u8/u16/u32/u64; a general Int/U64 address, issue #279) and the\n";
+    out << "    x86 port I/O builtins\n";
     out << "    (port_inb/port_outb/port_inw/port_outw/port_inl/port_outl; constant or\n";
     out << "    let-bound-base + constant-offset ports, issue #276) under `unsafe` with\n";
     out << "    `cap phys.mem`.\n";

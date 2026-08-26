@@ -1,0 +1,4 @@
+tests/fixtures/check_phys_read_runtime_addr.curlee:6:18: error: runtime phys read address must be an Int or U64 expression
+  |
+  |     let v: U32 = phys_read_u32(b);
+  |                  ^^^^^^^^^^^^^^^^

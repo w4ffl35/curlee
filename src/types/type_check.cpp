@@ -36,6 +36,7 @@ using curlee::parser::MatchStmt;
 using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
+using curlee::parser::RuntimePhysReadExpr;
 using curlee::parser::ScopedNameExpr;
 using curlee::parser::Stmt;
 using curlee::parser::StructLiteralExpr;
@@ -234,6 +235,8 @@ static bool is_reserved_builtin_name(std::string_view name)
         "__set_insert_int",
         "port_inb",        "port_outb",        "port_inw",
         "port_outw",       "port_inl",         "port_outl",
+        "phys_read_u8",    "phys_read_u16",    "phys_read_u32",
+        "phys_read_u64",
     }; // GCOVR_EXCL_LINE
     return reserved.contains(name);
 }
@@ -2346,6 +2349,50 @@ class Checker
             return std::nullopt;
         }
         return Type{.kind = TypeKind::Unit};
+    }
+
+    [[nodiscard]] std::optional<Type> check_expr_node(const RuntimePhysReadExpr& e, Span span)
+    {
+        // Rules (2)+(3): runtime phys reads only inside `unsafe` and require
+        // `cap phys.mem`, mirroring the Phys<T> read()/write() and port I/O
+        // gates. Trusted/opaque to the verifier: no address-range obligation
+        // is introduced (the caller asserts the address is mapped via the
+        // capability).
+        if (unsafe_depth_ == 0)
+        {
+            error_at(span, "physical memory access requires an unsafe block");
+            return std::nullopt;
+        }
+        require_capability("phys.mem", span);
+
+        // Rule (1): the address is a general Int or U64 expression (issue
+        // #279) — a runtime value such as the boot-stub-captured multiboot2
+        // info base, optionally plus a mutable byte cursor. U64 is accepted
+        // for reads of 64-bit pointer-shaped addresses (the mb2.c framebuffer
+        // address field read back via this mechanism). Any other type is
+        // rejected.
+        if (e.addr == nullptr) // GCOVR_EXCL_LINE
+        {
+            return std::nullopt; // GCOVR_EXCL_LINE
+        }
+        const auto addr_t = check_expr(*e.addr);
+        if (!addr_t.has_value())
+        {
+            return std::nullopt;
+        }
+        if (addr_t->kind != TypeKind::Int && addr_t->kind != TypeKind::U64)
+        {
+            error_at(span, "runtime phys read address must be an Int or U64 expression");
+            return std::nullopt;
+        }
+
+        // The read returns the unsigned width named by the builtin:
+        // phys_read_u8 -> U8, ..., phys_read_u64 -> U64.
+        const TypeKind width_kind = (e.op == "phys_read_u8")   ? TypeKind::U8
+                                    : (e.op == "phys_read_u16") ? TypeKind::U16
+                                    : (e.op == "phys_read_u32") ? TypeKind::U32
+                                                                : TypeKind::U64;
+        return Type{.kind = width_kind};
     }
 
     [[nodiscard]] std::optional<Type> check_expr_node(const GroupExpr& e, Span)

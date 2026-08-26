@@ -15,6 +15,11 @@ These are intentionally separate from `tests/diagnostics/` (renderer unit tests)
   `check_array_reject_*.golden` cover the MVP rejection diagnostics (multi-dim, bare-name,
   struct field, param, return, ghost, unsupported element kind); `run_array_vm_reject.golden`
   asserts `curlee run` rejects arrays (freestanding-only).
+- Runtime-address physical memory reads (issue #279): `check_phys_read_runtime.golden`
+  (empty on success) covers the mb2.c multiboot2 tag walk (runtime base + mutable byte
+  cursor, opaque reads); `check_phys_read_runtime_addr.golden` covers the non-integer
+  address rejection; `check_phys_read_runtime_contract.golden` covers the opaque-read
+  contract rejection (never silently proven).
 - Tests run with working directory set to the repo root so relative paths are stable.
 
 ## Ownership conventions

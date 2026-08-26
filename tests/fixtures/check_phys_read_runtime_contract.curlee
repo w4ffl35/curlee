@@ -1,0 +1,10 @@
+// Runtime phys reads are opaque to the verifier (issue #279): a refinement on
+// a phys_read_u8 result must be rejected, never silently proven (mirrors the
+// Phys<T>.read() / port_in* rules).
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let base: Int = 0x10000;
+    let v: U8 where v > 0 = phys_read_u8(base + 0);
+  }
+  return 0;
+}

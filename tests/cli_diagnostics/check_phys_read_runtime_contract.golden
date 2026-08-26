@@ -1,0 +1,5 @@
+tests/fixtures/check_phys_read_runtime_contract.curlee:7:21: error: cannot prove refinement on opaque MMIO read value
+  |
+  |     let v: U8 where v > 0 = phys_read_u8(base + 0);
+  |                     ^^^^^
+note: MMIO read is opaque; cannot prove this contract

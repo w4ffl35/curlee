@@ -1,0 +1,30 @@
+// Runtime-address physical memory reads (issue #279): the mb2.c multiboot2
+// tag-walk pattern, where the base is a RUNTIME value (the boot stub captures
+// the multiboot2 info address into a global at boot time, unknown at compile
+// time) and the cursor is a mutable Int advanced by assignment (#268). Unlike
+// `phys<U>(literal)`, the address is a general Int/U64 expression; each read
+// emits a volatile deref of the address expression.
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let mb2_info_addr: Int = 65536;      // runtime-discovered info base
+    let p: Int = mb2_info_addr + 8;      // first tag: total size (u32) at +8
+    let total: U32 = phys_read_u32(p);
+    if (total < 8) { return 0; }
+
+    // Byte cursor advance: p += (size + 7) & ~7U, then field reads.
+    let size: U32 = phys_read_u32(p + 4);
+    let step: Int = ((size + 0) + 7) & ~7;
+    p = p + step;
+    let bpp: U8 = phys_read_u8(p + 28);       // u8 at tag +28
+    let fb_lo: U32 = phys_read_u32(p + 8);    // u64 fb_addr low half
+    let fb_hi: U32 = phys_read_u32(p + 12);   // u64 fb_addr high half
+    let pitch: U16 = phys_read_u16(p + 16);   // u16 read at +16
+    let wide: U64 = phys_read_u64(p + 24);    // u64 width slot (padded)
+    let zero64: U64 = 0;                      // U64 == U64 compare is legal (#277)
+
+    if (bpp == 32 && !(fb_lo == 0 && fb_hi == 0) && !(wide == zero64)) {
+      return pitch + 0;
+    }
+    return 0;
+  }
+}

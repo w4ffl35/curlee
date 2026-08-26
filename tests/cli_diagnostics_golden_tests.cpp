@@ -933,6 +933,16 @@ int main(int argc, char** argv)
         fs::path("tests/fixtures/check_io_port_read_contract_runtime.curlee");
     const fs::path rel_io_port_value_type =
         fs::path("tests/fixtures/check_io_port_value_type.curlee");
+    // Runtime-address physical memory reads (issue #279): the mb2.c multiboot2
+    // tag walk — a general Int/U64 address (runtime base + mutable cursor) reads
+    // opaque values that can be compared/bit-tested but never contracted on; a
+    // non-integer address is rejected by the type checker.
+    const fs::path rel_phys_read_runtime =
+        fs::path("tests/fixtures/check_phys_read_runtime.curlee");
+    const fs::path rel_phys_read_runtime_addr =
+        fs::path("tests/fixtures/check_phys_read_runtime_addr.curlee");
+    const fs::path rel_phys_read_runtime_contract =
+        fs::path("tests/fixtures/check_phys_read_runtime_contract.curlee");
     const fs::path rel_unsigned_inspect =
         fs::path("tests/fixtures/check_unsigned_inspect.curlee");
     // U64 construction from Int/literal (issue #277).
@@ -1276,6 +1286,30 @@ int main(int argc, char** argv)
         if (!run_stderr_case("check-io-port-value-type",
                              {"curlee", "check", rel_io_port_value_type.string()},
                              dir / "check_io_port_value_type.golden", false))
+        {
+            return 1;
+        }
+
+        // Runtime-address physical memory reads (issue #279): the mb2.c
+        // multiboot2 tag walk checks cleanly with a runtime base + mutable byte
+        // cursor (opaque reads, comparison/bit-test only); a Bool address is
+        // rejected by the type checker; a refinement on a read value is rejected
+        // (never silently proven) exactly like Phys<T>.read()/port_in*.
+        if (!run_stderr_case("check-phys-read-runtime",
+                             {"curlee", "check", rel_phys_read_runtime.string()},
+                             dir / "check_phys_read_runtime.golden", true))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-phys-read-runtime-addr",
+                             {"curlee", "check", rel_phys_read_runtime_addr.string()},
+                             dir / "check_phys_read_runtime_addr.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-phys-read-runtime-contract",
+                             {"curlee", "check", rel_phys_read_runtime_contract.string()},
+                             dir / "check_phys_read_runtime_contract.golden", false))
         {
             return 1;
         }

@@ -43,6 +43,7 @@ using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
 using curlee::parser::PortIOExpr;
+using curlee::parser::RuntimePhysReadExpr;
 using curlee::parser::Stmt;
 using curlee::parser::UnsafeStmt;
 using curlee::parser::WhileStmt;
@@ -953,6 +954,50 @@ class Verifier
         return inserted_it->second;
     }
 
+    // Element kind ("U8"/"U16"/"U32"/"U64") for a runtime-address physical
+    // memory read builtin name (issue #279); empty for other names.
+    static std::string_view runtime_phys_read_element_kind(std::string_view op)
+    {
+        if (op == "phys_read_u8")
+        {
+            return "U8";
+        }
+        if (op == "phys_read_u16")
+        {
+            return "U16";
+        }
+        if (op == "phys_read_u32")
+        {
+            return "U32";
+        }
+        if (op == "phys_read_u64")
+        {
+            return "U64";
+        }
+        return {};
+    }
+
+    // Uninterpreted read function per element kind for RUNTIME addresses:
+    // phys_read_at_<kind> : Int -> Int. The address is a general Int/U64
+    // expression (issue #279), unlike the literal address baked into the
+    // Phys<T> sort; no axioms constrain the returned value, so it is opaque
+    // to the solver exactly like phys_read_<kind> and port_in_<b|w|l>.
+    std::unordered_map<std::string_view, z3::func_decl> phys_read_at_fns_;
+
+    const z3::func_decl& phys_read_at_fn(std::string_view element_kind)
+    {
+        auto it = phys_read_at_fns_.find(element_kind);
+        if (it != phys_read_at_fns_.end())
+        {
+            return it->second;
+        }
+        auto& ctx = solver_.context();
+        const std::string name = "phys_read_at_" + std::string(element_kind);
+        auto [inserted_it, _] = phys_read_at_fns_.emplace(
+            element_kind, ctx.function(name.c_str(), ctx.int_sort(), ctx.int_sort()));
+        return inserted_it->second;
+    }
+
     // Width tag ("b"/"w"/"l") for a port I/O builtin name; empty for non-port names.
     static std::string_view port_width_for_op(std::string_view op)
     {
@@ -1269,6 +1314,12 @@ class Verifier
                 else if constexpr (std::is_same_v<Node, PortIOExpr>)
                 {
                     return node.op.rfind("port_in", 0) == 0;
+                }
+                else if constexpr (std::is_same_v<Node, RuntimePhysReadExpr>)
+                {
+                    // A runtime-address phys read (issue #279) is opaque like
+                    // any other MMIO read: no axioms constrain the value.
+                    return true;
                 }
                 else if constexpr (std::is_same_v<Node, NameExpr>)
                 {
@@ -1821,6 +1872,39 @@ class Verifier
                     // Reads lower to the uninterpreted function port_in_<b|w|l> : Int -> Int.
                     // No axioms constrain them, so the returned value is opaque to the solver.
                     return ExprValue{port_in_fn(width)(port_term), TypeKind::Int, false};
+                }
+                else if constexpr (std::is_same_v<Node, RuntimePhysReadExpr>)
+                {
+                    // A runtime-address read lowers to the uninterpreted
+                    // function phys_read_at_<kind> : Int -> Int (issue #279).
+                    // The address is a general Int/U64 expression (a runtime
+                    // value — the boot-stub-captured multiboot2 info base plus
+                    // a mutable byte cursor), lowered like any other Int
+                    // expression; no axioms constrain the function, so the
+                    // returned value is opaque to the solver exactly like a
+                    // Phys<T>.read() or port_in* read.
+                    const std::string_view elem = runtime_phys_read_element_kind(node.op);
+                    if (elem.empty())
+                    {
+                        return error_at(e.span, "unknown runtime phys read builtin '" +
+                                                    std::string(node.op) + "'");
+                    }
+                    if (node.addr == nullptr) // GCOVR_EXCL_LINE
+                    {
+                        return error_at(e.span, "missing runtime phys read address"); // GCOVR_EXCL_LINE
+                    }
+                    auto addr_res = lower_expr(*node.addr);
+                    if (std::holds_alternative<Diagnostic>(addr_res))
+                    {
+                        return std::get<Diagnostic>(std::move(addr_res));
+                    }
+                    auto addr = std::get<ExprValue>(std::move(addr_res));
+                    if (addr.kind != TypeKind::Int && !is_phys_element_kind(addr.kind))
+                    {
+                        return error_at(e.span,
+                                        "runtime phys read address must be an integer expression");
+                    }
+                    return ExprValue{phys_read_at_fn(elem)(addr.expr), TypeKind::Int, false};
                 }
                 else if constexpr (std::is_same_v<Node, CallExpr>)
                 {
@@ -2404,6 +2488,16 @@ class Verifier
                     if (node.value)
                     {
                         check_expr_for_calls(*node.value, nullptr);
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, RuntimePhysReadExpr>)
+                {
+                    // A runtime phys read is not a function call; scan the
+                    // address expression (issue #279: it is a general Int/U64
+                    // expression) for calls.
+                    if (node.addr)
+                    {
+                        check_expr_for_calls(*node.addr, nullptr);
                     }
                 }
                 else

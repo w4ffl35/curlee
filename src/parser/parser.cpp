@@ -183,6 +183,10 @@ void assign_expr_ids(curlee::parser::Expr& expr, std::size_t& next_id)
                     assign_expr_ids(*node.value, next_id);
                 }
             }
+            else if constexpr (std::is_same_v<Node, curlee::parser::RuntimePhysReadExpr>)
+            {
+                assign_expr_ids(*node.addr, next_id);
+            }
             else if constexpr (std::is_same_v<Node, curlee::parser::GroupExpr>)
             {
                 assign_expr_ids(*node.inner, next_id);
@@ -2486,6 +2490,22 @@ class Parser
                 continue;
             }
 
+            // Runtime-address physical memory reads: `phys_read_u8(addr)`,
+            // `phys_read_u16(addr)`, `phys_read_u32(addr)`, `phys_read_u64(addr)`.
+            // The address is a general Int/U64 expression (issue #279) — a
+            // runtime value (the multiboot2 info base captured by the boot
+            // stub), unlike `phys<U>(literal)` which requires a constant.
+            // Parsed as a dedicated node so the builtin names cannot be
+            // shadowed by user functions (resolver defense) and the address
+            // child is carried explicitly.
+            if (const auto* phys_name = std::get_if<NameExpr>(&expr.node);
+                phys_name != nullptr &&
+                curlee::parser::is_runtime_phys_read_builtin_name(phys_name->name) &&
+                check(TokenKind::LParen))
+            {
+                return parse_runtime_phys_read_call(expr.span, *phys_name);
+            }
+
             // x86 port I/O builtins: `port_inb(0x3FD)`, `port_outw(0x1CE, v)`.
             // The port must be a compile-time constant literal; the optional
             // value (out* variants) is a general expression of the matching
@@ -2542,6 +2562,38 @@ class Parser
             expr = std::move(call);
         }
 
+        return expr;
+    }
+
+    // Parse a runtime-address physical memory read builtin call:
+    // `phys_read_u8(addr)` / `phys_read_u16(addr)` / `phys_read_u32(addr)` /
+    // `phys_read_u64(addr)`. The caller has verified the next token is `(`.
+    // The address is a general expression (issue #279): a runtime Int/U64
+    // value such as the boot-stub-captured multiboot2 info base plus a
+    // mutable byte cursor — not required to be a compile-time literal (unlike
+    // `phys<U>(literal)`).
+    [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic>
+    parse_runtime_phys_read_call(const curlee::source::Span& start_span, const NameExpr& name)
+    {
+        advance(); // consume '('
+
+        auto addr_res = parse_expr();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(addr_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(addr_res));
+        }
+        auto addr = std::make_unique<Expr>(std::get<Expr>(std::move(addr_res)));
+
+        if (auto err = consume(TokenKind::RParen, "expected ')' after runtime phys read address");
+            err.has_value())
+        {
+            return *err;
+        }
+        const Token rparen = previous();
+
+        Expr expr;
+        expr.span = span_cover(start_span, rparen.span);
+        expr.node = RuntimePhysReadExpr{.op = name.name, .addr = std::move(addr)};
         return expr;
     }
 
@@ -3320,6 +3372,13 @@ class Dumper
             out_ << ", ";
             dump_expr(*e.value);
         }
+        out_ << ")";
+    }
+
+    void dump_expr_node(const RuntimePhysReadExpr& e)
+    {
+        out_ << e.op << "(";
+        dump_expr(*e.addr);
         out_ << ")";
     }
 
