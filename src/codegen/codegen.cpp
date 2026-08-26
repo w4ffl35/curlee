@@ -1300,6 +1300,8 @@ class CEmitter
             return "!(" + rhs + ")";
         case TokenKind::Minus:
             return "-(" + rhs + ")";
+        case TokenKind::Tilde:
+            return "~(" + rhs + ")";
         default:
             push_error(span, "unsupported unary operator in freestanding target");
             return "0";
@@ -1331,6 +1333,18 @@ class CEmitter
             return "(" + lhs + " * " + rhs + ")";
         case TokenKind::Slash:
             return "(" + lhs + " / " + rhs + ")";
+        case TokenKind::Percent:
+            return "(" + lhs + " % " + rhs + ")";
+        case TokenKind::Amp:
+            return "(" + lhs + " & " + rhs + ")";
+        case TokenKind::Pipe:
+            return "(" + lhs + " | " + rhs + ")";
+        case TokenKind::Caret:
+            return "(" + lhs + " ^ " + rhs + ")";
+        case TokenKind::ShiftLeft:
+            return "(" + lhs + " << " + rhs + ")";
+        case TokenKind::ShiftRight:
+            return "(" + lhs + " >> " + rhs + ")";
         case TokenKind::EqualEqual:
             return "(" + lhs + " == " + rhs + ")";
         case TokenKind::BangEqual:

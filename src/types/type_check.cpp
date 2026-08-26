@@ -807,6 +807,17 @@ class Checker
             return Type{.kind = TypeKind::Bool};
         }
 
+        // Bitwise complement: Int or any unsigned fixed-width integer type.
+        if (e.op == TokenKind::Tilde)
+        {
+            if (rhs->kind != TypeKind::Int && !is_phys_element_kind(rhs->kind))
+            {
+                error_at(span, "unary '~' expects Int or an unsigned integer type (U8/U16/U32/U64)");
+                return std::nullopt;
+            }
+            return *rhs;
+        }
+
         error_at(span, "unsupported unary operator"); // GCOVR_EXCL_LINE
         return std::nullopt;                          // GCOVR_EXCL_LINE
     }
@@ -844,6 +855,42 @@ class Checker
                 return std::nullopt;
             }
             return Type{.kind = TypeKind::Int};
+
+        // Modulo: non-negative Integer semantics are defined by the identity
+        // a % b == a - (a / b) * b (issue #270). Type-wise it behaves like the
+        // other arithmetic operators.
+        case TokenKind::Percent:
+            if (lhs->kind != TypeKind::Int || rhs->kind != TypeKind::Int)
+            {
+                error_at(span, "'%' expects Int operands");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Int};
+
+        // Bitwise operators: Int or unsigned fixed-width integer types
+        // (U8/U16/U32/U64). Both operands must have the same type; the result
+        // keeps that type (issue #270).
+        case TokenKind::Amp:
+        case TokenKind::Pipe:
+        case TokenKind::Caret:
+        case TokenKind::ShiftLeft:
+        case TokenKind::ShiftRight:
+        {
+            const bool lhs_ok = lhs->kind == TypeKind::Int || is_phys_element_kind(lhs->kind);
+            const bool rhs_ok = rhs->kind == TypeKind::Int || is_phys_element_kind(rhs->kind);
+            if (!lhs_ok || !rhs_ok)
+            {
+                error_at(span, "bitwise operators expect Int or unsigned integer "
+                               "operands (U8/U16/U32/U64)");
+                return std::nullopt;
+            }
+            if (lhs->kind != rhs->kind)
+            {
+                error_at(span, "bitwise operators expect matching operand types");
+                return std::nullopt;
+            }
+            return *lhs;
+        }
 
         case TokenKind::EqualEqual:
         case TokenKind::BangEqual:

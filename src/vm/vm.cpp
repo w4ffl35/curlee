@@ -842,6 +842,127 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             push(Value::bool_v(lhs->int_value >= rhs->int_value));
             break;
         }
+        case OpCode::BitAnd:
+        {
+            auto rhs = pop();
+            auto lhs = pop();
+            if (!rhs.has_value() || !lhs.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
+            {
+                return err_result("bitand expects Int", span);
+            }
+            push(Value::int_v(lhs->int_value & rhs->int_value));
+            break;
+        }
+        case OpCode::BitOr:
+        {
+            auto rhs = pop();
+            auto lhs = pop();
+            if (!rhs.has_value() || !lhs.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
+            {
+                return err_result("bitor expects Int", span);
+            }
+            push(Value::int_v(lhs->int_value | rhs->int_value));
+            break;
+        }
+        case OpCode::BitXor:
+        {
+            auto rhs = pop();
+            auto lhs = pop();
+            if (!rhs.has_value() || !lhs.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
+            {
+                return err_result("bitxor expects Int", span);
+            }
+            push(Value::int_v(lhs->int_value ^ rhs->int_value));
+            break;
+        }
+        case OpCode::BitNot:
+        {
+            auto value = pop();
+            if (!value.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (value->kind != ValueKind::Int)
+            {
+                return err_result("bitnot expects Int", span);
+            }
+            push(Value::int_v(~value->int_value));
+            break;
+        }
+        case OpCode::ShiftLeft:
+        {
+            auto rhs = pop();
+            auto lhs = pop();
+            if (!rhs.has_value() || !lhs.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
+            {
+                return err_result("shl expects Int", span);
+            }
+            if (rhs->int_value < 0 || rhs->int_value >= 64)
+            {
+                return err_result("shift amount out of range", span);
+            }
+            // Wrap-around left shift (64-bit two's complement), matching the
+            // freestanding C target's uint64_t semantics.
+            push(Value::int_v(static_cast<std::int64_t>(static_cast<std::uint64_t>(
+                                 lhs->int_value)
+                                 << rhs->int_value)));
+            break;
+        }
+        case OpCode::ShiftRight:
+        {
+            auto rhs = pop();
+            auto lhs = pop();
+            if (!rhs.has_value() || !lhs.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
+            {
+                return err_result("shr expects Int", span);
+            }
+            if (rhs->int_value < 0 || rhs->int_value >= 64)
+            {
+                return err_result("shift amount out of range", span);
+            }
+            // Arithmetic right shift (documented Int semantics, issue #270).
+            push(Value::int_v(lhs->int_value >> rhs->int_value));
+            break;
+        }
+        case OpCode::Mod:
+        {
+            auto rhs = pop();
+            auto lhs = pop();
+            if (!rhs.has_value() || !lhs.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (lhs->kind != ValueKind::Int || rhs->kind != ValueKind::Int)
+            {
+                return err_result("mod expects Int", span);
+            }
+            if (rhs->int_value == 0)
+            {
+                return err_result("modulo by zero", span);
+            }
+            push(Value::int_v(lhs->int_value % rhs->int_value));
+            break;
+        }
         case OpCode::Pop:
         {
             if (!pop().has_value())

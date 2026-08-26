@@ -182,6 +182,20 @@ class Lexer
                 continue;
             }
 
+            if (c == '<' && next == '<')
+            {
+                pos_ += 2;
+                tokens.push_back(make_token(TokenKind::ShiftLeft, start, pos_));
+                continue;
+            }
+
+            if (c == '>' && next == '>')
+            {
+                pos_ += 2;
+                tokens.push_back(make_token(TokenKind::ShiftRight, start, pos_));
+                continue;
+            }
+
             if (c == ':' && next == ':')
             {
                 pos_ += 2;
@@ -246,6 +260,21 @@ class Lexer
                 break;
             case '>':
                 tokens.push_back(make_token(TokenKind::Greater, start, pos_));
+                break;
+            case '&':
+                tokens.push_back(make_token(TokenKind::Amp, start, pos_));
+                break;
+            case '|':
+                tokens.push_back(make_token(TokenKind::Pipe, start, pos_));
+                break;
+            case '^':
+                tokens.push_back(make_token(TokenKind::Caret, start, pos_));
+                break;
+            case '~':
+                tokens.push_back(make_token(TokenKind::Tilde, start, pos_));
+                break;
+            case '%':
+                tokens.push_back(make_token(TokenKind::Percent, start, pos_));
                 break;
             default:
                 return make_error(start, pos_, "invalid character");

@@ -766,9 +766,104 @@ class Parser
         return pred;
     }
 
-    [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred_and()
+    // Bitwise or: lowest-precedence bitwise operator (just above logical `&&`).
+    [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred_bit_or()
+    {
+        auto lhs_res = parse_pred_bit_xor();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
+        }
+        Pred pred = std::get<Pred>(std::move(lhs_res));
+
+        while (match(TokenKind::Pipe))
+        {
+            const Token op = previous();
+            auto rhs_res = parse_pred_bit_xor();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
+            }
+            Pred rhs = std::get<Pred>(std::move(rhs_res));
+
+            Pred combined;
+            combined.span = span_cover(pred.span, rhs.span);
+            combined.node = PredBinary{.op = op.kind, // GCOVR_EXCL_LINE
+                                       .lhs = std::make_unique<Pred>(std::move(pred)),
+                                       .rhs = std::make_unique<Pred>(std::move(rhs))};
+            pred = std::move(combined);
+        }
+
+        return pred;
+    }
+
+    // Bitwise xor: binds tighter than bitwise or, looser than bitwise and.
+    [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred_bit_xor()
+    {
+        auto lhs_res = parse_pred_bit_and();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
+        }
+        Pred pred = std::get<Pred>(std::move(lhs_res));
+
+        while (match(TokenKind::Caret))
+        {
+            const Token op = previous();
+            auto rhs_res = parse_pred_bit_and();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
+            }
+            Pred rhs = std::get<Pred>(std::move(rhs_res));
+
+            Pred combined;
+            combined.span = span_cover(pred.span, rhs.span);
+            combined.node = PredBinary{.op = op.kind, // GCOVR_EXCL_LINE
+                                       .lhs = std::make_unique<Pred>(std::move(pred)),
+                                       .rhs = std::make_unique<Pred>(std::move(rhs))};
+            pred = std::move(combined);
+        }
+
+        return pred;
+    }
+
+    // Bitwise and: binds tighter than xor, looser than equality (C precedence).
+    [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred_bit_and()
     {
         auto lhs_res = parse_pred_equality();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
+        }
+        Pred pred = std::get<Pred>(std::move(lhs_res));
+
+        while (match(TokenKind::Amp))
+        {
+            const Token op = previous();
+            auto rhs_res = parse_pred_equality();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
+            }
+            Pred rhs = std::get<Pred>(std::move(rhs_res));
+
+            Pred combined;
+            combined.span = span_cover(pred.span, rhs.span);
+            combined.node = PredBinary{.op = op.kind, // GCOVR_EXCL_LINE
+                                       .lhs = std::make_unique<Pred>(std::move(pred)),
+                                       .rhs = std::make_unique<Pred>(std::move(rhs))};
+            pred = std::move(combined);
+        }
+
+        return pred;
+    }
+
+    // Logical `&&` binds looser than all bitwise operators (C precedence:
+    // || < && < | < ^ < & < ==), so it parses bitwise or as its operand.
+    [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred_and()
+    {
+        auto lhs_res = parse_pred_bit_or();
         if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
         {
             return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
@@ -778,7 +873,7 @@ class Parser
         while (match(TokenKind::AndAnd))
         {
             const Token op = previous();
-            auto rhs_res = parse_pred_equality();
+            auto rhs_res = parse_pred_bit_or();
             if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
             {
                 return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
@@ -828,7 +923,7 @@ class Parser
 
     [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred_comparison()
     {
-        auto lhs_res = parse_pred_term();
+        auto lhs_res = parse_pred_shift();
         if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
         {
             return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
@@ -837,6 +932,37 @@ class Parser
 
         while (match(TokenKind::Less) || match(TokenKind::LessEqual) || match(TokenKind::Greater) ||
                match(TokenKind::GreaterEqual))
+        {
+            const Token op = previous();
+            auto rhs_res = parse_pred_shift();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
+            }
+            Pred rhs = std::get<Pred>(std::move(rhs_res));
+
+            Pred combined;
+            combined.span = span_cover(pred.span, rhs.span);
+            combined.node = PredBinary{.op = op.kind, // GCOVR_EXCL_LINE
+                                       .lhs = std::make_unique<Pred>(std::move(pred)),
+                                       .rhs = std::make_unique<Pred>(std::move(rhs))};
+            pred = std::move(combined);
+        }
+
+        return pred;
+    }
+
+    // Shifts bind tighter than comparisons, looser than additive (C-like).
+    [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred_shift()
+    {
+        auto lhs_res = parse_pred_term();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
+        }
+        Pred pred = std::get<Pred>(std::move(lhs_res));
+
+        while (match(TokenKind::ShiftLeft) || match(TokenKind::ShiftRight))
         {
             const Token op = previous();
             auto rhs_res = parse_pred_term();
@@ -896,7 +1022,7 @@ class Parser
         }
         Pred pred = std::get<Pred>(std::move(lhs_res));
 
-        while (match(TokenKind::Star) || match(TokenKind::Slash))
+        while (match(TokenKind::Star) || match(TokenKind::Slash) || match(TokenKind::Percent))
         {
             const Token op = previous();
             auto rhs_res = parse_pred_unary();
@@ -919,7 +1045,7 @@ class Parser
 
     [[nodiscard]] std::variant<Pred, curlee::diag::Diagnostic> parse_pred_unary()
     {
-        if (match(TokenKind::Bang) || match(TokenKind::Minus))
+        if (match(TokenKind::Bang) || match(TokenKind::Minus) || match(TokenKind::Tilde))
         {
             const Token op = previous();
             auto rhs_res = parse_pred_unary();
@@ -1785,9 +1911,113 @@ class Parser
         return expr;
     }
 
-    [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_and()
+    // Bitwise or: lowest-precedence bitwise operator (just above logical `&&`).
+    [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_bit_or()
+    {
+        auto lhs_res = parse_bit_xor();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
+        }
+        Expr expr = std::get<Expr>(std::move(lhs_res));
+
+        while (match(TokenKind::Pipe))
+        {
+            const Token op = previous();
+            auto rhs_res = parse_bit_xor();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
+            }
+            Expr rhs = std::get<Expr>(std::move(rhs_res));
+
+            const curlee::source::Span combined_span = span_cover(expr.span, rhs.span);
+            auto lhs_ptr = std::make_unique<Expr>(std::move(expr));
+            auto rhs_ptr = std::make_unique<Expr>(std::move(rhs));
+            expr = Expr{.span = combined_span,
+                        .node = BinaryExpr{
+                            .op = op.kind,
+                            .lhs = std::move(lhs_ptr),
+                            .rhs = std::move(rhs_ptr),
+                        }};
+        }
+
+        return expr;
+    }
+
+    // Bitwise xor: binds tighter than bitwise or, looser than bitwise and.
+    [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_bit_xor()
+    {
+        auto lhs_res = parse_bit_and();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
+        }
+        Expr expr = std::get<Expr>(std::move(lhs_res));
+
+        while (match(TokenKind::Caret))
+        {
+            const Token op = previous();
+            auto rhs_res = parse_bit_and();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
+            }
+            Expr rhs = std::get<Expr>(std::move(rhs_res));
+
+            const curlee::source::Span combined_span = span_cover(expr.span, rhs.span);
+            auto lhs_ptr = std::make_unique<Expr>(std::move(expr));
+            auto rhs_ptr = std::make_unique<Expr>(std::move(rhs));
+            expr = Expr{.span = combined_span,
+                        .node = BinaryExpr{
+                            .op = op.kind,
+                            .lhs = std::move(lhs_ptr),
+                            .rhs = std::move(rhs_ptr),
+                        }};
+        }
+
+        return expr;
+    }
+
+    // Bitwise and: binds tighter than xor, looser than equality (C precedence).
+    [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_bit_and()
     {
         auto lhs_res = parse_equality();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
+        }
+        Expr expr = std::get<Expr>(std::move(lhs_res));
+
+        while (match(TokenKind::Amp))
+        {
+            const Token op = previous();
+            auto rhs_res = parse_equality();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
+            }
+            Expr rhs = std::get<Expr>(std::move(rhs_res));
+
+            const curlee::source::Span combined_span = span_cover(expr.span, rhs.span);
+            auto lhs_ptr = std::make_unique<Expr>(std::move(expr));
+            auto rhs_ptr = std::make_unique<Expr>(std::move(rhs));
+            expr = Expr{.span = combined_span,
+                        .node = BinaryExpr{
+                            .op = op.kind,
+                            .lhs = std::move(lhs_ptr),
+                            .rhs = std::move(rhs_ptr),
+                        }};
+        }
+
+        return expr;
+    }
+
+    // Logical `&&` binds looser than all bitwise operators (C precedence:
+    // || < && < | < ^ < & < ==), so it parses bitwise or as its operand.
+    [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_and()
+    {
+        auto lhs_res = parse_bit_or();
         if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
         {
             return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
@@ -1797,7 +2027,7 @@ class Parser
         while (match(TokenKind::AndAnd))
         {
             const Token op = previous();
-            auto rhs_res = parse_equality();
+            auto rhs_res = parse_bit_or();
             if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
             {
                 return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
@@ -1853,7 +2083,7 @@ class Parser
 
     [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_comparison()
     {
-        auto lhs_res = parse_term();
+        auto lhs_res = parse_shift();
         if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
         {
             return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
@@ -1862,6 +2092,40 @@ class Parser
 
         while (match(TokenKind::Less) || match(TokenKind::LessEqual) || match(TokenKind::Greater) ||
                match(TokenKind::GreaterEqual))
+        {
+            const Token op = previous();
+            auto rhs_res = parse_shift();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
+            }
+            Expr rhs = std::get<Expr>(std::move(rhs_res));
+
+            const curlee::source::Span combined_span = span_cover(expr.span, rhs.span);
+            auto lhs_ptr = std::make_unique<Expr>(std::move(expr));
+            auto rhs_ptr = std::make_unique<Expr>(std::move(rhs));
+            expr = Expr{.span = combined_span,
+                        .node = BinaryExpr{
+                            .op = op.kind,
+                            .lhs = std::move(lhs_ptr),
+                            .rhs = std::move(rhs_ptr),
+                        }};
+        }
+
+        return expr;
+    }
+
+    // Shifts bind tighter than comparisons, looser than additive (C-like).
+    [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_shift()
+    {
+        auto lhs_res = parse_term();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(lhs_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(lhs_res));
+        }
+        Expr expr = std::get<Expr>(std::move(lhs_res));
+
+        while (match(TokenKind::ShiftLeft) || match(TokenKind::ShiftRight))
         {
             const Token op = previous();
             auto rhs_res = parse_term();
@@ -1927,7 +2191,7 @@ class Parser
         }
         Expr expr = std::get<Expr>(std::move(lhs_res));
 
-        while (match(TokenKind::Star) || match(TokenKind::Slash))
+        while (match(TokenKind::Star) || match(TokenKind::Slash) || match(TokenKind::Percent))
         {
             const Token op = previous();
             auto rhs_res = parse_unary();
@@ -1953,7 +2217,7 @@ class Parser
 
     [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_unary()
     {
-        if (match(TokenKind::Bang) || match(TokenKind::Minus))
+        if (match(TokenKind::Bang) || match(TokenKind::Minus) || match(TokenKind::Tilde))
         {
             const Token op = previous();
             auto rhs_res = parse_unary();

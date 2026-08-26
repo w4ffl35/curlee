@@ -15,6 +15,31 @@ z3::sort pred_sort_for_kind(z3::context& ctx, curlee::types::TypeKind kind)
     return ctx.int_sort();
 }
 
+// True when the Z3 expression is a top-level division or modulo term. Such
+// terms are linear in Z3's Int theory (div/mod elimination is handled by the
+// arithmetic solver), so a product involving one is not treated as
+// non-linear (issue #270).
+bool is_div_mod_term(const z3::expr& e)
+{
+    // Every expression reaching this helper is produced by lower_expr /
+    // lower_predicate, which always construct Z3 apps (numerals, constants,
+    // function applications); quantifier-bound (non-app) terms never occur.
+    if (!e.is_app()) // GCOVR_EXCL_LINE
+    {
+        return false; // GCOVR_EXCL_LINE
+    }
+    switch (e.decl().decl_kind())
+    {
+    case Z3_OP_DIV:
+    case Z3_OP_IDIV:
+    case Z3_OP_MOD:
+    case Z3_OP_REM:
+        return true;
+    default:
+        return false;
+    }
+}
+
 enum class PredType
 {
     Int,
@@ -170,6 +195,16 @@ TypedResult lower_node(const curlee::parser::Pred& pred, const LoweringContext& 
                     }
                     return TypedExpr{-typed.expr, PredType::Int, typed.is_literal};
                 }
+                // Bitwise complement: exact two's-complement identity ~x == -x - 1
+                // over the 64-bit Int model (issue #270).
+                if (node.op == TokenKind::Tilde)
+                {
+                    if (typed.type != PredType::Int)
+                    {
+                        return error_at(pred.span, "unary '~' expects Int predicate");
+                    }
+                    return TypedExpr{(-typed.expr) - 1, PredType::Int, typed.is_literal};
+                }
 
                 return error_at(pred.span, "unsupported unary operator in predicate");
             }
@@ -248,12 +283,77 @@ TypedResult lower_node(const curlee::parser::Pred& pred, const LoweringContext& 
                     {
                         return error_at(pred.span, "'*' expects Int predicates");
                     }
-                    if (!left.is_literal && !right.is_literal)
+                    // Products with a literal factor are linear. A product with a
+                    // div/mod factor is also linear in Z3's Int theory (the
+                    // division-remainder identity a % b == a - (a / b) * b is an
+                    // axiom, issue #270). Arbitrary products of two non-literal,
+                    // non-div/mod factors remain unsupported.
+                    if (!left.is_literal && !right.is_literal && !is_div_mod_term(left.expr) &&
+                        !is_div_mod_term(right.expr))
                     {
                         return error_at(pred.span, "non-linear multiplication is not supported");
                     }
                     return TypedExpr{left.expr * right.expr, PredType::Int,
                                      left.is_literal && right.is_literal};
+
+                // Division: Z3 Euclidean integer division (matches C truncating
+                // division for non-negative operands, issue #270).
+                case TokenKind::Slash:
+                    if (left.type != PredType::Int || right.type != PredType::Int)
+                    {
+                        return error_at(pred.span, "'/' expects Int predicates");
+                    }
+                    return TypedExpr{left.expr / right.expr, PredType::Int,
+                                     left.is_literal && right.is_literal};
+
+                // Modulo: Z3 Euclidean modulo; satisfies the division-remainder
+                // identity a % b == a - (a / b) * b for non-negative operands
+                // (issue #270).
+                case TokenKind::Percent:
+                    if (left.type != PredType::Int || right.type != PredType::Int)
+                    {
+                        return error_at(pred.span, "'%' expects Int predicates");
+                    }
+                    return TypedExpr{z3::mod(left.expr, right.expr), PredType::Int,
+                                     left.is_literal && right.is_literal};
+
+                // Bitwise operators (issue #270): bit-precise 64-bit model via
+                // Z3's bit-vector theory (see checker.cpp lower_expr for the
+                // full rationale). Right shift is arithmetic (bvashr); shift
+                // amounts are taken mod 64.
+                case TokenKind::Amp:
+                case TokenKind::Pipe:
+                case TokenKind::Caret:
+                case TokenKind::ShiftLeft:
+                case TokenKind::ShiftRight:
+                {
+                    if (left.type != PredType::Int || right.type != PredType::Int)
+                    {
+                        return error_at(pred.span, "bitwise operators expect Int predicates");
+                    }
+                    constexpr unsigned kWidth = 64;
+                    const z3::expr left_bv = z3::int2bv(kWidth, left.expr);
+                    const z3::expr right_bv = z3::int2bv(kWidth, right.expr);
+                    z3::expr result_bv = left_bv & right_bv;
+                    if (node.op == TokenKind::Pipe)
+                    {
+                        result_bv = left_bv | right_bv;
+                    }
+                    else if (node.op == TokenKind::Caret)
+                    {
+                        result_bv = left_bv ^ right_bv;
+                    }
+                    else if (node.op == TokenKind::ShiftLeft)
+                    {
+                        result_bv = z3::shl(left_bv, right_bv);
+                    }
+                    else if (node.op == TokenKind::ShiftRight)
+                    {
+                        result_bv = z3::ashr(left_bv, right_bv);
+                    }
+                    return TypedExpr{z3::bv2int(result_bv, true), PredType::Int,
+                                     left.is_literal && right.is_literal};
+                }
 
                 default:
                     break;
