@@ -1,0 +1,4 @@
+tests/fixtures/check_addr_of_element.curlee:7:18: error: addr_of expects a fixed-size array binding (e.g. addr_of(rx_buf)), not an element or expression
+  |
+  |     let a: Int = addr_of(q[0]);
+  |                  ^^^^^^^^^^^^^

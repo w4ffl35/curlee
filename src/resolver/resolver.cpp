@@ -748,6 +748,18 @@ class Resolver
         }
     }
 
+    void resolve_expr_node(const curlee::parser::AddrOfExpr& e, Span)
+    {
+        // `addr_of(arr)` references the array binding `arr` (a freestanding
+        // local `let` or a module-level `static`): resolve it so an unknown
+        // name is reported exactly like any other reference, and so the
+        // binding is marked used (issue #286).
+        if (e.target != nullptr)
+        {
+            resolve_expr(*e.target);
+        }
+    }
+
     void resolve_expr_node(const ScopedNameExpr&, Span)
     {
         // `Enum::Variant` is not a variable reference; do not call use_name().
@@ -851,6 +863,7 @@ bool is_builtin_call_name(std::string_view name)
         "phys_read_u8",    "phys_read_u16",   "phys_read_u32",
         "phys_read_u64",   "phys_write_u8",   "phys_write_u16",
         "phys_write_u32",  "phys_write_u64",
+        "addr_of",
     };
     return builtins.contains(name);
 }

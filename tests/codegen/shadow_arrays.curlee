@@ -1,0 +1,42 @@
+// Shadowed array bindings (issue #286 review round 1): the emitted C must
+// keep every shadow in its own compound-statement scope, so nested shadowed
+// declarations compile. Before the fix, BlockStmt/UnsafeStmt bodies were
+// inlined into the enclosing C scope, so two same-named `T q[N];` let arrays
+// emitted `redefinition of 'q'` (inherited from issue #278). This fixture
+// exercises: a nested-block shadow of a local array, a nested-block shadow
+// and a function-scope shadow of a module-level static array, and addr_of
+// calls on shadowed bindings (distinct bindings must stay distinct in the
+// emitted C — each is its own variable). Every value is consumed so the
+// emitted C is warning-free under `gcc -Wall -Werror`.
+static rx: [U8; 16] = [0; 16];
+
+fn probe(pm: cap phys.mem) -> Int {
+  unsafe {
+    let rx_addr: Int = addr_of(rx);   // the STATIC (used)
+    let q: [U8; 16] = [0; 16];
+    q[0] = 1;
+    let qa: Int = addr_of(q);
+    let acc: Int = q[0] + qa + rx_addr;
+    {
+      let q: [U8; 16] = [0; 16];      // shadows `q` in a nested scope
+      q[0] = 2;
+      let qb: Int = addr_of(q);        // a DIFFERENT array: separate C variable
+      acc = acc + q[0] + qb;
+    }
+    {
+      let rx: [U8; 16] = [0; 16];      // shadows the static in a nested scope
+      rx[1] = 3;
+      acc = acc + rx[1];
+    }
+    let rx: [U8; 16] = [0; 16];        // shadows the static in the function scope
+    rx[2] = 4;
+    acc = acc + rx[2];
+    return acc;
+  }
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    return probe(pm);
+  }
+}

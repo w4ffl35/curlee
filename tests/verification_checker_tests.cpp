@@ -2181,6 +2181,66 @@ fn main() -> Int {
         }
     }
 
+    // addr_of is priced like any other address leaf (issue #286): the address
+    // computation is a single instruction (the array binding already lives in
+    // a stack slot; codegen emits a plain cast). Regression guard mirroring
+    // the RuntimePhysWriteExpr fuel review finding — before the leaf pricing,
+    // an unhandled node fell through to a 0-instruction default and a too-low
+    // fuel bound verified unsoundly. `let a = addr_of(q);` costs store (1) +
+    // leaf (1), `return a;` costs return (1) + name (1): fuel 1 must fail and
+    // fuel 4 must verify.
+    {
+        const std::string source = R"(
+static rx_buf: [U8; 16] = [0; 16];
+
+fn addr(pm: cap phys.mem) -> Int
+  [ fuel 1; ]
+{
+  unsafe {
+    let a: Int = addr_of(rx_buf);
+    return a;
+  }
+}
+
+fn main() -> Int {
+  return 0;
+}
+)";
+        const auto verified = verify_program(source, "fuel addr_of low");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected too-low fuel bound on addr_of to fail verification");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "fuel bound may be exceeded"))
+        {
+            fail("expected fuel bound diagnostic for addr_of");
+        }
+    }
+    {
+        const std::string source = R"(
+static rx_buf: [U8; 16] = [0; 16];
+
+fn addr(pm: cap phys.mem) -> Int
+  [ fuel 4; ]
+{
+  unsafe {
+    let a: Int = addr_of(rx_buf);
+    return a;
+  }
+}
+
+fn main() -> Int {
+  return 0;
+}
+)";
+        const auto verified = verify_program(source, "fuel addr_of ok");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected sufficient fuel bound on addr_of to verify");
+        }
+    }
+
     // A function without a `fuel` clause is unaffected (no fuel obligation).
     {
         const std::string source = R"(

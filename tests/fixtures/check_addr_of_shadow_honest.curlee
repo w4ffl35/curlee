@@ -1,0 +1,23 @@
+// Positive regression (issue #286 review round 1): the honest shadowing
+// pattern — a local array shadowing a static, with no contract claiming the
+// two addresses are equal — must check CLEANLY (the fix must not over-reject
+// legitimate shadowing). The difference of the two opaque constants is simply
+// not contracted.
+
+static q: [U8; 16] = [0; 16];
+
+fn probe(pm: cap phys.mem) -> Int {
+  unsafe {
+    let a: Int = addr_of(q);     // the STATIC
+    let q: [U8; 16] = [0; 16];   // local shadows the static
+    let b: Int = addr_of(q);     // the LOCAL
+    let d: Int = a - b;          // unconstrained opaque difference
+    return d;
+  }
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    return probe(pm);
+  }
+}

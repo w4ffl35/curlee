@@ -1,0 +1,4 @@
+tests/fixtures/check_addr_of_outside_unsafe.curlee:5:16: error: address-of requires an unsafe block
+  |
+  |   let a: Int = addr_of(buf);
+  |                ^^^^^^^^^^^^

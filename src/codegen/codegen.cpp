@@ -18,6 +18,7 @@ namespace
 
 using curlee::diag::Diagnostic;
 using curlee::diag::Severity;
+using curlee::parser::AddrOfExpr;
 using curlee::parser::ArrayLiteralExpr;
 using curlee::parser::AssignStmt;
 using curlee::parser::BinaryExpr;
@@ -260,6 +261,15 @@ bool expr_uses_port_io(const Expr& e)
             else if constexpr (std::is_same_v<Node, ArrayLiteralExpr>)
             {
                 return node.value != nullptr && expr_uses_port_io(*node.value);
+            }
+            else if constexpr (std::is_same_v<Node, AddrOfExpr>)
+            {
+                // `addr_of(arr)` (issue #286) is not itself port I/O, but its
+                // target is a general expression position; scan it so the
+                // prologue helpers are still emitted if the target nests port
+                // I/O (defense in depth — the type checker requires a plain
+                // array binding name).
+                return node.target != nullptr && expr_uses_port_io(*node.target);
             }
             else if constexpr (std::is_same_v<Node, curlee::parser::GroupExpr>)
             {
@@ -1642,16 +1652,30 @@ class CEmitter
         writer_.line(std::string(stmt.name) + "[" + index + "] = " + value + ";");
     }
 
+    // A Curlee `{ ... }` block is a lexical scope (the resolver, type checker
+    // and verifier all push a scope for it), so the emitted C must be a
+    // compound statement — NOT inlined into the enclosing scope. Inlining
+    // flattened two same-named shadowed declarations (e.g. `let q: [T; N]` in
+    // a nested block shadowing an outer `q`) into one C scope and produced
+    // `redefinition of 'q'` (issue #286 review round 1, inherited from #278).
     void emit_stmt_node(const BlockStmt& stmt, Span span)
     {
         (void)span;
+        writer_.open_brace();
         emit_block_stmts(*stmt.block);
+        writer_.close_brace();
     }
 
+    // `unsafe { ... }` is likewise a lexical scope in Curlee (the verifier
+    // checks its body in a pushed scope), so emit a C compound statement to
+    // preserve shadowing semantics in the generated C (issue #286 review
+    // round 1).
     void emit_stmt_node(const UnsafeStmt& stmt, Span span)
     {
         (void)span;
+        writer_.open_brace();
         emit_block_stmts(*stmt.body);
+        writer_.close_brace();
     }
 
     void emit_stmt_node(const IfStmt& stmt, Span span)
@@ -2594,6 +2618,32 @@ class CEmitter
         }
         const std::string c_type = std::string(c_type_for_phys_element(element_kind));
         return "(*(volatile " + c_type + "*)(uintptr_t)(" + addr + ")) = (" + value + ")";
+    }
+
+    // Address-of a Curlee-owned fixed-size array (issue #286):
+    // `addr_of(arr)` -> `(int64_t)(uintptr_t)(arr)`. The array binding was
+    // emitted as a plain C array (`T arr[N];` for a local let or `static T
+    // arr[N]` for a module-level static), and the C array name decays to a
+    // pointer to its first byte, so the cast yields the storage's address.
+    // The kernel runs with identity paging (crt0.S maps the first 2 MiB
+    // identity), so virtual == physical: the value is the PHYSICAL address
+    // the DMA descriptor needs. Int lowers to int64_t, so the expression is
+    // Int-typed and usable wherever an Int address is (phys_read_*/write_*
+    // addresses, `>> 12` PFN arithmetic, and Int -> U64 widening for a
+    // descriptor's U64 addr field).
+    std::string emit_expr_node(const AddrOfExpr& expr, Span span)
+    {
+        if (expr.target == nullptr)
+        {
+            push_error(span, "missing addr_of target");
+            return "0";
+        }
+        const std::string target = emit_expr_as_text(*expr.target);
+        if (!diags_.empty())
+        {
+            return "0";
+        }
+        return "(int64_t)(uintptr_t)(" + target + ")";
     }
 };
 

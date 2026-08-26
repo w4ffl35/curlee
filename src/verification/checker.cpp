@@ -25,6 +25,7 @@ namespace
 using curlee::diag::Diagnostic;
 using curlee::diag::Related;
 using curlee::diag::Severity;
+using curlee::parser::AddrOfExpr;
 using curlee::parser::ArrayLiteralExpr;
 using curlee::parser::AssignStmt;
 using curlee::parser::Block;
@@ -483,6 +484,15 @@ struct ArrayMeta
 {
     TypeKind elem_kind = TypeKind::Int;
     std::uint64_t len = 0;
+    // Per-function unique identity of THIS declaration (issue #286 review
+    // round 1): every `let q: [T; N]` / `static q: [T; N]` binding gets its
+    // own id, so `addr_of`'s opaque address constant is keyed by binding, not
+    // by name. Two distinct arrays that share a name (a local shadowing a
+    // static, or nested shadowed lets) then lower to DISTINCT constants and
+    // the solver can no longer conflate their addresses. The id doubles as
+    // the `@<n>` suffix of the array-sort symbol (`fresh_array_symbol`), so a
+    // binding's array term and address constant are named consistently.
+    std::uint64_t binding_id = 0;
 };
 
 // Static metadata for a module-level mutable binding (issue #287): the scalar
@@ -613,6 +623,37 @@ class Verifier
     // Fixed-size array metadata (name -> element kind + length), scoped like
     // the other variable tables (restored by push/pop for shadowing).
     std::unordered_map<std::string_view, ArrayMeta> array_meta_;
+    // Per-array opaque address constants for `addr_of(arr)` (issue #286),
+    // keyed by the binding's unique id (ArrayMeta::binding_id), NOT by name:
+    // two DIFFERENT arrays that share a name (a local `let` shadowing a
+    // static, or nested shadowed lets) get DISTINCT constants, so the solver
+    // can never prove `addr_of(static q) == addr_of(local q)` — a false fact
+    // the emitted kernel contradicts at runtime (review round 1). The same
+    // array binding always yields the SAME constant within a function (the
+    // address of owned storage is stable — unlike an MMIO read, two
+    // addr_of(arr) calls cannot differ), so `let a = addr_of(q); ...;
+    // a == addr_of(q)` stays provable while the numeric VALUE stays
+    // uninterpreted (trusted/opaque). Cleared per function like the other
+    // binding tables.
+    std::unordered_map<std::uint64_t, z3::expr> addr_of_consts_;
+
+    // The opaque Int constant for an array binding's address (issue #286).
+    // Created on first use per function; the value is never constrained, so
+    // the solver knows addr_of(q) == addr_of(q) but not what the address is.
+    // The solver symbol name embeds the binding id (addr_of_<name>@<id>) so
+    // shadowed bindings with the same name never alias to one Z3 constant.
+    z3::expr addr_of_const(std::string_view name, std::uint64_t binding_id)
+    {
+        if (auto it = addr_of_consts_.find(binding_id); it != addr_of_consts_.end())
+        {
+            return it->second;
+        }
+        const std::string const_name = "addr_of_" + std::string(name) + "@" +
+                                       std::to_string(binding_id);
+        auto [inserted_it, _] = addr_of_consts_.emplace(
+            binding_id, solver_.context().int_const(const_name.c_str()));
+        return inserted_it->second;
+    }
     // Names bound from a Phys read() result; contracts referencing these cannot be proven.
     std::unordered_set<std::string_view> opaque_read_vars_;
     // Names bound from a port_in* read result; contracts referencing these get the
@@ -899,21 +940,34 @@ class Verifier
     // so every array is `(Array Int Int)`; `select` gives the element value and
     // `store` the updated array. Naming follows fresh_symbol (`name@<counter>`)
     // so reassignments/shadowing never conflate solver constants.
-    z3::expr fresh_array_symbol(std::string_view name)
+    z3::expr fresh_array_symbol_with_id(std::string_view name, std::uint64_t binding_id)
     {
-        const std::string sym_name =
-            std::string(name) + "@" + std::to_string(fresh_counter_++);
+        const std::string sym_name = std::string(name) + "@" + std::to_string(binding_id);
         auto& ctx = solver_.context();
         return ctx.constant(sym_name.c_str(), ctx.array_sort(ctx.int_sort(), ctx.int_sort()));
     }
 
+    // A fresh array-sort symbol for a REBIND of an existing binding (if/loop
+    // join points): the binding identity is unchanged, so the symbol is named
+    // from the per-function counter alone (no binding-id pairing needed).
+    z3::expr fresh_array_symbol(std::string_view name)
+    {
+        return fresh_array_symbol_with_id(name, fresh_counter_++);
+    }
+
     // Declare a fixed-size array binding in the solver. `elem_kind` must be a
     // supported array element kind (the type checker enforces this; the
-    // verifier re-checks as defense in depth).
+    // verifier re-checks as defense in depth). Every declaration — including
+    // a shadowing one — consumes a fresh binding id from the per-function
+    // fresh-symbol counter, so `addr_of`'s opaque constant is keyed by this
+    // declaration, never by the bare name (issue #286 review round 1).
     void declare_array_var(std::string_view name, TypeKind elem_kind, std::uint64_t len)
     {
-        lower_ctx_.array_vars.insert_or_assign(name, fresh_array_symbol(name));
-        array_meta_.insert_or_assign(name, ArrayMeta{.elem_kind = elem_kind, .len = len});
+        const std::uint64_t binding_id = fresh_counter_++;
+        lower_ctx_.array_vars.insert_or_assign(name,
+                                               fresh_array_symbol_with_id(name, binding_id));
+        array_meta_.insert_or_assign(
+            name, ArrayMeta{.elem_kind = elem_kind, .len = len, .binding_id = binding_id});
     }
 
     // Look up an array binding's current array-sort Z3 term.
@@ -2204,6 +2258,45 @@ class Verifier
                     (void)phys_write_at_fn(elem)(addr.expr, value.expr);
                     return ExprValue{solver_.context().bool_val(true), TypeKind::Unit, false};
                 }
+                else if constexpr (std::is_same_v<Node, AddrOfExpr>)
+                {
+                    // `addr_of(arr)` lowers to a per-array opaque Int constant
+                    // (issue #286): the address of Curlee-owned array storage
+                    // is stable within a function (the same array binding
+                    // always has the same address), so the constant is created
+                    // once per BINDING and reused — `let a = addr_of(q)` then
+                    // `a == addr_of(q)` is provable. The constant is keyed by
+                    // the binding's unique id (review round 1): two different
+                    // arrays that shadow the same name map to DISTINCT
+                    // constants, so the solver never conflates their
+                    // addresses (it previously proved `addr_of(static q) ==
+                    // addr_of(local q)`, false in real execution). The VALUE
+                    // stays uninterpreted (trusted/opaque like the other
+                    // unsafe primitives): the verifier never assumes the
+                    // address is anything in particular, and contracts can
+                    // compare but not derive it. Unlike an MMIO read, addr_of
+                    // is NOT an opaque read: two addr_of(q) calls on the same
+                    // binding cannot differ, so bindings from it are normal
+                    // Int bindings with equality facts, not opaque-marked.
+                    if (node.target == nullptr) // GCOVR_EXCL_LINE
+                    {
+                        return error_at(e.span, "missing addr_of target"); // GCOVR_EXCL_LINE
+                    }
+                    const auto* target_name = std::get_if<NameExpr>(&node.target->node);
+                    if (target_name == nullptr)
+                    {
+                        return error_at(e.span,
+                                        "addr_of requires a fixed-size array binding");
+                    }
+                    const auto meta_it = array_meta_.find(target_name->name);
+                    if (meta_it == array_meta_.end())
+                    {
+                        return error_at(e.span,
+                                        "addr_of requires a fixed-size array binding");
+                    }
+                    return ExprValue{addr_of_const(target_name->name, meta_it->second.binding_id),
+                                     TypeKind::Int, false};
+                }
                 else if constexpr (std::is_same_v<Node, CallExpr>)
                 {
                     return error_at(e.span, "calls are not supported in verification expressions");
@@ -2812,6 +2905,13 @@ class Verifier
                     {
                         check_expr_for_calls(*node.value, nullptr);
                     }
+                }
+                else if constexpr (std::is_same_v<Node, AddrOfExpr>)
+                {
+                    // `addr_of(arr)` is not a function call; the target is a
+                    // plain array binding name (no calls inside) — the type
+                    // checker enforces this, so there is nothing to scan.
+                    (void)node;
                 }
                 else
                 {
@@ -4186,6 +4286,7 @@ class Verifier
         lower_ctx_.array_vars.clear();
         phys_vars_.clear();
         array_meta_.clear();
+        addr_of_consts_.clear();
         opaque_read_vars_.clear();
         opaque_port_read_vars_.clear();
         opaque_global_vars_.clear();

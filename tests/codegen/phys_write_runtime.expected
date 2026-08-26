@@ -7,16 +7,18 @@ int64_t curlee_main(void);
 
 int64_t curlee_main(void)
 {
-    int64_t fb_addr = 1048576;
-    int64_t i = 0;
-    while ((i < 64))
     {
-        (*(volatile uint32_t*)(uintptr_t)((fb_addr + (i * 4)))) = (0xFF8800);
-        i = (i + 1);
+        int64_t fb_addr = 1048576;
+        int64_t i = 0;
+        while ((i < 64))
+        {
+            (*(volatile uint32_t*)(uintptr_t)((fb_addr + (i * 4)))) = (0xFF8800);
+            i = (i + 1);
+        }
+        (*(volatile uint8_t*)(uintptr_t)(fb_addr)) = (0x01);
+        (*(volatile uint16_t*)(uintptr_t)(fb_addr)) = (0x1234);
+        (*(volatile uint64_t*)(uintptr_t)(fb_addr)) = (0);
     }
-    (*(volatile uint8_t*)(uintptr_t)(fb_addr)) = (0x01);
-    (*(volatile uint16_t*)(uintptr_t)(fb_addr)) = (0x1234);
-    (*(volatile uint64_t*)(uintptr_t)(fb_addr)) = (0);
     return 0;
 }
 

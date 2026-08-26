@@ -8,12 +8,16 @@ uint32_t curlee_main(void);
 
 static uint32_t curlee_read_reg(uint32_t* reg)
 {
-    return (*(reg));
+    {
+        return (*(reg));
+    }
 }
 
 uint32_t curlee_main(void)
 {
-    /* unit binding reg */
-    return curlee_read_reg((void*)(uintptr_t)(0x4000));
+    {
+        /* unit binding reg */
+        return curlee_read_reg((void*)(uintptr_t)(0x4000));
+    }
 }
 

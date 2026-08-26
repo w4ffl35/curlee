@@ -19,6 +19,7 @@ truth while Curlee is in "production-readiness stabilization":
 | [`cpp23-best-practices.md`](cpp23-best-practices.md) | C++23 reference for LLM agents contributing code |
 | [`loop-contracts.md`](loop-contracts.md) | Loop invariants and `decreases` variant clauses (issue #261) |
 | [`fuel-contracts.md`](fuel-contracts.md) | Static fuel bounds / WCET contract clauses (issue #262) |
+| [`addr-of.md`](addr-of.md) | `addr_of(arr)` — physical address of a Curlee-owned array (issue #286) and the alignment guarantee |
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Contributor guide |
 | [`../SECURITY.md`](../SECURITY.md) | Vulnerability reporting |
 | [`../.github/compatibility-policy.json`](../.github/compatibility-policy.json) | Semver/bundle-format compatibility policy |

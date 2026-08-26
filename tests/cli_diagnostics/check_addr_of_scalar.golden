@@ -1,0 +1,4 @@
+tests/fixtures/check_addr_of_scalar.curlee:6:18: error: addr_of expects a fixed-size array binding, got 'x' of type Int
+  |
+  |     let a: Int = addr_of(x);
+  |                  ^^^^^^^^^^

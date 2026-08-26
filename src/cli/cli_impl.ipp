@@ -110,8 +110,10 @@ void print_usage(std::ostream& out)
     out << "  curlee run --cap phys.mem <file.curlee>  # phys.mem is freestanding-only\n";
     out << "    phys.mem: grants Phys<T> read()/write() MMIO access, the runtime-address\n";
     out << "    reads (phys_read_u8/u16/u32/u64, issue #279) and writes\n";
-    out << "    (phys_write_u8/u16/u32/u64, issue #285), and the x86 port I/O\n";
-    out << "    builtins (port_inb/port_outb/port_inw/port_outw/port_inl/port_outl). Port\n";
+    out << "    (phys_write_u8/u16/u32/u64, issue #285), the address-of builtin\n";
+    out << "    (addr_of(arr) for a Curlee-owned array's physical address, issue #286),\n";
+    out << "    and the x86 port I/O builtins\n";
+    out << "    (port_inb/port_outb/port_inw/port_outw/port_inl/port_outl). Port\n";
     out << "    programs are rejected by the VM (freestanding-only); use `curlee build`.\n";
     out << "  curlee fmt [--check] <file>\n";
     out << "  curlee bundle build [--root <dir>] [--stdlib-root <dir>] [--cap <capability>]... "
@@ -148,10 +150,12 @@ void print_build_usage(std::ostream& out)
     out << "    module-level `static name: Type = expr;` state (issue #287), Phys<T> +\n";
     out << "    read()/write(), the runtime-address reads and writes\n";
     out << "    (phys_read_u8/u16/u32/u64 and phys_write_u8/u16/u32/u64; a general\n";
-    out << "    Int/U64 address, issues #279/#285) and the x86 port I/O builtins\n";
-    out << "    (port_inb/port_outb/port_inw/port_outw/port_inl/port_outl; constant or\n";
-    out << "    let-bound-base + constant-offset ports, issue #276) under `unsafe` with\n";
-    out << "    `cap phys.mem`.\n";
+    out << "    Int/U64 address, issues #279/#285), the address-of builtin\n";
+    out << "    (addr_of(arr): the physical address of a Curlee-owned fixed-size array\n";
+    out << "    `let`/`static`, for DMA descriptor filling, issue #286) and the x86 port\n";
+    out << "    I/O builtins (port_inb/port_outb/port_inw/port_outw/port_inl/port_outl;\n";
+    out << "    constant or let-bound-base + constant-offset ports, issue #276) under\n";
+    out << "    `unsafe` with `cap phys.mem`.\n";
     out << "  - Rejected: print, String, Vec, python_ffi, and all hosted builtins; Phys/Unit\n";
     out << "    cannot be stored (struct fields, enum payloads), returned, or used as\n";
     out << "    parameters.\n";

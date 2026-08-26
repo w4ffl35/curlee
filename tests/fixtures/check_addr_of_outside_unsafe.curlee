@@ -1,0 +1,7 @@
+// addr_of requires an unsafe block (issue #286), mirroring the Phys<T>,
+// port I/O and runtime phys read/write gates.
+fn main(pm: cap phys.mem) -> Int {
+  let buf: [U8; 16] = [0; 16];
+  let a: Int = addr_of(buf);
+  return a;
+}

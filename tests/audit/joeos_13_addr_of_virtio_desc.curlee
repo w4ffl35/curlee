@@ -1,0 +1,116 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 13 (issue #286): the full virtio_net.c
+// DMA-descriptor-filling + virtqueue-setup shape, including the 4096-byte
+// alignment the ring needs.
+//
+// Mirrors the real driver:
+//   - virtio_net.c:375: `rx_desc[s].addr = (uint64_t)(unsigned long)rx_buf[s];`
+//     — the vring descriptor's 64-bit addr field filled with the address of
+//     the driver's own buffer. Curlee: `VringDesc { addr: addr_of(rx_buf) }`
+//     (Int -> U64 widening, issue #277). Slot offsets for the real driver's
+//     `rx_buf[VRING_SIZE][2048]` become byte-offset arithmetic on the
+//     addr_of value (`addr_of(rx_buf) + slot * 2048`).
+//   - virtio_net.c:334-357 (`queue_setup`): the legacy virtqueue PFN register
+//     is programmed with `base >> 12`, where base is the 4096-ALIGNED address
+//     of a driver-owned scratch region. The real driver over-allocates
+//     `rx_qmem`/`tx_qmem` by one extra page and rounds up
+//     (`(addr + 4095) & ~4095`). This probe confirms the same is expressible
+//     in Curlee: over-allocate `[U8; 8192]`, round the addr_of value up, and
+//     the result IS page-aligned and fits inside the region.
+//
+// ALIGNMENT GUARANTEE (acceptance criterion #4, measured, not assumed):
+// Curlee's codegen places a `[T; N]` binding at the alignment the C compiler
+// gives the plain C array declaration — there is no `aligned(N)` attribute
+// and none is needed:
+//   - the C ABI alignment of the element type: 1 (U8), 2 (U16), 4 (U32),
+//     8 (U64/Int) for locals (x86-64 stack: 16-byte minimum frame alignment
+//     in practice);
+//   - static storage: the C compiler's placement (gcc here puts byte arrays
+//     at >= 16, and large byte arrays at 32 — measured via `.comm ... ,32`),
+//     which is NOT guaranteed to be 4096.
+// A `[U8; 4096]` array is therefore NOT automatically 4096-aligned — the
+// size-forced-alignment shortcut does not exist in C. The virtio ring's hard
+// 4096 alignment must come from the driver, exactly as in virtio_net.c:
+// over-allocate one extra page and round the addr_of value up. The boot
+// check below proves the round-up lands on a page boundary inside the
+// over-allocated region, and the probe characters report the raw alignments
+// observed in THIS build (the language does not guarantee them — the driver
+// must round up regardless):
+//   'A'/'a' raw static addr % 16 == 0 / not
+//   'B'/'b' raw static addr % 4096 == 0 / not  (may be either; not guaranteed)
+//   'C'/'c' local  [U8; 16] addr % 16 == 0 / not
+//
+// Build: ./build/linux-debug/curlee build --link -o build/audit/13.elf \
+//          tests/audit/joeos_13_addr_of_virtio_desc.curlee
+// Boot:  qemu-system-x86_64 -display none \
+//          -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+//          -serial file:qemu-serial.log -no-reboot \
+//          -kernel build/audit/13.elf
+//        (expect qemu rc=3 and "OKAbC"-shaped output in qemu-serial.log)
+
+extern fn curlee_halt() -> Unit;
+
+struct VringDesc {
+  addr: U64;
+}
+
+// virtio_net.c's rx_qmem/tx_qmem: driver-owned scratch regions, over-
+// allocated by one extra 4096 page so the round-up below always fits.
+static rx_qmem: [U8; 8192] = [0; 8192];
+
+// The real driver's rx_buf (one fixed-size buffer per direction; the real
+// [VRING_SIZE][2048] reduces to a region + slot offsets).
+static rx_buf: [U8; 2048] = [0; 2048];
+
+fn serial_putc(pm: cap phys.mem, c: Int) -> Unit {
+  unsafe {
+    let lsr: U8 = port_inb(0x3FD);        // COM1 LSR (opaque read)
+    while ((lsr & 32) == 0) { }           // wait for THR empty
+    port_outb(0x3F8, c);                  // COM1 THR
+  }
+  return;
+}
+
+fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    // virtio_net.c:334-357 (queue_setup): base = 4096-aligned driver-owned
+    // region; VIRTIO_PCI_QUEUE_PFN = base >> 12. The over-allocate +
+    // round-up is ordinary Int arithmetic on the addr_of value:
+    //   base = (addr_of(rx_qmem) + 4095) & ~4095
+    let raw: Int = addr_of(rx_qmem);
+    let base: Int = (raw + 4095) & 0xFFFFF000;
+    let pfn: Int = base >> 12;
+
+    // virtio_net.c:375: rx_desc[s].addr = (uint64_t)(unsigned long)rx_buf[s];
+    let desc: VringDesc = VringDesc { addr: addr_of(rx_buf) };
+    let stored: U64 = desc.addr;
+    let indep: U64 = addr_of(rx_buf);
+
+    // Alignment probes (raw observations, reported over serial).
+    let s16: Bool = (raw % 16) == 0;          // 'A'/'a'
+    let s4k: Bool = (raw % 4096) == 0;        // 'B'/'b'
+    let q: [U8; 16] = [0; 16];
+    let qaddr: Int = addr_of(q);
+    let l16: Bool = (qaddr % 16) == 0;        // 'C'/'c'
+
+    // All virtio properties must hold: the round-up lands on a page
+    // boundary, the PFN round-trips, the descriptor address equals the
+    // independently obtained address, and the aligned region fits inside the
+    // over-allocated rx_qmem (one extra page = 4096 bytes of slack).
+    if (base % 4096 == 0 && pfn * 4096 == base &&
+        base + 4096 <= raw + 8192 && stored == indep) {
+      serial_putc(pm, 79);                // 'O'
+      serial_putc(pm, 75);                // 'K'
+    } else {
+      serial_putc(pm, 66);                // 'B'
+      serial_putc(pm, 65);                // 'A'
+      serial_putc(pm, 68);                // 'D'
+    }
+    if (s16) { serial_putc(pm, 65); } else { serial_putc(pm, 97); }  // 'A'/'a'
+    if (s4k) { serial_putc(pm, 66); } else { serial_putc(pm, 98); }  // 'B'/'b'
+    if (l16) { serial_putc(pm, 67); } else { serial_putc(pm, 99); }  // 'C'/'c'
+  }
+  curlee_halt();
+  return;
+}

@@ -1,0 +1,19 @@
+// The addr_of value is trusted/opaque (issue #286): the verifier knows the
+// same array binding always yields the same address, but never assumes the
+// numeric VALUE. An ensures claiming the address is a specific number is
+// therefore unprovable and must fail verification.
+fn probe(pm: cap phys.mem) -> Int
+  [ ensures result == 12345; ]
+{
+  let q: [U8; 16] = [0; 16];
+  unsafe {
+    let a: Int = addr_of(q);
+    return a;
+  }
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    return probe(pm);
+  }
+}

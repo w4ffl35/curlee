@@ -1997,6 +1997,36 @@ fn main() -> Int {
                 .value = std::make_unique<Expr>(std::move(value))};
             expect_runtime_phys_write_reject(std::move(root));
         }
+
+        // Address-of (issue #286) is freestanding-only too: the VM emitter
+        // must reject addr_of nodes the same way it rejects Phys, port I/O and
+        // the runtime phys read/write nodes.
+        using curlee::parser::AddrOfExpr;
+
+        auto expect_addr_of_reject = [&](Expr root)
+        {
+            const auto emitted = run_with_expr(std::move(root));
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for AddrOfExpr node");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("address-of (addr_of) is freestanding-only") ==
+                    std::string::npos)
+            {
+                fail("expected freestanding-only diagnostic for AddrOfExpr node");
+            }
+        };
+
+        {
+            // addr_of(q) with a plain name target.
+            Expr target;
+            target.node = curlee::parser::NameExpr{.name = "q"};
+            Expr root;
+            root.node = AddrOfExpr{.target = std::make_unique<Expr>(std::move(target))};
+            expect_addr_of_reject(std::move(root));
+        }
     }
 
     {
