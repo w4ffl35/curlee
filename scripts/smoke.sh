@@ -119,6 +119,11 @@ run_smoke_for_preset() {
   expect_ok "check: check_bitwise_equivalence.curlee" "$bin" check tests/fixtures/check_bitwise_equivalence.curlee
   expect_ok "run: check_bitwise_equivalence.curlee" "$bin" run tests/fixtures/check_bitwise_equivalence.curlee
 
+  # Issue #274: U8/U16/U32 port reads are inspectable (widening, comparisons,
+  # bitwise with Int literals). Freestanding-only: `check` (the VM cannot run
+  # port I/O), plus the freestanding codegen fixture below in codegen_tests.
+  expect_ok "check: check_unsigned_inspect.curlee" "$bin" check tests/fixtures/check_unsigned_inspect.curlee
+
   # Examples (also expected success).
   expect_ok "check: mvp_run_int" "$bin" check examples/mvp_run_int.curlee
   expect_ok "run: mvp_run_control_flow" "$bin" run examples/mvp_run_control_flow.curlee

@@ -869,16 +869,52 @@ int main()
     }
 
     {
-        // Bitwise binary operator typing (issue #270): mismatched operand types
-        // are rejected (U8 element kind is not the same type as Int).
+        // Bitwise binary operator typing (issue #274): a U8 value bitwise-ANDed
+        // with an Int LITERAL is accepted — the literal adapts to the unsigned
+        // width (mirroring port_outb(0x3F8, 0x48)), so `let y: U8 = x & 1;`
+        // type-checks.
         const std::string source = R"(fn main(pm: cap phys.mem) -> Int {
   unsafe {
     let x: U8 = phys<U8>(0x4000).read();
-    return x & 1;
+    let y: U8 = x & 1;
+    let z: U8 = x | 64;
+    let g: U8 = x & (32);   // grouped Int literal also adapts
+    let l: U8 = 32 & x;     // Int literal on the other side adapts too
+    if ((x & 32) != 0) {
+      return 0;
+    }
+    return y + z;
+  }
+})";
+        (void)type_check_should_succeed(source, "bitwise U8-with-literal typing test");
+    }
+
+    {
+        // Bitwise binary operator typing (issue #274): a non-literal Int operand
+        // widens the U8/U16/U32 side to Int, so the result is Int (not U8).
+        const std::string source = R"(fn main(pm: cap phys.mem, m: Int) -> Int {
+  unsafe {
+    let x: U8 = phys<U8>(0x4000).read();
+    let y: Int = x & m;
+    return y;
+  }
+})";
+        (void)type_check_should_succeed(source, "bitwise U8-with-Int-var typing test");
+    }
+
+    {
+        // Bitwise binary operator typing (issue #274): mixed unsigned widths
+        // (U8 & U16) remain a hard error — no cross-width bitwise.
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let x: U8 = phys<U8>(0x4000).read();
+    let w: U16 = phys<U16>(0x4002).read();
+    let y: U16 = w & x;
+    return 0;
   }
 })";
 
-        const auto diags = type_check_should_fail(source, "bitwise mixed-kind typing test");
+        const auto diags = type_check_should_fail(source, "bitwise mixed-width typing test");
         bool saw = false;
         for (const auto& d : diags)
         {
@@ -891,6 +927,33 @@ int main()
         if (!saw)
         {
             fail("expected bitwise matching-type diagnostic");
+        }
+    }
+
+    {
+        // Bitwise binary operator typing (issue #274): U64 does not widen — a
+        // U64 value bitwise-mixed with an Int is rejected.
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let x: U64 = phys<U64>(0x4000).read();
+    let y: U64 = x & 1;
+    return 0;
+  }
+})";
+
+        const auto diags = type_check_should_fail(source, "bitwise U64-with-literal typing test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("bitwise operators expect matching operand types") !=
+                std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected bitwise U64 matching-type diagnostic");
         }
     }
 
@@ -963,6 +1026,138 @@ int main()
         {
             fail("expected '%' rhs type diagnostic");
         }
+    }
+
+    // ---- Unsigned widening / comparisons / bitwise (issue #274) ----
+
+    {
+        // Arithmetic widening: a U8 value + Int literal widens to Int, so the
+        // result binds to an Int let (the acceptance-criterion shape
+        // `let wide: Int = v + 0;`).
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let v: U8 = port_inb(0x3FD);
+    let wide: Int = v + 0;
+    return wide;
+  }
+})";
+        (void)type_check_should_succeed(source, "U8 arithmetic widening typing test");
+    }
+
+    {
+        // Arithmetic widening: unsigned + unsigned (same or mixed widths) is
+        // defined as Int arithmetic (no wraparound), so U8+U8 -> Int and
+        // U16+U8 -> Int.
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let a: U8 = port_inb(0x3FD);
+    let b: U8 = port_inb(0x3FE);
+    let w: U16 = port_inw(0x1CF);
+    let s1: Int = a + b;
+    let s2: Int = w + a;
+    let d: Int = a - 1;
+    let q: Int = a / 4;
+    return s1 + s2 + d + q;
+  }
+})";
+        (void)type_check_should_succeed(source, "unsigned arithmetic widening typing test");
+    }
+
+    {
+        // U64 has no arithmetic/widening model: `u64 + 1` is a hard error even
+        // with an Int literal (out of scope for issue #274).
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let x: U64 = phys<U64>(0x4000).read();
+    let y: Int = x + 1;
+    return 0;
+  }
+})";
+
+        const auto diags = type_check_should_fail(source, "U64 arithmetic typing test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("arithmetic with U64 is not supported") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected U64 arithmetic diagnostic");
+        }
+    }
+
+    {
+        // Comparisons on unsigned values: U8 == U8, U16 vs an Int literal, and
+        // U8 vs an Int variable all produce Bool (widening).
+        const std::string source = R"(fn main(pm: cap phys.mem, lim: Int) -> Bool {
+  unsafe {
+    let m: U8 = port_inb(0x3FD);
+    let v: U8 = port_inb(0x3FE);
+    let xres: U16 = port_inw(0x1CF);
+    if (m == v) {
+      return xres != 640;
+    } else {
+      return v <= lim;
+    }
+  }
+})";
+        (void)type_check_should_succeed(source, "unsigned comparison typing test");
+    }
+
+    {
+        // Mixed unsigned widths compare via widening (U8 < U16 -> Bool).
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Bool {
+  unsafe {
+    let a: U8 = port_inb(0x3FD);
+    let w: U16 = port_inw(0x1CF);
+    return a < w;
+  }
+})";
+        (void)type_check_should_succeed(source, "mixed-width comparison typing test");
+    }
+
+    {
+        // U64 does not widen: a U64-vs-Int comparison is a hard error.
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Bool {
+  unsafe {
+    let x: U64 = phys<U64>(0x4000).read();
+    return x == 5;
+  }
+})";
+
+        const auto diags = type_check_should_fail(source, "U64 comparison typing test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("U64 does not widen") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected U64 comparison diagnostic");
+        }
+    }
+
+    {
+        // The putc_driver busy-wait shape type-checks end-to-end on a U8 port
+        // read: bit-test with an Int literal, compare, and use as an `if`
+        // condition.
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let lsr: U8 = port_inb(0x3FD);
+    if ((lsr & 32) != 0) {
+      port_outb(0x3F8, 0x48);
+      return 0;
+    }
+    return 1;
+  }
+})";
+        (void)type_check_should_succeed(source, "putc busy-wait typing test");
     }
 
     {

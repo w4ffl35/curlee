@@ -1,0 +1,42 @@
+// Issue #274: U8/U16/U32 port reads are inspectable — arithmetic widening,
+// bitwise with Int literals, and comparisons. Mirrors the JOE OS driver
+// patterns: putc_driver.c (COM1 busy-wait) and vbe.c (mode readback). The
+// reads stay opaque to the verifier, but their *types* are usable in
+// expressions, so the emitted C promotes naturally (uint8_t & int, etc.).
+fn putc_ready(pm: cap phys.mem) -> U8 {
+  unsafe {
+    let lsr: U8 = port_inb(0x3FD);  // COM1 line status register (opaque read)
+    if ((lsr & 32) == 0) {          // LSR bit 5 = THR empty (busy-wait)
+      port_outb(0x3F8, 0x41);       // COM1 THR: 'A'
+    } else {
+      port_outb(0x3F8, 0x00);
+    }
+    return lsr;
+  }
+}
+
+fn vbe_readback(pm: cap phys.mem) -> Int {
+  unsafe {
+    port_outw(0x1CE, 0x0004);        // Bochs VBE index register: XRES
+    let xres: U16 = port_inw(0x1CF); // read back XRES
+    port_outw(0x1CE, 0x0005);        // Bochs VBE index register: YRES
+    let yres: U16 = port_inw(0x1CF); // read back YRES
+    if (xres != 640 || yres != 480) { // mode-set readback validation
+      return 1;
+    }
+    let wide: Int = xres + 0;        // U16 -> Int widening
+    return wide % 2;
+  }
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let v: U8 = port_inb(0x3FD);     // COM1 LSR (opaque read)
+    let wide: Int = v + 0;           // U8 -> Int widening (acceptance #1)
+    let thr_empty: U8 = v & 32;      // bitwise with an Int literal (adapts)
+    if ((v & 32) != 0) {             // bit-test + compare (acceptance #2)
+      port_outb(0x3F8, v);
+    }
+    return wide + thr_empty + putc_ready(pm) + vbe_readback(pm);
+  }
+}

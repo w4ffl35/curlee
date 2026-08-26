@@ -217,6 +217,14 @@ std::vector<z3::expr> model_vars_for_pred(const curlee::parser::Pred& pred,
     return vars;
 }
 
+// True for the unsigned fixed-width integer types the verifier lowers to their
+// Int value (issue #274): U8/U16/U32. U64 is excluded — widening a 64-bit
+// unsigned value to Int is not value-preserving (out of scope for the MVP).
+static bool is_widening_unsigned(TypeKind kind)
+{
+    return kind == TypeKind::U8 || kind == TypeKind::U16 || kind == TypeKind::U32;
+}
+
 struct ExprValue
 {
     z3::expr expr;
@@ -591,6 +599,15 @@ class Verifier
     void declare_var(std::string_view name, TypeKind kind)
     {
         if (kind == TypeKind::Int)
+        {
+            lower_ctx_.int_vars.insert_or_assign(name, fresh_symbol(name, TypeKind::Int));
+            return;
+        }
+        // U8/U16/U32 values lower to their Int value in the solver (issue #274):
+        // the read stays opaque (uninterpreted), but its *type* is usable — a
+        // port read can be bit-tested, compared, and arithmetically widened.
+        // U64 is excluded (widening is not value-preserving; out of scope).
+        if (is_widening_unsigned(kind))
         {
             lower_ctx_.int_vars.insert_or_assign(name, fresh_symbol(name, TypeKind::Int));
             return;
@@ -2115,7 +2132,6 @@ class Verifier
 
         if (is_phys_element_kind(core_t->kind))
         {
-            // Uninterpreted: do not declare a solver variable, but still scan for calls.
             // Opaque provenance is transitive: a binding whose initializer derives from a
             // Phys read() or port_in* read (directly or via an alias chain) is itself
             // opaque and must not be contractable.
@@ -2139,7 +2155,53 @@ class Verifier
                             : "cannot prove refinement on opaque MMIO read value",
                     is_port);
             }
-            check_expr_for_calls(s.value);
+
+            // U8/U16/U32 values lower to their Int value in the solver (issue #274):
+            // declare an Int-sort symbol and bind it to the (opaque) initializer, so
+            // the read can be bit-tested, compared, and arithmetically widened while
+            // its VALUE stays uninterpreted. U64 remains uninterpreted (no solver
+            // variable; widening is not value-preserving and is out of scope).
+            if (is_widening_unsigned(core_t->kind))
+            {
+                declare_var(s.name, TypeKind::Int);
+
+                // Unsigned lets never receive a call result (check_call only models
+                // Int/Bool callee results, and an unsigned-typed callee would be a
+                // front-end type mismatch); the branch is kept for symmetry with the
+                // Int let path below.
+                std::optional<z3::expr> call_result;
+                check_expr_for_calls(s.value, &call_result);
+                if (call_result.has_value()) // GCOVR_EXCL_LINE
+                {
+                    auto sym = fresh_symbol(s.name, TypeKind::Int);
+                    lower_ctx_.int_vars.insert_or_assign(s.name, sym);
+                    facts_.push_back(sym == *call_result);
+                }
+                else
+                {
+                    auto lowered = lower_expr(s.value);
+                    if (std::holds_alternative<ExprValue>(lowered))
+                    {
+                        auto value = std::get<ExprValue>(std::move(lowered));
+                        // The opaque read lowers to an Int-sort term; bind the let
+                        // to it so later expressions can use the read's *type* (the
+                        // value itself stays opaque — contracts still cannot mention
+                        // it).
+                        if (value.kind == TypeKind::Int) // GCOVR_EXCL_LINE
+                        {
+                            if (auto it = lower_ctx_.int_vars.find(s.name);
+                                it != lower_ctx_.int_vars.end())
+                            {
+                                facts_.push_back(it->second == value.expr);
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                check_expr_for_calls(s.value);
+            }
             return;
         }
 
