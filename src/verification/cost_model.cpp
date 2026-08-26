@@ -22,6 +22,7 @@ using curlee::parser::BinaryExpr;
 using curlee::parser::Block;
 using curlee::parser::BlockStmt;
 using curlee::parser::BoolExpr;
+using curlee::parser::AddrOfExpr;
 using curlee::parser::CallExpr;
 using curlee::parser::Expr;
 using curlee::parser::ExprStmt;
@@ -77,9 +78,13 @@ std::size_t leaf_instruction_cost(const Expr& e)
             using Node = std::decay_t<decltype(node)>;
             if constexpr (std::is_same_v<Node, IntExpr> || std::is_same_v<Node, BoolExpr> ||
                           std::is_same_v<Node, StringExpr> || std::is_same_v<Node, NameExpr> ||
-                          std::is_same_v<Node, PhysExpr> || std::is_same_v<Node, ScopedNameExpr>)
+                          std::is_same_v<Node, PhysExpr> || std::is_same_v<Node, ScopedNameExpr> ||
+                          std::is_same_v<Node, AddrOfExpr>)
             {
-                // Constant/name/phys-address load: one instruction.
+                // Constant/name/phys-address load: one instruction. addr_of
+                // (issue #286) lowers to a `lea`-class address computation —
+                // the array binding already lives in a register/stack slot and
+                // the codegen emits a plain cast, so price it as a leaf.
                 return 1;
             }
             return 0;

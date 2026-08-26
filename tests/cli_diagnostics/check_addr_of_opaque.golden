@@ -1,0 +1,8 @@
+tests/fixtures/check_addr_of_opaque.curlee:6:13: error: ensures clause not satisfied
+  |
+  |   [ ensures result == 12345; ]
+  |             ^^^^^^^^^^^^^^^
+note: goal: (result == 12345)
+note: model:
+result = 16
+note: hint: add or strengthen preconditions/refinements to satisfy this contract

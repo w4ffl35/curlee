@@ -1,0 +1,10 @@
+// addr_of targets must be fixed-size array bindings (issue #286); an indexed
+// element (`addr_of(q[0])`) is rejected — this is "the address of ONE array
+// I already own", not element/pointer arithmetic.
+fn main(pm: cap phys.mem) -> Int {
+  let q: [U8; 16] = [0; 16];
+  unsafe {
+    let a: Int = addr_of(q[0]);
+    return a;
+  }
+}

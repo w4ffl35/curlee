@@ -954,6 +954,22 @@ int main(int argc, char** argv)
         fs::path("tests/fixtures/check_phys_write_runtime_addr.curlee");
     const fs::path rel_phys_write_runtime_value =
         fs::path("tests/fixtures/check_phys_write_runtime_value.curlee");
+    // Address-of a Curlee-owned fixed-size array (issue #286): the DMA
+    // descriptor-filling primitive — an Int address for a local/static array
+    // binding that flows into the runtime phys builtins (issues #279/#285)
+    // and a descriptor's U64 field (Int -> U64 widening, issue #277). Scalar
+    // and indexed-element targets and uses outside `unsafe` are rejected by
+    // the type checker; the value is trusted/opaque to the verifier (stable
+    // per array binding, never assumed numerically).
+    const fs::path rel_addr_of = fs::path("tests/fixtures/check_addr_of.curlee");
+    const fs::path rel_addr_of_scalar =
+        fs::path("tests/fixtures/check_addr_of_scalar.curlee");
+    const fs::path rel_addr_of_outside_unsafe =
+        fs::path("tests/fixtures/check_addr_of_outside_unsafe.curlee");
+    const fs::path rel_addr_of_element =
+        fs::path("tests/fixtures/check_addr_of_element.curlee");
+    const fs::path rel_addr_of_opaque =
+        fs::path("tests/fixtures/check_addr_of_opaque.curlee");
     const fs::path rel_unsigned_inspect =
         fs::path("tests/fixtures/check_unsigned_inspect.curlee");
     // U64 construction from Int/literal (issue #277).
@@ -1380,6 +1396,44 @@ int main(int argc, char** argv)
         if (!run_stderr_case("check-phys-write-runtime-value",
                              {"curlee", "check", rel_phys_write_runtime_value.string()},
                              dir / "check_phys_write_runtime_value.golden", false))
+        {
+            return 1;
+        }
+
+        // Address-of a Curlee-owned fixed-size array (issue #286): the
+        // virtio-shaped descriptor fill checks cleanly (stable opaque
+        // addresses — two addr_of(q) calls are provably equal — an Int ->
+        // U64 widening into a descriptor field, a phys_read_u8 round-trip of
+        // an array-index write, and the virtqueue PFN `base >> 12` setup).
+        // A scalar target, an indexed element target and use outside `unsafe`
+        // are rejected by the type checker; an ensures claiming a specific
+        // numeric address is unprovable (the value is trusted/opaque).
+        if (!run_stderr_case("check-addr-of", {"curlee", "check", rel_addr_of.string()},
+                             dir / "check_addr_of.golden", true))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-addr-of-scalar",
+                             {"curlee", "check", rel_addr_of_scalar.string()},
+                             dir / "check_addr_of_scalar.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-addr-of-outside-unsafe",
+                             {"curlee", "check", rel_addr_of_outside_unsafe.string()},
+                             dir / "check_addr_of_outside_unsafe.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-addr-of-element",
+                             {"curlee", "check", rel_addr_of_element.string()},
+                             dir / "check_addr_of_element.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-addr-of-opaque",
+                             {"curlee", "check", rel_addr_of_opaque.string()},
+                             dir / "check_addr_of_opaque.golden", false))
         {
             return 1;
         }

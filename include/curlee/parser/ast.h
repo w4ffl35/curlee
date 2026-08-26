@@ -349,6 +349,48 @@ struct RuntimePhysWriteExpr
 }
 
 /**
+ * @brief Address-of a Curlee-owned fixed-size array: `addr_of(arr)`.
+ *
+ * Returns the physical address of the storage of a freestanding-local or
+ * module-level `static` fixed-size array binding (`let q: [T; N] = ...;` or
+ * `static q: [T; N] = ...;`, issue #278/#287) as an `Int`. This is the DMA
+ * descriptor-filling primitive for virtio_net.c: the vring descriptor's
+ * 64-bit `addr` field is filled with the address of the driver's own RX/TX
+ * byte buffer, and the legacy virtqueue PFN register is programmed with
+ * `base >> 12` for a 4096-aligned driver-owned scratch region (over-allocate
+ * + round-up, now expressible with Int address arithmetic).
+ *
+ * Unlike `phys_read_*`/`phys_write_*` (which dereference an address the
+ * kernel does not necessarily own), `addr_of` asks the compiler for the
+ * address OF memory the kernel already owns, to hand to a device for DMA. It
+ * is still gated like the other unsafe primitives (`unsafe` + `cap
+ * phys.mem`) and is trusted/opaque to the verifier: the value lowers to a
+ * stable per-array opaque constant (same array -> same address), so it can
+ * be compared/stored, but its numeric value is never assumed. General
+ * pointer arithmetic / pointer types remain out of scope — this is exactly
+ * "the address of ONE array I already own".
+ */
+struct AddrOfExpr
+{
+    // The target expression: a bare array binding name (a freestanding-local
+    // `let` or a module-level `static`). The type checker requires it to
+    // resolve to an Array-typed binding; indexed elements (`addr_of(q[0])`)
+    // and scalars are rejected.
+    std::unique_ptr<Expr> target;
+};
+
+/**
+ * @brief True if `name` is the address-of builtin (`addr_of`).
+ *
+ * Single source of truth for the address-of builtin surface, shared by the
+ * parser, resolver, type checker, verifier, codegen and VM emitter.
+ */
+[[nodiscard]] inline bool is_addr_of_builtin_name(std::string_view name)
+{
+    return name == "addr_of";
+}
+
+/**
  * @brief A general expression node with id, span and variant payload.
  */
 struct Expr
@@ -357,8 +399,8 @@ struct Expr
     curlee::source::Span span;
     std::variant<IntExpr, BoolExpr, StringExpr, NameExpr, UnaryExpr, BinaryExpr, CallExpr,
                  MemberExpr, GroupExpr, ScopedNameExpr, StructLiteralExpr, PhysExpr, PhysReadExpr,
-                 PhysWriteExpr, PortIOExpr, RuntimePhysReadExpr, RuntimePhysWriteExpr, IndexExpr,
-                 ArrayLiteralExpr>
+                 PhysWriteExpr, PortIOExpr, RuntimePhysReadExpr, RuntimePhysWriteExpr, AddrOfExpr,
+                 IndexExpr, ArrayLiteralExpr>
         node;
 };
 

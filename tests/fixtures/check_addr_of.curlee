@@ -1,0 +1,74 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #286: address-of a Curlee-owned fixed-size array.
+//
+// addr_of(arr) returns the physical address of a freestanding-local `let` or
+// module-level `static` fixed-size array's storage as an Int — the DMA
+// descriptor-filling primitive for virtio_net.c:
+//   rx_desc[s].addr = (uint64_t)(unsigned long)rx_buf[s];   (virtio_net.c:375)
+//   queue_setup: VIRTIO_PCI_QUEUE_PFN = base >> 12;          (virtio_net.c:334)
+//
+// The value is trusted/opaque to the verifier like the other unsafe
+// primitives: it lowers to a per-array opaque Int constant, so the SAME array
+// binding always yields the SAME address (`a == addr_of(q)` is provable) but
+// the numeric value is never assumed. It flows into the runtime phys builtins
+// as an Int address (issue #279/#285) and into a descriptor's U64 field via
+// the Int -> U64 widening (issue #277).
+
+struct VringDesc {
+  addr: U64;
+}
+
+static rx_buf: [U8; 16] = [0; 16];
+
+// virtio_net.c:334-357: the legacy virtqueue PFN register is programmed with
+// base >> 12, where base is the driver-owned scratch region (the over-allocate
+// + round-up alignment arithmetic is ordinary Int arithmetic).
+fn queue_setup(pm: cap phys.mem) -> Int {
+  unsafe {
+    let base: Int = addr_of(rx_buf);
+    let pfn: Int = base >> 12;
+    return pfn;
+  }
+}
+
+// virtio_net.c:375: rx_desc[s].addr = (uint64_t)(unsigned long)rx_buf[s].
+// The address widens into the descriptor's U64 field, and the same array
+// binding always yields the same address (provable stable opaque constant).
+fn fill_desc(pm: cap phys.mem) -> Int {
+  unsafe {
+    let addr: U64 = addr_of(rx_buf);
+    let desc: VringDesc = VringDesc { addr: addr };
+    let a: Int = addr_of(rx_buf);
+    let b: Int = addr_of(rx_buf);
+    if (a == b) {
+      return 0;
+    }
+    return 1;
+  }
+}
+
+// Acceptance #2: a value written through the array index reads back through
+// the obtained address via phys_read_u8 (the runtime phys read path).
+fn local_roundtrip(pm: cap phys.mem) -> Int {
+  unsafe {
+    let q: [U8; 16] = [0; 16];
+    let addr: Int = addr_of(q);
+    q[0] = 0x41;
+    let back: U8 = phys_read_u8(addr);
+    if (back == 0x41) {
+      return 0;
+    }
+    return 1;
+  }
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let q: [U8; 16] = [0; 16];
+    let a: Int = addr_of(q);
+    let addr64: U64 = addr_of(q);            // Int -> U64 widening
+    let desc: VringDesc = VringDesc { addr: addr_of(q) };
+    return queue_setup(pm) + fill_desc(pm) + local_roundtrip(pm) + a;
+  }
+}

@@ -39,6 +39,17 @@ the generated C is linked against `runtime/rt.c` + `runtime/crt0.S` +
 - `joeos_11_phys_write_runtime.curlee` — runtime-address physical writes for
   fb.c's pixel-write half (issue #285): a write loop over a runtime base +
   mutable cursor, read back through `phys_read_u32` and confirmed over COM1.
+- `joeos_12_addr_of_roundtrip.curlee` — address-of a Curlee-owned array
+  (issue #286): an array-index write read back through the obtained address
+  via `phys_read_u8`, a `phys_write_u8` through the address landing in the
+  array, and the address widening into a vring-descriptor-shaped struct's U64
+  field — the DMA-buffer-address half of virtio_net.c, confirmed over COM1.
+- `joeos_13_addr_of_virtio_desc.curlee` — the full virtio_net.c pattern
+  (issue #286): descriptor U64 field filled from `addr_of`, the legacy
+  virtqueue PFN (`base >> 12`) with the over-allocate + round-up 4096
+  alignment done as Int arithmetic on the addr_of value, and the raw
+  alignment of static/local arrays measured and reported over COM1 (the
+  language guarantees only element-type alignment; the driver must round up).
 - `joeos_09_net_stack_globals.curlee` — the net_stack.c shim's shape (scalar
   phase/seq/port fields + a 256-byte response body, read/written from several
   functions across separate poll calls) in pure Curlee (issue #287).

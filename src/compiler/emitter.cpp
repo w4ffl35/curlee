@@ -1472,6 +1472,12 @@ class Emitter
             span, "physical memory writes are freestanding-only and not supported in the VM"));
     }
 
+    void emit_expr_node(const curlee::parser::AddrOfExpr&, Span span)
+    {
+        diags_.push_back(error_at(
+            span, "address-of (addr_of) is freestanding-only and not supported in the VM"));
+    }
+
     void emit_expr_node(const curlee::parser::IndexExpr&, Span span)
     {
         diags_.push_back(error_at(span, "arrays are freestanding-only and not supported in the VM"));

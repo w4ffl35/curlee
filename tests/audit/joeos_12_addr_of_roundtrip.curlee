@@ -1,0 +1,74 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 12 (issue #286): address-of a
+// Curlee-owned fixed-size array, round-tripped through the runtime phys
+// builtins. Mirrors the virtio_net.c DMA-buffer pattern's address half:
+//
+//   - a Curlee-owned `static` byte buffer (the real driver's rx_buf[s] is a
+//     static array of byte buffers),
+//   - `addr_of(rx_buf)` yields its PHYSICAL address as an Int (the emitted C
+//     is `(int64_t)(uintptr_t)(rx_buf)`; the kernel runs with identity paging,
+//     so virtual == physical),
+//   - a value written through the ARRAY INDEX reads back through the obtained
+//     address via phys_read_u8 (acceptance #2: the address is real and
+//     correct, not a fabricated placeholder),
+//   - a value written THROUGH the address via phys_write_u8 lands in the
+//     array (the reverse direction — the DMA write direction),
+//   - the address widens into a vring-descriptor-shaped struct's U64 field
+//     (Int -> U64 widening, issue #277) and the stored value equals the
+//     address obtained independently.
+//
+// Build: ./build/linux-debug/curlee build --link -o build/audit/12.elf \
+//          tests/audit/joeos_12_addr_of_roundtrip.curlee
+// Boot:  qemu-system-x86_64 -display none \
+//          -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+//          -serial file:qemu-serial.log -no-reboot \
+//          -kernel build/audit/12.elf
+//        (expect qemu rc=3 and "OK" in qemu-serial.log)
+
+extern fn curlee_halt() -> Unit;
+
+struct VringDesc {
+  addr: U64;
+}
+
+static rx_buf: [U8; 16] = [0; 16];
+
+fn serial_putc(pm: cap phys.mem, c: Int) -> Unit {
+  unsafe {
+    let lsr: U8 = port_inb(0x3FD);        // COM1 LSR (opaque read)
+    while ((lsr & 32) == 0) { }           // wait for THR empty
+    port_outb(0x3F8, c);                  // COM1 THR
+  }
+  return;
+}
+
+fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    // 1. Array-index write; read back through the obtained address.
+    rx_buf[0] = 0x41;
+    let addr: Int = addr_of(rx_buf);
+    let back: U8 = phys_read_u8(addr);
+
+    // 2. Write THROUGH the address; confirm it landed in the array.
+    phys_write_u8(addr, 0x42);
+    let via_index: U8 = rx_buf[0];
+
+    // 3. vring descriptor shape: address widens into the U64 addr field and
+    //    equals the address obtained independently.
+    let desc: VringDesc = VringDesc { addr: addr_of(rx_buf) };
+    let stored: U64 = desc.addr;
+    let indep: U64 = addr_of(rx_buf);
+
+    if (back == 0x41 && via_index == 0x42 && stored == indep) {
+      serial_putc(pm, 79);                // 'O'
+      serial_putc(pm, 75);                // 'K'
+    } else {
+      serial_putc(pm, 66);                // 'B'
+      serial_putc(pm, 65);                // 'A'
+      serial_putc(pm, 68);                // 'D'
+    }
+  }
+  curlee_halt();
+  return;
+}

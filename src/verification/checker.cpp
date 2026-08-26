@@ -25,6 +25,7 @@ namespace
 using curlee::diag::Diagnostic;
 using curlee::diag::Related;
 using curlee::diag::Severity;
+using curlee::parser::AddrOfExpr;
 using curlee::parser::ArrayLiteralExpr;
 using curlee::parser::AssignStmt;
 using curlee::parser::Block;
@@ -613,6 +614,31 @@ class Verifier
     // Fixed-size array metadata (name -> element kind + length), scoped like
     // the other variable tables (restored by push/pop for shadowing).
     std::unordered_map<std::string_view, ArrayMeta> array_meta_;
+    // Per-array opaque address constants for `addr_of(arr)` (issue #286):
+    // name -> Int constant. The same array binding always yields the SAME
+    // constant within a function (the address of owned storage is stable —
+    // unlike an MMIO read, two addr_of(arr) calls cannot differ), so
+    // `let a = addr_of(q); ...; a == addr_of(q)` is provable while the
+    // numeric VALUE stays uninterpreted (trusted/opaque). Cleared per
+    // function like the other binding tables; a name shadowed by a local let
+    // reuses the same constant, which is harmless (both are opaque and a
+    // shadowed static is unreachable by bare name).
+    std::unordered_map<std::string_view, z3::expr> addr_of_consts_;
+
+    // The opaque Int constant for an array binding's address (issue #286).
+    // Created on first use per function; the value is never constrained, so
+    // the solver knows addr_of(q) == addr_of(q) but not what the address is.
+    z3::expr addr_of_const(std::string_view name)
+    {
+        if (auto it = addr_of_consts_.find(name); it != addr_of_consts_.end())
+        {
+            return it->second;
+        }
+        const std::string const_name = std::string("addr_of_") + std::string(name);
+        auto [inserted_it, _] = addr_of_consts_.emplace(
+            name, solver_.context().int_const(const_name.c_str()));
+        return inserted_it->second;
+    }
     // Names bound from a Phys read() result; contracts referencing these cannot be proven.
     std::unordered_set<std::string_view> opaque_read_vars_;
     // Names bound from a port_in* read result; contracts referencing these get the
@@ -2204,6 +2230,34 @@ class Verifier
                     (void)phys_write_at_fn(elem)(addr.expr, value.expr);
                     return ExprValue{solver_.context().bool_val(true), TypeKind::Unit, false};
                 }
+                else if constexpr (std::is_same_v<Node, AddrOfExpr>)
+                {
+                    // `addr_of(arr)` lowers to a per-array opaque Int constant
+                    // (issue #286): the address of Curlee-owned array storage
+                    // is stable within a function (the same array binding
+                    // always has the same address), so the constant is created
+                    // once per binding name and reused — `let a = addr_of(q)`
+                    // then `a == addr_of(q)` is provable. The VALUE stays
+                    // uninterpreted (trusted/opaque like the other unsafe
+                    // primitives): the verifier never assumes the address is
+                    // anything in particular, and contracts can compare but
+                    // not derive it. Unlike an MMIO read, addr_of is NOT an
+                    // opaque read: two addr_of(q) calls cannot differ, so
+                    // bindings from it are normal Int bindings with equality
+                    // facts, not opaque-marked.
+                    if (node.target == nullptr) // GCOVR_EXCL_LINE
+                    {
+                        return error_at(e.span, "missing addr_of target"); // GCOVR_EXCL_LINE
+                    }
+                    const auto* target_name = std::get_if<NameExpr>(&node.target->node);
+                    if (target_name == nullptr ||
+                        array_meta_.find(target_name->name) == array_meta_.end())
+                    {
+                        return error_at(e.span,
+                                        "addr_of requires a fixed-size array binding");
+                    }
+                    return ExprValue{addr_of_const(target_name->name), TypeKind::Int, false};
+                }
                 else if constexpr (std::is_same_v<Node, CallExpr>)
                 {
                     return error_at(e.span, "calls are not supported in verification expressions");
@@ -2812,6 +2866,13 @@ class Verifier
                     {
                         check_expr_for_calls(*node.value, nullptr);
                     }
+                }
+                else if constexpr (std::is_same_v<Node, AddrOfExpr>)
+                {
+                    // `addr_of(arr)` is not a function call; the target is a
+                    // plain array binding name (no calls inside) — the type
+                    // checker enforces this, so there is nothing to scan.
+                    (void)node;
                 }
                 else
                 {
@@ -4186,6 +4247,7 @@ class Verifier
         lower_ctx_.array_vars.clear();
         phys_vars_.clear();
         array_meta_.clear();
+        addr_of_consts_.clear();
         opaque_read_vars_.clear();
         opaque_port_read_vars_.clear();
         opaque_global_vars_.clear();

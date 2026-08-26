@@ -1,0 +1,54 @@
+// Address-of a Curlee-owned fixed-size array (issue #286): the DMA
+// descriptor-filling primitive. `addr_of(arr)` returns the physical address
+// of the array's storage as an Int; the emitted C is a plain cast of the
+// array name (which decays to a pointer to its first byte) through uintptr_t
+// to int64_t. The kernel runs with identity paging (crt0.S maps the first
+// 2 MiB identity), so the virtual address IS the physical address the virtio
+// hardware needs.
+struct VringDesc {
+  addr: U64;
+}
+
+static rx_buf: [U8; 16] = [0; 16];
+
+// virtio_net.c:334-357: the legacy virtqueue PFN register is programmed with
+// base >> 12, where base is the (aligned) driver-owned scratch region.
+fn queue_setup(pm: cap phys.mem) -> Int {
+  unsafe {
+    let base: Int = addr_of(rx_buf);
+    let pfn: Int = base >> 12;
+    return pfn;
+  }
+}
+
+// virtio_net.c:375: rx_desc[s].addr = (uint64_t)(unsigned long)rx_buf[s].
+fn fill_desc(pm: cap phys.mem) -> Int {
+  unsafe {
+    let addr: U64 = addr_of(rx_buf);
+    let desc: VringDesc = VringDesc { addr: addr };
+    let q: [U8; 16] = [0; 16];
+    let qa: Int = addr_of(q);
+    let qa2: Int = addr_of(q);
+    if (desc.addr == addr && qa == qa2) {
+      return 0;
+    }
+    return 1;
+  }
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let q: [U8; 16] = [0; 16];
+    let a: Int = addr_of(q);
+    let b: Int = addr_of(q);
+    q[3] = 0x42;
+    let back: U8 = phys_read_u8(a);   // round-trip: array write / phys read
+    let addr64: U64 = addr_of(q);     // Int -> U64 widening (descriptor field)
+    let again: U64 = addr_of(q);      // same array -> same address
+    let desc: VringDesc = VringDesc { addr: addr_of(q) };
+    if (desc.addr == addr64 && addr64 == again) {
+      return a + b + back + queue_setup(pm) + fill_desc(pm);
+    }
+    return 1;
+  }
+}

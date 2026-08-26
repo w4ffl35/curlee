@@ -1,0 +1,9 @@
+// addr_of targets must be fixed-size array bindings (issue #286); a scalar
+// binding is rejected (the MVP has no address-of for scalars).
+fn main(pm: cap phys.mem) -> Int {
+  let x: Int = 5;
+  unsafe {
+    let a: Int = addr_of(x);
+    return a;
+  }
+}

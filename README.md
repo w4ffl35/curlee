@@ -207,6 +207,27 @@ bootable **x86-64 multiboot2 kernel ELF**:
   `let` bindings only — no struct fields/params/returns/ghost snapshots, no multi-dimensional
   indexing, and predicates cannot reference array elements. `curlee run` rejects arrays (they
   are freestanding-only).
+- **Address-of a Curlee-owned array** `addr_of(arr)` (issue #286): the physical address of a
+  freestanding-local `let q: [T; N]` or module-level `static q: [T; N]` fixed-size array's
+  storage, as an `Int` — the DMA-descriptor-filling primitive for virtio_net.c (`rx_desc[s].addr
+  = (uint64_t)(unsigned long)rx_buf[s]`, and the legacy virtqueue PFN `base >> 12`). Codegen
+  emits a plain cast of the C array name (`(int64_t)(uintptr_t)(arr)`); the kernel runs with
+  identity paging (crt0.S), so the virtual address IS the physical address. The value flows
+  into the runtime phys builtins as an `Int` address (issues #279/#285) and into a
+  descriptor's `U64` field via the #277 widening. Gated like the other unsafe primitives
+  (`unsafe` + `cap phys.mem`) and **trusted/opaque** to the verifier: it lowers to a per-array
+  opaque `Int` constant, so the same array binding always yields the same address
+  (`a == addr_of(q)` is provable) but the numeric value is never assumed. MVP scope: the
+  target must be a plain fixed-size array binding — no element addresses, no scalars, no
+  pointer arithmetic (that remains out of scope). **Alignment guarantee:** the codegen places
+  the array at the C compiler's alignment for the plain array declaration — the element type's
+  ABI alignment (1/2/4/8) for locals, plus whatever the compiler does for static storage (gcc
+  ≥16, large byte arrays 32) — which is **not** guaranteed to be 4096. The virtio ring's hard
+  4096 alignment therefore comes from the driver, exactly as in virtio_net.c: over-allocate by
+  one extra page and round the `addr_of` value up with ordinary `Int` arithmetic
+  (`(base + 4095) & ~4095`), then program `base >> 12` (see
+  [`docs/addr-of.md`](docs/addr-of.md) and the boot probes
+  `tests/audit/joeos_12/13_addr_of_*`).
 - **Module-level mutable state** `static name: Type = expr;` (issue #287): a file-scope
   binding initialized exactly once, readable and assignable (via #268's assignment mechanism)
   from any function in the module, and persisting **across separate top-level calls** — the C

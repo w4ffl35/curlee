@@ -192,6 +192,13 @@ void assign_expr_ids(curlee::parser::Expr& expr, std::size_t& next_id)
                 assign_expr_ids(*node.addr, next_id);
                 assign_expr_ids(*node.value, next_id);
             }
+            else if constexpr (std::is_same_v<Node, curlee::parser::AddrOfExpr>)
+            {
+                if (node.target != nullptr)
+                {
+                    assign_expr_ids(*node.target, next_id);
+                }
+            }
             else if constexpr (std::is_same_v<Node, curlee::parser::GroupExpr>)
             {
                 assign_expr_ids(*node.inner, next_id);
@@ -2615,6 +2622,20 @@ class Parser
                 return parse_runtime_phys_write_call(expr.span, *phys_name);
             }
 
+            // Address-of a Curlee-owned fixed-size array (issue #286):
+            // `addr_of(arr)` returns the physical address of the array's
+            // storage as an Int — the DMA descriptor-filling primitive (the
+            // vring descriptor's addr field / the virtqueue PFN register).
+            // Parsed as a dedicated node so the builtin name cannot be
+            // shadowed by user functions (resolver defense) and the target
+            // child is carried explicitly.
+            if (const auto* addr_name = std::get_if<NameExpr>(&expr.node);
+                addr_name != nullptr && curlee::parser::is_addr_of_builtin_name(addr_name->name) &&
+                check(TokenKind::LParen))
+            {
+                return parse_addr_of_call(expr.span, *addr_name);
+            }
+
             // x86 port I/O builtins: `port_inb(0x3FD)`, `port_outw(0x1CE, v)`.
             // The port must be a compile-time constant literal; the optional
             // value (out* variants) is a general expression of the matching
@@ -2703,6 +2724,37 @@ class Parser
         Expr expr;
         expr.span = span_cover(start_span, rparen.span);
         expr.node = RuntimePhysReadExpr{.op = name.name, .addr = std::move(addr)};
+        return expr;
+    }
+
+    // Parse an address-of builtin call: `addr_of(arr)`. The caller has
+    // verified the next token is `(`. The argument is a single expression
+    // (the type checker requires it to resolve to a fixed-size array
+    // binding); the builtin returns the array storage's physical address as
+    // an Int (issue #286).
+    [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic>
+    parse_addr_of_call(const curlee::source::Span& start_span, const NameExpr& name)
+    {
+        advance(); // consume '('
+
+        auto target_res = parse_expr();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(target_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(target_res));
+        }
+        auto target = std::make_unique<Expr>(std::get<Expr>(std::move(target_res)));
+
+        if (auto err = consume(TokenKind::RParen, "expected ')' after addr_of argument");
+            err.has_value())
+        {
+            return *err;
+        }
+        const Token rparen = previous();
+
+        Expr expr;
+        expr.span = span_cover(start_span, rparen.span);
+        expr.node = AddrOfExpr{.target = std::move(target)};
+        (void)name;
         return expr;
     }
 
@@ -3570,6 +3622,13 @@ class Dumper
         dump_expr(*e.addr);
         out_ << ", ";
         dump_expr(*e.value);
+        out_ << ")";
+    }
+
+    void dump_expr_node(const AddrOfExpr& e)
+    {
+        out_ << "addr_of(";
+        dump_expr(*e.target);
         out_ << ")";
     }
 

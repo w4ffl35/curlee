@@ -33,6 +33,7 @@ using curlee::parser::IndexAssignStmt;
 using curlee::parser::IndexExpr;
 using curlee::parser::LetStmt;
 using curlee::parser::MatchStmt;
+using curlee::parser::AddrOfExpr;
 using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
@@ -239,6 +240,7 @@ static bool is_reserved_builtin_name(std::string_view name)
         "phys_read_u8",    "phys_read_u16",    "phys_read_u32",
         "phys_read_u64",   "phys_write_u8",    "phys_write_u16",
         "phys_write_u32",  "phys_write_u64",
+        "addr_of",
     }; // GCOVR_EXCL_LINE
     return reserved.contains(name);
 }
@@ -2640,6 +2642,66 @@ class Checker
         }
         // A write is a side effect: the expression's type is Unit.
         return Type{.kind = TypeKind::Unit};
+    }
+
+    [[nodiscard]] std::optional<Type> check_expr_node(const AddrOfExpr& e, Span span)
+    {
+        // Rules (2)+(3): address-of only inside `unsafe` and requires
+        // `cap phys.mem`, mirroring the Phys<T> read()/write(), port I/O and
+        // runtime phys read/write gates (issues #279/#285). The returned
+        // address is trusted/opaque to the verifier — the caller asserts it
+        // hands the address to a device that may DMA into it via the
+        // capability.
+        if (unsafe_depth_ == 0)
+        {
+            error_at(span, "address-of requires an unsafe block");
+            return std::nullopt;
+        }
+        require_capability("phys.mem", span);
+
+        // Rule (1): the target must be a plain array binding name — a
+        // freestanding-local `let q: [T; N]` or a module-level `static`
+        // (both resolve through lookup_var to TypeKind::Array). Grouping
+        // parens are unwrapped (mirroring the IndexExpr base rule); indexed
+        // elements, scalars and unknown names are rejected. This is exactly
+        // "the address of ONE array I already own" (issue #286) — no element
+        // addresses, no pointer arithmetic.
+        if (e.target == nullptr) // GCOVR_EXCL_LINE
+        {
+            return std::nullopt; // GCOVR_EXCL_LINE
+        }
+        const Expr* target = e.target.get();
+        while (const auto* g = std::get_if<GroupExpr>(&target->node))
+        {
+            target = g->inner.get();
+        }
+        const auto* target_name = std::get_if<NameExpr>(&target->node);
+        if (target_name == nullptr)
+        {
+            error_at(span, "addr_of expects a fixed-size array binding "
+                           "(e.g. addr_of(rx_buf)), not an element or expression");
+            return std::nullopt;
+        }
+        const auto target_t = lookup_var(target_name->name);
+        if (!target_t.has_value())
+        {
+            error_at(span, "unknown name '" + std::string(target_name->name) + "'");
+            return std::nullopt;
+        }
+        if (target_t->kind != TypeKind::Array)
+        {
+            error_at(span, "addr_of expects a fixed-size array binding, got '" +
+                               std::string(target_name->name) + "' of type " +
+                               std::string(to_string(*target_t)));
+            return std::nullopt;
+        }
+
+        // The address is an Int: the natural address type for the runtime
+        // phys builtins (which accept Int or U64) and for the virtio PFN
+        // arithmetic (`base >> 12`; U64 has no arithmetic model in the MVP).
+        // A descriptor's U64 `addr` field is reachable via the Int -> U64
+        // widening (issue #277).
+        return Type{.kind = TypeKind::Int};
     }
 
     [[nodiscard]] std::optional<Type> check_expr_node(const GroupExpr& e, Span)
