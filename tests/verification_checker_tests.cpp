@@ -2395,6 +2395,35 @@ fn main() -> Int
         }
     }
 
+    {
+        // Unsigned port reads lower to their Int value (issue #274): a U8 read
+        // can be bit-tested, compared, and arithmetically widened inside the
+        // solver, while the value itself stays opaque (no contract can mention
+        // it). The busy-wait pattern and a U8==U8 comparison verify with zero
+        // obligations.
+        const std::string source = "fn main(pm: cap phys.mem) -> Int [ ensures result == 0; ] {\n"
+                                   "  unsafe {\n"
+                                   "    let lsr: U8 = port_inb(0x3FD);\n"
+                                   "    let wide: Int = lsr + 0;\n"
+                                   "    let thr: U8 = lsr & 32;\n"
+                                   "    let other: U8 = port_inb(0x3FE);\n"
+                                   "    if ((lsr & 32) != 0) {\n"
+                                   "      port_outb(0x3F8, 0x48);\n"
+                                   "    }\n"
+                                   "    if (lsr == other) {\n"
+                                   "      return 0;\n"
+                                   "    }\n"
+                                   "    return wide - wide;\n"
+                                   "  }\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "unsigned read widening verification");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification to succeed for unsigned read widening");
+        }
+    }
+
     std::cout << "OK\n";
     return 0;
 }

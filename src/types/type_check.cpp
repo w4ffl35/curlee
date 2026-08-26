@@ -51,6 +51,33 @@ static std::string join_path(const std::vector<std::string_view>& parts)
     return out;
 } // GCOVR_EXCL_LINE
 
+// True for the unsigned fixed-width integer types that implicitly widen to Int
+// in binary-operator contexts (issue #274): U8/U16/U32. U64 is excluded —
+// widening a 64-bit unsigned value to Int is not value-preserving (out of
+// scope for the MVP; see the issue).
+static bool is_widening_unsigned(TypeKind kind)
+{
+    return kind == TypeKind::U8 || kind == TypeKind::U16 || kind == TypeKind::U32;
+}
+
+// True if an expression is a plain Int literal, unwrapping grouping parens
+// (`32` or `(32)`). Used by the bitwise literal-adaptation rule: an Int
+// literal operand adapts to the unsigned width of the other operand, mirroring
+// how `port_outb(0x3F8, 0x48)` accepts an Int literal today (issue #274).
+static bool is_int_literal_expr(const Expr& e)
+{
+    if (std::get_if<curlee::parser::IntExpr>(&e.node) != nullptr)
+    {
+        return true;
+    }
+    if (const auto* group = std::get_if<curlee::parser::GroupExpr>(&e.node);
+        group != nullptr && group->inner != nullptr)
+    {
+        return is_int_literal_expr(*group->inner);
+    }
+    return false;
+}
+
 // True if a lexeme is a plain compile-time integer literal: decimal digits,
 // hex (0x...) form, with optional underscore separators. Used for phys()
 // addresses and port I/O ports (both must be constants).
@@ -934,42 +961,62 @@ class Checker
         using curlee::lexer::TokenKind;
         switch (e.op)
         {
+        // Arithmetic (issue #274): Int+Int stays Int; U8/U16/U32 operands —
+        // alone, with Int, or with each other — implicitly widen to Int
+        // (value-preserving; unsigned arithmetic is defined as Int arithmetic,
+        // no wraparound). U64 has no arithmetic/widening model in the MVP, so
+        // any U64 arithmetic stays a hard error. `+` additionally supports
+        // String+String.
         case TokenKind::Plus:
             if (lhs->kind == TypeKind::String && rhs->kind == TypeKind::String)
             {
                 return Type{.kind = TypeKind::String};
             }
-            if (lhs->kind != TypeKind::Int || rhs->kind != TypeKind::Int)
-            {
-                error_at(span, "'+' expects Int+Int or String+String");
-                return std::nullopt;
-            }
-            return Type{.kind = TypeKind::Int};
-
+            [[fallthrough]];
         case TokenKind::Minus:
         case TokenKind::Star:
         case TokenKind::Slash:
-            if (lhs->kind != TypeKind::Int || rhs->kind != TypeKind::Int)
-            {
-                error_at(span, "arithmetic operators expect Int operands");
-                return std::nullopt;
-            }
-            return Type{.kind = TypeKind::Int};
-
-        // Modulo: non-negative Integer semantics are defined by the identity
-        // a % b == a - (a / b) * b (issue #270). Type-wise it behaves like the
-        // other arithmetic operators.
         case TokenKind::Percent:
-            if (lhs->kind != TypeKind::Int || rhs->kind != TypeKind::Int)
+        {
+            const bool lhs_ok = lhs->kind == TypeKind::Int || is_phys_element_kind(lhs->kind);
+            const bool rhs_ok = rhs->kind == TypeKind::Int || is_phys_element_kind(rhs->kind);
+            if (lhs->kind == TypeKind::Int && rhs->kind == TypeKind::Int)
             {
-                error_at(span, "'%' expects Int operands");
+                return Type{.kind = TypeKind::Int};
+            }
+            if (!lhs_ok || !rhs_ok)
+            {
+                if (e.op == TokenKind::Plus)
+                {
+                    error_at(span, "'+' expects Int+Int or String+String");
+                }
+                else if (e.op == TokenKind::Percent)
+                {
+                    error_at(span, "'%' expects Int operands "
+                                   "(U8/U16/U32 implicitly widen to Int)");
+                }
+                else
+                {
+                    error_at(span, "arithmetic operators expect Int operands "
+                                   "(U8/U16/U32 implicitly widen to Int)");
+                }
+                return std::nullopt;
+            }
+            if (lhs->kind == TypeKind::U64 || rhs->kind == TypeKind::U64)
+            {
+                error_at(span, "arithmetic with U64 is not supported (U8/U16/U32 "
+                               "implicitly widen to Int; U64 widening is out of scope)");
                 return std::nullopt;
             }
             return Type{.kind = TypeKind::Int};
+        }
 
-        // Bitwise operators: Int or unsigned fixed-width integer types
-        // (U8/U16/U32/U64). Both operands must have the same type; the result
-        // keeps that type (issue #270).
+        // Bitwise operators (issue #270 + #274): same-type operands (Int, or a
+        // matching unsigned width) keep that type. U8/U16/U32 interoperate with
+        // Int: an Int LITERAL adapts to the unsigned width (mirroring
+        // `port_outb(0x3F8, 0x48)`), and a non-literal Int widens the unsigned
+        // operand to Int. U64 does not widen (out of scope) and mixed unsigned
+        // widths remain a hard error.
         case TokenKind::Amp:
         case TokenKind::Pipe:
         case TokenKind::Caret:
@@ -984,26 +1031,59 @@ class Checker
                                "operands (U8/U16/U32/U64)");
                 return std::nullopt;
             }
-            if (lhs->kind != rhs->kind)
+            if (lhs->kind == rhs->kind)
             {
-                error_at(span, "bitwise operators expect matching operand types");
+                return *lhs;
+            }
+            if (lhs->kind == TypeKind::U64 || rhs->kind == TypeKind::U64)
+            {
+                error_at(span, "bitwise operators expect matching operand types "
+                               "(U64 does not widen to Int)");
                 return std::nullopt;
             }
-            return *lhs;
+            if (is_widening_unsigned(lhs->kind) && rhs->kind == TypeKind::Int)
+            {
+                return is_int_literal_expr(*e.rhs) ? *lhs : Type{.kind = TypeKind::Int};
+            }
+            if (is_widening_unsigned(rhs->kind) && lhs->kind == TypeKind::Int)
+            {
+                return is_int_literal_expr(*e.lhs) ? *rhs : Type{.kind = TypeKind::Int};
+            }
+            error_at(span, "bitwise operators expect matching operand types");
+            return std::nullopt;
         }
 
+        // Comparisons (issue #274): same-kind operands (Int, or a matching
+        // unsigned width) compare directly; U8/U16/U32 mixed with Int (or each
+        // other) compare via implicit widening to Int. U64 does not widen, so a
+        // U64-vs-anything-else comparison is a hard error.
         case TokenKind::EqualEqual:
         case TokenKind::BangEqual:
         case TokenKind::Less:
         case TokenKind::LessEqual:
         case TokenKind::Greater:
         case TokenKind::GreaterEqual:
-            if (lhs->kind != TypeKind::Int || rhs->kind != TypeKind::Int)
+        {
+            const bool lhs_ok = lhs->kind == TypeKind::Int || is_phys_element_kind(lhs->kind);
+            const bool rhs_ok = rhs->kind == TypeKind::Int || is_phys_element_kind(rhs->kind);
+            if (!lhs_ok || !rhs_ok)
             {
-                error_at(span, "comparison operators expect Int operands");
+                error_at(span, "comparison operators expect Int operands or unsigned "
+                               "integer operands (U8/U16/U32 widen to Int)");
+                return std::nullopt;
+            }
+            if (lhs->kind == rhs->kind)
+            {
+                return Type{.kind = TypeKind::Bool};
+            }
+            if (lhs->kind == TypeKind::U64 || rhs->kind == TypeKind::U64)
+            {
+                error_at(span, "comparison operators expect matching operand types "
+                               "(U64 does not widen to Int)");
                 return std::nullopt;
             }
             return Type{.kind = TypeKind::Bool};
+        }
 
         case TokenKind::AndAnd:
         case TokenKind::OrOr:

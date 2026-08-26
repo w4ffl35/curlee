@@ -915,6 +915,8 @@ int main(int argc, char** argv)
         fs::path("tests/fixtures/check_io_port_read_contract.curlee");
     const fs::path rel_io_port_value_type =
         fs::path("tests/fixtures/check_io_port_value_type.curlee");
+    const fs::path rel_unsigned_inspect =
+        fs::path("tests/fixtures/check_unsigned_inspect.curlee");
     const fs::path rel_run_missing_stdout_cap = fs::path("tests/fixtures/r.curlee");
     const fs::path rel_run_missing_tty_cap = fs::path("tests/fixtures/run_missing_tty_cap.curlee");
     const fs::path rel_run_read_line = fs::path("tests/fixtures/run_read_line.curlee");
@@ -1172,6 +1174,17 @@ int main(int argc, char** argv)
         if (!run_stderr_case("check-io-port-value-type",
                              {"curlee", "check", rel_io_port_value_type.string()},
                              dir / "check_io_port_value_type.golden", false))
+        {
+            return 1;
+        }
+
+        // Unsigned widening / comparisons / bitwise on port reads (issue #274):
+        // the putc_driver busy-wait, vbe readback validation, and the
+        // division-vs-bitwise glyph equivalence all check cleanly, while
+        // contracts still cannot see through the opaque reads.
+        if (!run_stderr_case("check-unsigned-inspect",
+                             {"curlee", "check", rel_unsigned_inspect.string()},
+                             dir / "check_unsigned_inspect.golden", true))
         {
             return 1;
         }

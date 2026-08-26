@@ -170,6 +170,13 @@ bootable **x86-64 multiboot2 kernel ELF**:
   `unsafe` and requires the `phys.mem` capability. The x86 **port I/O** builtins
   (`port_inb`/`port_outb`/`port_inw`/`port_outw`/`port_inl`/`port_outl`, constant ports only)
   are gated the same way and codegen to inline `in`/`out` assembly.
+- Unsigned fixed-width integers (`U8`/`U16`/`U32`) are **usable in expressions** (issue #274):
+  a port/`Phys` read can be bit-tested, compared, and arithmetically widened. `U8`/`U16`/`U32`
+  operands implicitly widen to `Int` in arithmetic (results are `Int`); comparisons accept them
+  directly (with `Int` literals auto-adapting); bitwise operators accept an `Int` *literal* on
+  the other side (which adapts to the unsigned width), or widen the unsigned operand to `Int`
+  for a non-literal `Int`. Reads stay **opaque** to the verifier — a contract can never see
+  through a port/MMIO read value. `U64` widening is not yet supported.
 - The VM never runs freestanding programs (`curlee run` rejects `Phys`/`extern`/port I/O
   bodies); `curlee build` is the freestanding execution path.
 

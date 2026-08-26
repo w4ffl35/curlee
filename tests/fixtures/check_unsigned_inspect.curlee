@@ -1,0 +1,114 @@
+// Issue #274: U8/U16/U32 port reads are inspectable — arithmetic widening,
+// bitwise with Int literals, and comparisons. Mirrors the JOE OS driver
+// patterns: putc_driver.c (COM1 busy-wait) and vbe.c (mode readback
+// validation), and proves the division-based glyph workaround equivalent to
+// the native bitwise form (bounded Int, as in issue #270) so both forms
+// produce the same Int obligations over the opaque read.
+//
+// Precedence note: Curlee uses C precedence, so `v & 32 != 0` parses as
+// `v & (32 != 0)`; the driver pattern uses the real putc_driver form
+// `(v & 32) == 0`.
+
+// putc_driver.c COM1 busy-wait: spin until LSR bit 5 (THR empty) is set,
+// then write the byte to the transmit-hold register.
+fn putc(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let lsr: U8 = port_inb(0x3FD);       // COM1 line status register
+    while ((lsr & 32) == 0) {
+      // busy-wait: THR not empty yet
+    }
+    port_outb(0x3F8, 0x48);              // COM1 THR: 'H'
+  }
+  return;
+}
+
+// vbe.c readback validation: after setting the Bochs VBE mode, read back
+// XRES/YRES and reject the mode if they do not match.
+fn vbe_validate(pm: cap phys.mem) -> Int {
+  unsafe {
+    port_outw(0x1CE, 0x0004);            // VBE index: XRES
+    let xres: U16 = port_inw(0x1CF);
+    port_outw(0x1CE, 0x0005);            // VBE index: YRES
+    let yres: U16 = port_inw(0x1CF);
+    if (xres != 640 || yres != 480) {
+      return 1;                          // mode-set failed
+    }
+    return 0;
+  }
+}
+
+// The glyph workaround equivalence (issue #270 style): for byte values the
+// division-based bit extraction agrees with the native bitwise form.
+fn glyph_div_form(bits: Int) -> Bool [
+  requires 0 <= bits && bits <= 255;
+  ensures result == ((bits & 32) != 0);
+] {
+  return (bits / 32) % 2 == 1;
+}
+
+// Unsigned parameters are usable too: the verifier declares them as Int-sort
+// symbols, so they can be written straight to a port or compared against a
+// read (contracts on them are still rejected as opaque).
+fn putc_char(pm: cap phys.mem, c: U8) -> Unit {
+  unsafe {
+    port_outb(0x3F8, c);
+  }
+  return;
+}
+
+fn vbe_cmp(pm: cap phys.mem, want: U16) -> Int {
+  unsafe {
+    let xres: U16 = port_inw(0x1CF);
+    if (want == xres) {
+      return 0;
+    }
+    return 1;
+  }
+}
+
+// U64 stays out of scope for widening (issue #274): a U64 read still
+// type-checks and verifies as an uninterpreted value, but it cannot be mixed
+// with Int in operators.
+fn u64_read(pm: cap phys.mem) -> Int {
+  unsafe {
+    let x: U64 = phys<U64>(0x4000).read(); // opaque, uninterpreted
+    let y: U64 = x;                        // U64-to-U64 binding stays legal
+    if (y == x) {
+      return 0;
+    }
+    return 1;
+  }
+}
+
+// Both forms are usable on a U8 port read: the native bitwise form and the
+// division-based workaround both lower to Bool obligations over the opaque
+// read value (the read stays opaque — no contract can see through it).
+fn glyph_forms(pm: cap phys.mem) -> Int {
+  unsafe {
+    let v: U8 = port_inb(0x3FD);
+    let bitwise: Bool = (v & 32) != 0;
+    let div_form: Bool = (v / 32) % 2 == 1;
+    if (bitwise || div_form) {
+      return 1;
+    } else {
+      return 0;
+    }
+  }
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let v: U8 = port_inb(0x3FD);         // COM1 LSR (opaque read)
+    let wide: Int = v + 0;               // U8 -> Int widening
+    let thr_empty: U8 = v & 32;          // bitwise with an Int literal
+    if ((v & 32) != 0) {
+      port_outb(0x3F8, v);
+    }
+    let w: U16 = port_inw(0x1CF);        // read a word register
+    let d: U32 = port_inl(0xCFC);        // read a long register
+    if (w > 0 || d == 4294967295) {      // U16/U32 compared against Int literals
+      return wide + thr_empty + 1;
+    }
+    return wide + thr_empty + glyph_forms(pm);
+  }
+}
