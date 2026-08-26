@@ -886,6 +886,9 @@ class Emitter
         case TokenKind::Minus:
             chunk_.emit(OpCode::Neg, span);
             return;
+        case TokenKind::Tilde:
+            chunk_.emit(OpCode::BitNot, span);
+            return;
         default:
             diags_.push_back(error_at(span, "unsupported unary operator in emitter"));
             return;
@@ -971,6 +974,24 @@ class Emitter
             return;
         case TokenKind::Slash:
             chunk_.emit(OpCode::Div, span);
+            return;
+        case TokenKind::Percent:
+            chunk_.emit(OpCode::Mod, span);
+            return;
+        case TokenKind::Amp:
+            chunk_.emit(OpCode::BitAnd, span);
+            return;
+        case TokenKind::Pipe:
+            chunk_.emit(OpCode::BitOr, span);
+            return;
+        case TokenKind::Caret:
+            chunk_.emit(OpCode::BitXor, span);
+            return;
+        case TokenKind::ShiftLeft:
+            chunk_.emit(OpCode::ShiftLeft, span);
+            return;
+        case TokenKind::ShiftRight:
+            chunk_.emit(OpCode::ShiftRight, span);
             return;
         case TokenKind::EqualEqual:
             chunk_.emit(OpCode::Equal, span);

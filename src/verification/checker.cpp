@@ -55,6 +55,8 @@ std::string token_to_string(curlee::lexer::TokenKind kind)
         return "*";
     case TokenKind::Slash:
         return "/";
+    case TokenKind::Percent:
+        return "%";
     case TokenKind::EqualEqual:
         return "==";
     case TokenKind::BangEqual:
@@ -73,6 +75,18 @@ std::string token_to_string(curlee::lexer::TokenKind kind)
         return "||";
     case TokenKind::Bang:
         return "!";
+    case TokenKind::Amp:
+        return "&";
+    case TokenKind::Pipe:
+        return "|";
+    case TokenKind::Caret:
+        return "^";
+    case TokenKind::Tilde:
+        return "~";
+    case TokenKind::ShiftLeft:
+        return "<<";
+    case TokenKind::ShiftRight:
+        return ">>";
     default:
         break;
     }
@@ -862,6 +876,17 @@ class Verifier
                         }
                         return ExprValue{!rhs.expr, TypeKind::Bool, false};
                     }
+                    // Bitwise complement: exact two's-complement identity
+                    // ~x == -x - 1 over the 64-bit Int model (issue #270).
+                    if (node.op == TokenKind::Tilde)
+                    {
+                        if (rhs.kind != TypeKind::Int &&
+                            !curlee::types::is_phys_element_kind(rhs.kind))
+                        {
+                            return error_at(e.span, "unary '~' expects Int expression");
+                        }
+                        return ExprValue{(-rhs.expr) - 1, TypeKind::Int, rhs.is_literal};
+                    }
 
                     return error_at(e.span, "unsupported unary operator in expression");
                 }
@@ -904,6 +929,78 @@ class Verifier
                         }
                         return ExprValue{lhs.expr * rhs.expr, TypeKind::Int,
                                          lhs.is_literal && rhs.is_literal};
+
+                    // Division: Z3 Euclidean integer division. Matches C
+                    // truncating division for non-negative operands (the
+                    // supported subset, issue #270).
+                    case TokenKind::Slash:
+                        if (lhs.kind != TypeKind::Int || rhs.kind != TypeKind::Int)
+                        {
+                            return error_at(e.span, "'/' expects Int expressions");
+                        }
+                        return ExprValue{lhs.expr / rhs.expr, TypeKind::Int,
+                                         lhs.is_literal && rhs.is_literal};
+
+                    // Modulo: Z3 Euclidean modulo. For non-negative operands it
+                    // satisfies the division-remainder identity
+                    // a % b == a - (a / b) * b (issue #270), which is an axiom
+                    // of the Z3 Int theory and directly provable.
+                    case TokenKind::Percent:
+                        if (lhs.kind != TypeKind::Int || rhs.kind != TypeKind::Int)
+                        {
+                            return error_at(e.span, "'%' expects Int expressions");
+                        }
+                        return ExprValue{z3::mod(lhs.expr, rhs.expr), TypeKind::Int,
+                                         lhs.is_literal && rhs.is_literal};
+
+                    // Bitwise operators (issue #270): bit-precise 64-bit model.
+                    // Int (and unsigned element kinds, which the verifier treats
+                    // as Int-sort values) are lowered through Z3's bit-vector
+                    // theory: int2bv(64, x) takes the 64-bit two's-complement
+                    // pattern, the bitwise op runs in that domain, and
+                    // bv2int(_, signed) interprets the result back as a signed
+                    // Int. Right shift is ARITHMETIC (bvashr), per the documented
+                    // Int semantics. Shift amounts are taken mod 64 by Z3's bv
+                    // semantics; protocol code uses constant small shifts.
+                    case TokenKind::Amp:
+                    case TokenKind::Pipe:
+                    case TokenKind::Caret:
+                    case TokenKind::ShiftLeft:
+                    case TokenKind::ShiftRight:
+                    {
+                        const bool lhs_ok =
+                            lhs.kind == TypeKind::Int ||
+                            curlee::types::is_phys_element_kind(lhs.kind);
+                        const bool rhs_ok =
+                            rhs.kind == TypeKind::Int ||
+                            curlee::types::is_phys_element_kind(rhs.kind);
+                        if (!lhs_ok || !rhs_ok)
+                        {
+                            return error_at(e.span, "bitwise operators expect Int expressions");
+                        }
+                        constexpr unsigned kWidth = 64;
+                        const z3::expr lhs_bv = z3::int2bv(kWidth, lhs.expr);
+                        const z3::expr rhs_bv = z3::int2bv(kWidth, rhs.expr);
+                        z3::expr result_bv = lhs_bv & rhs_bv;
+                        if (node.op == TokenKind::Pipe)
+                        {
+                            result_bv = lhs_bv | rhs_bv;
+                        }
+                        else if (node.op == TokenKind::Caret)
+                        {
+                            result_bv = lhs_bv ^ rhs_bv;
+                        }
+                        else if (node.op == TokenKind::ShiftLeft)
+                        {
+                            result_bv = z3::shl(lhs_bv, rhs_bv);
+                        }
+                        else if (node.op == TokenKind::ShiftRight)
+                        {
+                            result_bv = z3::ashr(lhs_bv, rhs_bv);
+                        }
+                        return ExprValue{z3::bv2int(result_bv, true), TypeKind::Int,
+                                         lhs.is_literal && rhs.is_literal};
+                    }
 
                     case TokenKind::EqualEqual:
                     case TokenKind::BangEqual:

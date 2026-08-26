@@ -85,6 +85,15 @@ enum class TokenKind
     Star,
     Slash,
 
+    // Bitwise operators (issue #270)
+    Amp,         // &
+    Pipe,        // |
+    Caret,       // ^
+    Tilde,       // ~
+    ShiftLeft,   // <<
+    ShiftRight,  // >>
+    Percent,     // %
+
     AndAnd,
     OrOr,
 };
@@ -218,6 +227,21 @@ struct Token
         return "star";
     case TokenKind::Slash:
         return "slash";
+
+    case TokenKind::Amp:
+        return "amp";
+    case TokenKind::Pipe:
+        return "pipe";
+    case TokenKind::Caret:
+        return "caret";
+    case TokenKind::Tilde:
+        return "tilde";
+    case TokenKind::ShiftLeft:
+        return "shift_left";
+    case TokenKind::ShiftRight:
+        return "shift_right";
+    case TokenKind::Percent:
+        return "percent";
 
     case TokenKind::AndAnd:
         return "and_and";

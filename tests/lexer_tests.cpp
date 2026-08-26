@@ -65,7 +65,10 @@ int main()
             TokenKind::GreaterEqual,  TokenKind::Plus,
             TokenKind::Minus,         TokenKind::Star,
             TokenKind::Slash,         TokenKind::AndAnd,
-            TokenKind::OrOr,
+            TokenKind::OrOr,          TokenKind::Amp,
+            TokenKind::Pipe,          TokenKind::Caret,
+            TokenKind::Tilde,         TokenKind::ShiftLeft,
+            TokenKind::ShiftRight,    TokenKind::Percent,
         };
 
         for (const auto kind : all_kinds)
@@ -520,20 +523,64 @@ int main()
         expect_token(toks, 5, TokenKind::Eof, "");
     }
 
-    // Cover: lone '&' and '|' should error (exercises &&/|| partial-match branches).
+    // Cover: bitwise operator tokens (issue #270). Lone '&'/'|' are now valid
+    // single-char tokens (Amp/Pipe); the &&/|| partial-match branches are
+    // exercised by the two-character forms below.
     {
         const auto res = lex("&");
-        if (!std::holds_alternative<curlee::diag::Diagnostic>(res))
+        if (!std::holds_alternative<std::vector<Token>>(res))
         {
-            fail("expected error for lone '&'");
+            fail("expected success for '&' token");
         }
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::Amp, "&");
+        expect_token(toks, 1, TokenKind::Eof, "");
     }
     {
         const auto res = lex("|");
-        if (!std::holds_alternative<curlee::diag::Diagnostic>(res))
+        if (!std::holds_alternative<std::vector<Token>>(res))
         {
-            fail("expected error for lone '|'");
+            fail("expected success for '|' token");
         }
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::Pipe, "|");
+        expect_token(toks, 1, TokenKind::Eof, "");
+    }
+    {
+        const auto res = lex("^ ~ %");
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for '^ ~ %' tokens");
+        }
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::Caret, "^");
+        expect_token(toks, 1, TokenKind::Tilde, "~");
+        expect_token(toks, 2, TokenKind::Percent, "%");
+        expect_token(toks, 3, TokenKind::Eof, "");
+    }
+    {
+        const auto res = lex("<< >>");
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for '<< >>' tokens");
+        }
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::ShiftLeft, "<<");
+        expect_token(toks, 1, TokenKind::ShiftRight, ">>");
+        expect_token(toks, 2, TokenKind::Eof, "");
+    }
+    {
+        // && and || must still lex as two-char logical operators, not pairs of
+        // Amp/Pipe tokens (exercises the &&/|| partial-match branches).
+        const auto res = lex("&& ||");
+        if (!std::holds_alternative<std::vector<Token>>(res))
+        {
+            fail("expected success for '&& ||' tokens");
+        }
+        const auto& toks = std::get<std::vector<Token>>(res);
+        expect_token(toks, 0, TokenKind::AndAnd, "&&");
+        expect_token(toks, 1, TokenKind::OrOr, "||");
+        expect_token(toks, 2, TokenKind::Eof, "");
     }
 
     // Cover: '/' as a token (not a comment) and line-comment lookahead at EOF.

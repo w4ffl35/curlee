@@ -1,0 +1,11 @@
+fn pack(v: Int) -> Int {
+  return ((v >> 24) & 255) | ((v >> 8) & 255) | (~v & 15) | (v ^ 3) | (1 << 4);
+}
+
+fn mod_op(a: Int, b: Int) -> Int {
+  return a % b;
+}
+
+fn main() -> Int {
+  return pack(0) + mod_op(17, 5);
+}

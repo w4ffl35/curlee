@@ -426,6 +426,20 @@ std::string token_op_to_string(curlee::lexer::TokenKind kind)
         return "*";
     case TokenKind::Slash:
         return "/";
+    case TokenKind::Amp:
+        return "&";
+    case TokenKind::Pipe:
+        return "|";
+    case TokenKind::Caret:
+        return "^";
+    case TokenKind::Tilde:
+        return "~";
+    case TokenKind::ShiftLeft:
+        return "<<";
+    case TokenKind::ShiftRight:
+        return ">>";
+    case TokenKind::Percent:
+        return "%";
     default:
         break;
     }

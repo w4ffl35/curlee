@@ -1,0 +1,56 @@
+// Issue #270: the shift-based glyph bit extraction
+//   (bits >> (4 - col)) & 1
+// is equivalent to the division-based workaround used by glyphs.curlee
+//   bits - (bits / 16) * 16 >= 8
+// for nibble values. Proving the equivalence for a symbolic `bits` requires
+// the verifier's bit-precise model of >> and & (Z3 bit-vector theory).
+fn glyph_pixel_shift(bits: Int, col: Int) -> Int [
+  requires 0 <= bits && bits < 16 && col == 1;
+  ensures result == ((bits >> 3) & 1);
+] {
+  return (bits >> 3) & 1;
+}
+
+fn glyph_pixel_div(bits: Int, col: Int) -> Bool [
+  requires 0 <= bits && bits < 16 && col == 1;
+  ensures result == (bits - (bits / 16) * 16 >= 8);
+] {
+  return bits - (bits / 16) * 16 >= 8;
+}
+
+// The equivalence itself is proven for every nibble value (symbolic `bits`):
+// the shift form agrees with the division-based workaround on all inputs.
+fn glyph_equiv(bits: Int) -> Int [
+  requires 0 <= bits && bits < 16;
+  ensures result == 0;
+] {
+  let s: Int = glyph_pixel_shift(bits, 1);
+  let d: Bool = glyph_pixel_div(bits, 1);
+  if ((s & 1) != 0) {
+    if (d) {
+      return 0;
+    } else {
+      return 1;
+    }
+  } else {
+    if (!d) {
+      return 0;
+    } else {
+      return 1;
+    }
+  }
+}
+
+fn main() -> Int [
+  ensures result == 0;
+] {
+  let a: Int = glyph_equiv(0);
+  let b: Int = glyph_equiv(7);
+  let c: Int = glyph_equiv(8);
+  let d: Int = glyph_equiv(15);
+  if (a == 0 && b == 0 && c == 0 && d == 0) {
+    return 0;
+  } else {
+    return 1;
+  }
+}

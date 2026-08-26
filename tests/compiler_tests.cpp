@@ -84,6 +84,13 @@ static std::vector<curlee::vm::OpCode> decode_ops(const curlee::vm::Chunk& chunk
         case OpCode::LessEqual:
         case OpCode::Greater:
         case OpCode::GreaterEqual:
+        case OpCode::BitAnd:
+        case OpCode::BitOr:
+        case OpCode::BitXor:
+        case OpCode::BitNot:
+        case OpCode::ShiftLeft:
+        case OpCode::ShiftRight:
+        case OpCode::Mod:
         case OpCode::Pop:
         case OpCode::Return:
         case OpCode::Ret:
@@ -172,6 +179,29 @@ int main()
         if (!(res.value == curlee::vm::Value::bool_v(true)))
         {
             fail("expected compiled result to equal true");
+        }
+    }
+
+    {
+        // Bitwise + modulo emission (issue #270): the VM emitter must lower
+        // & | ^ ~ << >> % to their opcodes (compile + run end to end).
+        const std::string source = "fn main() -> Int {\n"
+                                   "  let a: Int = 1 & 3 | 2 ^ 4;\n"
+                                   "  let b: Int = ~a;\n"
+                                   "  let c: Int = (a << 2) >> 1;\n"
+                                   "  let d: Int = 17 % 5;\n"
+                                   "  return a + b + c + d;\n"
+                                   "}\n";
+
+        const auto chunk = compile_to_chunk(source);
+        const auto res = run_chunk(chunk);
+        if (!res.ok)
+        {
+            fail("expected VM to run compiled bitwise chunk");
+        }
+        if (!(res.value == curlee::vm::Value::int_v(15)))
+        {
+            fail("expected compiled bitwise result to equal 15");
         }
     }
 
