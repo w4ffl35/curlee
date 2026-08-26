@@ -15,6 +15,17 @@ These are intentionally separate from `tests/diagnostics/` (renderer unit tests)
   `check_array_reject_*.golden` cover the MVP rejection diagnostics (multi-dim, bare-name,
   struct field, param, return, ghost, unsupported element kind); `run_array_vm_reject.golden`
   asserts `curlee run` rejects arrays (freestanding-only).
+- Address-of a Curlee-owned array (issue #286): `check_addr_of.golden` (empty on success)
+  covers the virtio-shaped descriptor-fill pattern (stable opaque addresses, Int -> U64
+  widening into a descriptor field, a phys_read_u8 round-trip, the `base >> 12` PFN setup);
+  `check_addr_of_{scalar,outside_unsafe,element,opaque}.golden` cover the type/unsafe/
+  unprovable-address rejections. Shadowing regressions (review round 1): the addr_of
+  constant is keyed by BINDING, so `check_addr_of_shadow_static.golden` and
+  `check_addr_of_shadow_local.golden` assert `ensures result == 0` over two same-named
+  arrays' address difference FAILS check (previously verified — unsound), while
+  `check_addr_of_shadow_scoped.golden` (empty on success) asserts shadowing does not leak
+  across scopes and `check_addr_of_shadow_honest.golden` (empty on success) asserts the
+  honest shadowing pattern checks cleanly.
 - Runtime-address physical memory reads (issue #279): `check_phys_read_runtime.golden`
   (empty on success) covers the mb2.c multiboot2 tag walk (runtime base + mutable byte
   cursor, opaque reads); `check_phys_read_runtime_addr.golden` covers the non-integer

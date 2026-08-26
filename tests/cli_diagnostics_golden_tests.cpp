@@ -970,6 +970,14 @@ int main(int argc, char** argv)
         fs::path("tests/fixtures/check_addr_of_element.curlee");
     const fs::path rel_addr_of_opaque =
         fs::path("tests/fixtures/check_addr_of_opaque.curlee");
+    const fs::path rel_addr_of_shadow_static =
+        fs::path("tests/fixtures/check_addr_of_shadow_static.curlee");
+    const fs::path rel_addr_of_shadow_local =
+        fs::path("tests/fixtures/check_addr_of_shadow_local.curlee");
+    const fs::path rel_addr_of_shadow_scoped =
+        fs::path("tests/fixtures/check_addr_of_shadow_scoped.curlee");
+    const fs::path rel_addr_of_shadow_honest =
+        fs::path("tests/fixtures/check_addr_of_shadow_honest.curlee");
     const fs::path rel_unsigned_inspect =
         fs::path("tests/fixtures/check_unsigned_inspect.curlee");
     // U64 construction from Int/literal (issue #277).
@@ -1434,6 +1442,42 @@ int main(int argc, char** argv)
         if (!run_stderr_case("check-addr-of-opaque",
                              {"curlee", "check", rel_addr_of_opaque.string()},
                              dir / "check_addr_of_opaque.golden", false))
+        {
+            return 1;
+        }
+
+        // Shadowing regression (issue #286 review round 1): the addr_of
+        // opaque constant is keyed by BINDING, not name, so two different
+        // arrays that share a name (a local shadowing a static, or nested
+        // shadowed locals) map to DISTINCT constants. `ensures result == 0`
+        // over their difference is therefore unprovable and both shadow
+        // fixtures must FAIL check (before the fix they verified and the
+        // emitted kernels contradicted the contract at runtime).
+        if (!run_stderr_case("check-addr-of-shadow-static",
+                             {"curlee", "check", rel_addr_of_shadow_static.string()},
+                             dir / "check_addr_of_shadow_static.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-addr-of-shadow-local",
+                             {"curlee", "check", rel_addr_of_shadow_local.string()},
+                             dir / "check_addr_of_shadow_local.golden", false))
+        {
+            return 1;
+        }
+        // Positive controls: shadowing must NOT leak across scopes (an
+        // addr_of(q) before and after a nested shadow is the same static
+        // binding, so equality is provable), and the honest shadowing pattern
+        // (no contract on the address difference) must check cleanly.
+        if (!run_stderr_case("check-addr-of-shadow-scoped",
+                             {"curlee", "check", rel_addr_of_shadow_scoped.string()},
+                             dir / "check_addr_of_shadow_scoped.golden", true))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-addr-of-shadow-honest",
+                             {"curlee", "check", rel_addr_of_shadow_honest.string()},
+                             dir / "check_addr_of_shadow_honest.golden", true))
         {
             return 1;
         }

@@ -1,0 +1,27 @@
+// Regression (issue #286 review round 1): two DIFFERENT local arrays that
+// shadow the same name in nested scopes. The verifier previously collapsed
+// both addr_of(q) calls to ONE name-keyed constant and proved `a - b == 0`
+// — false in real execution (two distinct stack arrays). Now each binding
+// gets its own constant, so `ensures result == 0` is unprovable and
+// `curlee check` must FAIL.
+// Expected error: "ensures clause not satisfied".
+
+fn probe(pm: cap phys.mem) -> Int
+  [ ensures result == 0; ]
+{
+  unsafe {
+    let q: [U8; 16] = [0; 16];
+    let a: Int = addr_of(q);
+    {
+      let q: [U8; 16] = [0; 16];
+      let b: Int = addr_of(q);
+      return a - b;
+    }
+  }
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    return probe(pm);
+  }
+}

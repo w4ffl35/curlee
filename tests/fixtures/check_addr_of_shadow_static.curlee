@@ -1,0 +1,27 @@
+// Regression (issue #286 review round 1): a local `q` shadowing a module-level
+// static `q` must NOT conflate the two addr_of(q) constants. Before the fix,
+// the verifier keyed the opaque address constant by bare name, so it proved
+// `addr_of(static q) == addr_of(local q)` and discharged `ensures result == 0`
+// — false at runtime (static vs stack storage; the emitted kernel printed
+// BAD). Now the two bindings map to DISTINCT constants, so the contract is
+// unprovable and `curlee check` must FAIL.
+// Expected error: "ensures clause not satisfied".
+
+static q: [U8; 16] = [0; 16];
+
+fn probe(pm: cap phys.mem) -> Int
+  [ ensures result == 0; ]
+{
+  unsafe {
+    let a: Int = addr_of(q);     // the STATIC
+    let q: [U8; 16] = [0; 16];   // local shadows the static
+    let b: Int = addr_of(q);     // the LOCAL — a different array
+    return a - b;
+  }
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    return probe(pm);
+  }
+}

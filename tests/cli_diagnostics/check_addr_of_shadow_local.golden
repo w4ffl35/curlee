@@ -1,0 +1,8 @@
+tests/fixtures/check_addr_of_shadow_local.curlee:10:13: error: ensures clause not satisfied
+  |
+  |   [ ensures result == 0; ]
+  |             ^^^^^^^^^^^
+note: goal: (result == 0)
+note: model:
+result = (- 1)
+note: hint: add or strengthen preconditions/refinements to satisfy this contract

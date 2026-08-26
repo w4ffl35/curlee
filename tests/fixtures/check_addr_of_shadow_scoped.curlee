@@ -1,0 +1,28 @@
+// Positive regression (issue #286 review round 1): shadowing must not leak
+// across scopes. `addr_of(q)` before and after a nested block that shadows
+// `q` refer to the SAME (static) binding, so their equality is provable and
+// `ensures result == 0` must VERIFY. (A name-keyed map also passed this, but
+// only because it conflated every `q`; the binding-id-keyed map passes it
+// correctly because the scope pop restores the static's binding id.)
+
+static q: [U8; 16] = [0; 16];
+
+fn probe(pm: cap phys.mem) -> Int
+  [ ensures result == 0; ]
+{
+  unsafe {
+    let a: Int = addr_of(q);        // the STATIC
+    {
+      let q: [U8; 16] = [0; 16];    // shadows inside the nested scope only
+      let _inner: Int = addr_of(q); // the LOCAL (distinct constant, unused)
+    }
+    let b: Int = addr_of(q);        // the STATIC again
+    return a - b;
+  }
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    return probe(pm);
+  }
+}
