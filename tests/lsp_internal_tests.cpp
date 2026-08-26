@@ -1144,23 +1144,31 @@ int main()
         (void)find_expr_at(group_null, 1, nullptr);
         (void)find_call_expr_at(group_null, 1, nullptr);
 
-        // Port I/O builtins (issue #269): value==nullptr (in* read) takes the
-        // skip branch; value!=nullptr (out* write) recurses into the value.
+        // Port I/O builtins (issue #269/#276): value==nullptr (in* read) takes
+        // the skip branch for the value but still recurses into the port
+        // expression; value!=nullptr (out* write) recurses into both.
+        Expr port_io_read_port{
+            .id = 7, .span = span, .node = curlee::parser::IntExpr{.lexeme = "0x3FD"}};
         Expr port_io_read{
-            .id = 7,
+            .id = 8,
             .span = span,
-            .node = curlee::parser::PortIOExpr{.op = "port_inb", .port_lexeme = "0x3FD", .value = nullptr}};
+            .node = curlee::parser::PortIOExpr{
+                .op = "port_inb",
+                .port = std::make_unique<curlee::parser::Expr>(std::move(port_io_read_port)),
+                .value = nullptr}};
         (void)find_expr_at(port_io_read, 1, nullptr);
         (void)find_call_expr_at(port_io_read, 1, nullptr);
 
         Expr port_io_write_val{
-            .id = 8, .span = span, .node = curlee::parser::IntExpr{.lexeme = "0x48"}};
+            .id = 9, .span = span, .node = curlee::parser::IntExpr{.lexeme = "0x48"}};
+        Expr port_io_write_port{
+            .id = 10, .span = span, .node = curlee::parser::IntExpr{.lexeme = "0x3F8"}};
         Expr port_io_write{
-            .id = 9,
+            .id = 11,
             .span = span,
             .node = curlee::parser::PortIOExpr{
                 .op = "port_outb",
-                .port_lexeme = "0x3F8",
+                .port = std::make_unique<curlee::parser::Expr>(std::move(port_io_write_port)),
                 .value = std::make_unique<curlee::parser::Expr>(std::move(port_io_write_val))}};
         (void)find_expr_at(port_io_write, 1, nullptr);
         (void)find_call_expr_at(port_io_write, 1, nullptr);

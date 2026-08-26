@@ -1,0 +1,10 @@
+// Port reads with a runtime port stay opaque to the verifier (issue #276): a
+// refinement on a port_inb result computed from a let-bound base + offset
+// must be rejected, never silently proven (mirrors the constant-port rule).
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let base: Int = 0x3FD;
+    let v: U8 where v > 0 = port_inb(base + 0);
+  }
+  return 0;
+}

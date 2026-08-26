@@ -723,7 +723,7 @@ class CEmitter
     // while the emitted call sites remain plain C function calls.
     void emit_port_io_helpers()
     {
-        writer_.line("/* x86 port I/O builtins (constant ports; gated by `unsafe` + `cap phys.mem`). */");
+        writer_.line("/* x86 port I/O builtins (constant or let-bound-base + constant-offset ports). */");
         writer_.line("static inline uint8_t curlee_port_inb(uint16_t port)");
         writer_.open_brace();
         writer_.line("uint8_t v;");
@@ -2181,13 +2181,22 @@ class CEmitter
     }
 
     // x86 port I/O builtins lower to calls of the prologue helpers with the
-    // constant port embedded: `curlee_port_inb((uint16_t)(0x3FD))` /
-    // `curlee_port_outb((uint16_t)(0x3F8), (v))`. The front-end guarantees the
-    // port is a constant literal, so the emitted call passes a compile-time
-    // constant.
+    // port argument embedded: `curlee_port_inb((uint16_t)(0x3FD))` for a
+    // constant port, `curlee_port_inw((uint16_t)(io_base + 0x0C))` for a
+    // runtime port (issue #276). The "Nd" asm constraint uses an 8-bit
+    // immediate for constant ports in 0..255 and the DX register otherwise,
+    // so runtime ports automatically emit the DX-register form — the helpers
+    // need no change.
     std::string emit_expr_node(const PortIOExpr& expr, Span span)
     {
-        const std::string port = strip_underscores(expr.port_lexeme);
+        // A constant literal port (single IntExpr token) emits the stripped
+        // lexeme, byte-identical to the pre-#276 output; a runtime port emits
+        // the general expression text.
+        const std::string port = emit_expr_as_text(*expr.port);
+        if (!diags_.empty())
+        {
+            return "0";
+        }
         const std::string helper = "curlee_" + std::string(expr.op);
 
         if (expr.op.rfind("port_in", 0) == 0)

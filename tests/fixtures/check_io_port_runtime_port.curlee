@@ -1,0 +1,15 @@
+// Port I/O to a runtime-computed port (issue #276): a `let`-bound base plus a
+// constant offset, mirroring virtio_net.c's legacy-virtio register access
+// (`outw(io_base + VIRTIO_PCI_QUEUE_SEL, qsel)`, `io_base` from a PCI BAR
+// probe). The port expression is Int-typed; the verifier lowers it as an
+// opaque extra argument to the uninterpreted read/write functions, and reads
+// with a runtime port stay opaque (no contract can see through them).
+// Verifies with zero obligations.
+fn main(pm: cap phys.mem) -> U16 {
+  unsafe {
+    let io_base: Int = 49152;             // runtime-discovered I/O BAR base
+    let qsel: Int = 0;                    // VIRTIO_PCI_QUEUE_SEL = 0x0E
+    port_outw(io_base + 0x0E, qsel);      // outw(io_base + QUEUE_SEL, qsel)
+    return port_inw(io_base + 0x0C);      // inw(io_base + QUEUE_NUM)
+  }
+}

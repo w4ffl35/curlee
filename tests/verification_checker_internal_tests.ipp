@@ -1571,16 +1571,18 @@ int main()
     }
 
     {
-        // x86 port I/O (issue #269): lower_expr on the six builtins must produce
-        // opaque ExprValues (reads: Int term; writes: Unit) with no axioms, and
-        // the constant-port + integer-value rules are enforced in the verifier
-        // too (defense in depth, mirroring Phys).
+        // x86 port I/O (issue #269/#276): lower_expr on the six builtins must
+        // produce opaque ExprValues (reads: Int term; writes: Unit) with no
+        // axioms, and the constant/runtime-port + integer-value rules are
+        // enforced in the verifier too (defense in depth, mirroring Phys).
         const curlee::source::Span s{.start = 0, .end = 1};
 
-        auto read_ok = [&](std::string_view op, std::string_view port_lexeme)
+        auto port_lit = [&](std::string_view lexeme)
+        { return make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = lexeme})); };
+
+        auto read_ok = [&](std::string_view op, std::unique_ptr<curlee::parser::Expr> port)
         {
-            auto e =
-                make_expr(s, curlee::parser::PortIOExpr{.op = op, .port_lexeme = port_lexeme});
+            auto e = make_expr(s, curlee::parser::PortIOExpr{.op = op, .port = std::move(port)});
             auto r = v.lower_expr(e);
             if (!std::holds_alternative<curlee::verification::ExprValue>(r))
             {
@@ -1588,13 +1590,13 @@ int main()
             }
         };
 
-        auto write_ok = [&](std::string_view op, std::string_view port_lexeme)
+        auto write_ok = [&](std::string_view op, std::unique_ptr<curlee::parser::Expr> port)
         {
             auto value = make_expr(s, curlee::parser::IntExpr{.lexeme = "1"});
-            auto e = make_expr(
-                s, curlee::parser::PortIOExpr{.op = op,
-                                              .port_lexeme = port_lexeme,
-                                              .value = make_expr_ptr(std::move(value))});
+            auto e =
+                make_expr(s, curlee::parser::PortIOExpr{.op = op,
+                                                        .port = std::move(port),
+                                                        .value = make_expr_ptr(std::move(value))});
             auto r = v.lower_expr(e);
             if (!std::holds_alternative<curlee::verification::ExprValue>(r))
             {
@@ -1603,32 +1605,52 @@ int main()
         };
 
         // All three widths for reads and writes (covers port_width_for_op "b"/"w"/"l").
-        read_ok("port_inb", "0x3FD");
-        read_ok("port_inw", "0x1CF");
-        read_ok("port_inl", "0xCFC");
-        write_ok("port_outb", "0x3F8");
-        write_ok("port_outw", "0x1CE");
-        write_ok("port_outl", "0xCF8");
+        read_ok("port_inb", port_lit("0x3FD"));
+        read_ok("port_inw", port_lit("0x1CF"));
+        read_ok("port_inl", port_lit("0xCFC"));
+        write_ok("port_outb", port_lit("0x3F8"));
+        write_ok("port_outw", port_lit("0x1CE"));
+        write_ok("port_outl", port_lit("0xCF8"));
 
         // Underscore-separated port: '_' is stripped before handing the lexeme to Z3.
-        read_ok("port_inb", "0x3F_8");
+        read_ok("port_inb", port_lit("0x3F_8"));
 
         // Repeated same-width calls exercise the cached func_decl branch in
         // port_in_fn/port_out_fn.
-        read_ok("port_inb", "0x3F9");
-        write_ok("port_outb", "0x3F9");
+        read_ok("port_inb", port_lit("0x3F9"));
+        write_ok("port_outb", port_lit("0x3F9"));
 
-        // Non-literal port -> hard error.
+        // Runtime port (issue #276): a let-bound base plus a constant offset
+        // lowers to an opaque term passed as the extra uninterpreted-function
+        // argument. Bind `io_base` first so lower_expr resolves the name.
+        v.declare_var("io_base", curlee::types::TypeKind::Int);
+        auto runtime_port_read = make_expr(
+            s, curlee::parser::BinaryExpr{
+                   .op = TokenKind::Plus,
+                   .lhs = make_expr_ptr(make_expr(s, curlee::parser::NameExpr{.name = "io_base"})),
+                   .rhs = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "0x0E"}))});
+        read_ok("port_inw", make_expr_ptr(std::move(runtime_port_read)));
+        auto runtime_port_write = make_expr(
+            s, curlee::parser::BinaryExpr{
+                   .op = TokenKind::Plus,
+                   .lhs = make_expr_ptr(make_expr(s, curlee::parser::NameExpr{.name = "io_base"})),
+                   .rhs = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "0x0E"}))});
+        write_ok("port_outw", make_expr_ptr(std::move(runtime_port_write)));
+
+        // Unbound runtime-port name -> the name itself fails to lower (the
+        // front-end reports the undefined name; the verifier errors here too).
         auto bad_port = make_expr(
-            s, curlee::parser::PortIOExpr{.op = "port_inb", .port_lexeme = "base"});
+            s, curlee::parser::PortIOExpr{
+                   .op = "port_inb",
+                   .port = make_expr_ptr(make_expr(s, curlee::parser::NameExpr{.name = "base"}))});
         if (!std::holds_alternative<curlee::diag::Diagnostic>(v.lower_expr(bad_port)))
         {
-            fail("expected lower_expr(port read, non-literal port) to error");
+            fail("expected lower_expr(port read, unknown port name) to error");
         }
 
         // Unknown builtin name (width.empty()) -> hard error.
-        auto bad_op = make_expr(
-            s, curlee::parser::PortIOExpr{.op = "port_inx", .port_lexeme = "0x3FD"});
+        auto bad_op =
+            make_expr(s, curlee::parser::PortIOExpr{.op = "port_inx", .port = port_lit("0x3FD")});
         if (!std::holds_alternative<curlee::diag::Diagnostic>(v.lower_expr(bad_op)))
         {
             fail("expected lower_expr(unknown port builtin) to error");
@@ -1636,13 +1658,23 @@ int main()
 
         // Write value must be an integer expression.
         auto bool_value = make_expr(s, curlee::parser::BoolExpr{.value = true});
-        auto bad_val = make_expr(
-            s, curlee::parser::PortIOExpr{.op = "port_outb",
-                                          .port_lexeme = "0x3F8",
-                                          .value = make_expr_ptr(std::move(bool_value))});
+        auto bad_val =
+            make_expr(s, curlee::parser::PortIOExpr{.op = "port_outb",
+                                                    .port = port_lit("0x3F8"),
+                                                    .value = make_expr_ptr(std::move(bool_value))});
         if (!std::holds_alternative<curlee::diag::Diagnostic>(v.lower_expr(bad_val)))
         {
             fail("expected lower_expr(port write, non-integer value) to error");
+        }
+
+        // A non-Int runtime port expression -> hard error (defense in depth).
+        auto bool_port = make_expr(
+            s, curlee::parser::PortIOExpr{
+                   .op = "port_inb",
+                   .port = make_expr_ptr(make_expr(s, curlee::parser::BoolExpr{.value = true}))});
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(v.lower_expr(bool_port)))
+        {
+            fail("expected lower_expr(port read, non-Int port) to error");
         }
     }
 
@@ -1653,42 +1685,45 @@ int main()
         // binary wrappers and predicates through call/unary/binary/group shapes.
         const curlee::source::Span s{.start = 0, .end = 1};
 
+        auto port_read_expr = [&]()
+        {
+            return make_expr(
+                s, curlee::parser::PortIOExpr{.op = "port_inb",
+                                              .port = make_expr_ptr(make_expr(
+                                                  s, curlee::parser::IntExpr{.lexeme = "0x3FD"}))});
+        };
+
         curlee::parser::LetStmt ls;
         ls.name = "lsr";
         ls.type = curlee::parser::TypeName{.span = s, .name = "U8"};
-        ls.value = make_expr(
-            s, curlee::parser::PortIOExpr{.op = "port_inb", .port_lexeme = "0x3FD"});
+        ls.value = port_read_expr();
         v.check_stmt_node(ls, s, curlee::types::TypeKind::Unit);
-        if (v.opaque_read_vars_.count("lsr") == 0 ||
-            v.opaque_port_read_vars_.count("lsr") == 0)
+        if (v.opaque_read_vars_.count("lsr") == 0 || v.opaque_port_read_vars_.count("lsr") == 0)
         {
             fail("expected port read binding to be marked opaque");
         }
 
         // expr_is_port_opaque_read through GroupExpr.
-        auto port_read =
-            make_expr(s, curlee::parser::PortIOExpr{.op = "port_inb", .port_lexeme = "0x3FD"});
-        auto grouped = make_expr(
-            s, curlee::parser::GroupExpr{.inner = make_expr_ptr(std::move(port_read))});
+        auto port_read = port_read_expr();
+        auto grouped =
+            make_expr(s, curlee::parser::GroupExpr{.inner = make_expr_ptr(std::move(port_read))});
         if (!v.expr_is_port_opaque_read(grouped))
         {
             fail("expected grouped port read to be port-opaque");
         }
 
         // expr_is_port_opaque_read through UnaryExpr (rhs).
-        auto port_read2 =
-            make_expr(s, curlee::parser::PortIOExpr{.op = "port_inb", .port_lexeme = "0x3FD"});
-        auto unary = make_expr(
-            s, curlee::parser::UnaryExpr{.op = TokenKind::Minus,
-                                         .rhs = make_expr_ptr(std::move(port_read2))});
+        auto port_read2 = port_read_expr();
+        auto unary =
+            make_expr(s, curlee::parser::UnaryExpr{.op = TokenKind::Minus,
+                                                   .rhs = make_expr_ptr(std::move(port_read2))});
         if (!v.expr_is_port_opaque_read(unary))
         {
             fail("expected unary-wrapped port read to be port-opaque");
         }
 
         // expr_is_port_opaque_read through BinaryExpr (lhs).
-        auto port_read3 =
-            make_expr(s, curlee::parser::PortIOExpr{.op = "port_inb", .port_lexeme = "0x3FD"});
+        auto port_read3 = port_read_expr();
         auto bin_lhs = make_expr(
             s, curlee::parser::BinaryExpr{
                    .op = TokenKind::Plus,
@@ -1700,8 +1735,7 @@ int main()
         }
 
         // expr_is_port_opaque_read through BinaryExpr (rhs).
-        auto port_read4 =
-            make_expr(s, curlee::parser::PortIOExpr{.op = "port_inb", .port_lexeme = "0x3FD"});
+        auto port_read4 = port_read_expr();
         auto bin_rhs = make_expr(
             s, curlee::parser::BinaryExpr{
                    .op = TokenKind::Plus,

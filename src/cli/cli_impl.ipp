@@ -144,8 +144,9 @@ void print_build_usage(std::ostream& out)
     out << "  - Supported: Int, Bool, U8/U16/U32/U64 arithmetic, structs/enums (storable\n";
     out << "    payloads only), match, if/else, while, verified contracts, extern fn,\n";
     out << "    Phys<T> + read()/write() and the x86 port I/O builtins\n";
-    out << "    (port_inb/port_outb/port_inw/port_outw/port_inl/port_outl, constant ports\n";
-    out << "    only) under `unsafe` with `cap phys.mem`.\n";
+    out << "    (port_inb/port_outb/port_inw/port_outw/port_inl/port_outl; constant or\n";
+    out << "    let-bound-base + constant-offset ports, issue #276) under `unsafe` with\n";
+    out << "    `cap phys.mem`.\n";
     out << "  - Rejected: print, String, Vec, python_ffi, and all hosted builtins; Phys/Unit\n";
     out << "    cannot be stored (struct fields, enum payloads), returned, or used as\n";
     out << "    parameters.\n";

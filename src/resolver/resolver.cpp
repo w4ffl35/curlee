@@ -660,8 +660,13 @@ class Resolver
 
     void resolve_expr_node(const curlee::parser::PortIOExpr& e, Span)
     {
-        // The port is a compile-time literal (no variable references). The
-        // out* value is a general expression and may reference variables.
+        // The port is a general Int expression (issue #276) and may reference
+        // variables (a let-bound base); the out* value is also a general
+        // expression.
+        if (e.port != nullptr)
+        {
+            resolve_expr(*e.port);
+        }
         if (e.value != nullptr)
         {
             resolve_expr(*e.value);

@@ -40,16 +40,13 @@ static inline void curlee_port_outl(uint16_t port, uint32_t value)
     __asm__ volatile("outl %0, %1" ::"a"(value), "Nd"(port));
 }
 
-uint32_t curlee_main(void);
+uint16_t curlee_main(void);
 
-uint32_t curlee_main(void)
+uint16_t curlee_main(void)
 {
-    curlee_port_outb((uint16_t)(0x3FB), (0x03));
-    uint8_t lsr = curlee_port_inb((uint16_t)(0x3FD));
-    curlee_port_outb((uint16_t)(0x3F8), (lsr));
-    curlee_port_outw((uint16_t)(0x1CE), (0x0004));
-    curlee_port_inw((uint16_t)(0x1CF));
-    curlee_port_outl((uint16_t)(0xCF8), (0x80000000));
-    return curlee_port_inl((uint16_t)(0xCFC));
+    int64_t io_base = 49152;
+    int64_t qsel = 0;
+    curlee_port_outw((uint16_t)((io_base + 0x0E)), (qsel));
+    return curlee_port_inw((uint16_t)((io_base + 0x0C)));
 }
 

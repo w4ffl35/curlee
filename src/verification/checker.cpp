@@ -1110,6 +1110,17 @@ class Verifier
                 using Node = std::decay_t<decltype(node)>;
                 if constexpr (std::is_same_v<Node, curlee::parser::IntExpr>)
                 {
+                    // Hex/underscore lexemes (PhysAddrLiteral forms, e.g.
+                    // `0x0E` inside a runtime port offset or a write() value)
+                    // are not accepted by Z3's numeral parser, so convert them
+                    // to a plain decimal numeral first (issue #276: a runtime
+                    // port like `io_base + 0x0E` lowers through here).
+                    const auto decimal = parse_port_literal(node.lexeme);
+                    if (decimal.has_value())
+                    {
+                        return ExprValue{solver_.context().int_val(static_cast<int64_t>(*decimal)),
+                                         TypeKind::Int, true};
+                    }
                     const std::string literal(node.lexeme);
                     return ExprValue{solver_.context().int_val(literal.c_str()), TypeKind::Int,
                                      true};
@@ -1417,28 +1428,50 @@ class Verifier
                 }
                 else if constexpr (std::is_same_v<Node, PortIOExpr>)
                 {
-                    // Second-line enforcement: the port must be a constant literal.
-                    // The front-end guarantees this, but the verifier does not trust the AST.
-                    if (!is_phys_address_literal(node.port_lexeme))
-                    {
-                        return error_at(e.span, "port I/O address must be a constant literal");
-                    }
                     const std::string_view width = port_width_for_op(node.op);
                     if (width.empty())
                     {
                         return error_at(e.span,
                                         "unknown port I/O builtin '" + std::string(node.op) + "'");
                     }
-                    // The port lowers to its constant integer value. Hex and
-                    // underscore forms are converted to a decimal numeral because
-                    // Z3's rational parser does not accept them.
-                    const auto port_value = parse_port_literal(node.port_lexeme);
-                    if (!port_value.has_value())
+
+                    // The port is an extra argument to the uninterpreted
+                    // read/write functions (issue #276). Constant literal ports
+                    // keep today's behavior: they lower to their integer value
+                    // (hex/underscore forms are converted to a decimal numeral
+                    // because Z3's rational parser does not accept them).
+                    // Runtime ports (a let-bound base plus a constant offset,
+                    // the virtio_net.c pattern) lower to an opaque term; reads
+                    // stay opaque because no axioms constrain port_in_<b|w|l>.
+                    if (node.port == nullptr) // GCOVR_EXCL_LINE
                     {
-                        return error_at(e.span, "port I/O address must be a constant literal");
+                        return error_at(e.span, "missing port I/O address"); // GCOVR_EXCL_LINE
                     }
-                    const z3::expr port_term =
-                        solver_.context().int_val(static_cast<int>(*port_value));
+                    z3::expr port_term = solver_.context().int_val(0);
+                    if (const auto* lit = std::get_if<curlee::parser::IntExpr>(&node.port->node);
+                        lit != nullptr && is_phys_address_literal(lit->lexeme))
+                    {
+                        const auto port_value = parse_port_literal(lit->lexeme);
+                        if (!port_value.has_value())
+                        {
+                            return error_at(e.span, "port I/O address must be a constant literal");
+                        }
+                        port_term = solver_.context().int_val(static_cast<int>(*port_value));
+                    }
+                    else
+                    {
+                        auto port_res = lower_expr(*node.port);
+                        if (std::holds_alternative<Diagnostic>(port_res))
+                        {
+                            return std::get<Diagnostic>(std::move(port_res));
+                        }
+                        auto port_val = std::get<ExprValue>(std::move(port_res));
+                        if (port_val.kind != TypeKind::Int)
+                        {
+                            return error_at(e.span, "port I/O address must be an Int expression");
+                        }
+                        port_term = port_val.expr;
+                    }
 
                     if (node.op.rfind("port_out", 0) == 0)
                     {
@@ -1921,7 +1954,13 @@ class Verifier
                 }
                 else if constexpr (std::is_same_v<Node, PortIOExpr>)
                 {
-                    // Port I/O is not a function call; scan the out* value for calls.
+                    // Port I/O is not a function call; scan the port expression
+                    // (issue #276: it is a general Int expression) and the out*
+                    // value for calls.
+                    if (node.port)
+                    {
+                        check_expr_for_calls(*node.port, nullptr);
+                    }
                     if (node.value)
                     {
                         check_expr_for_calls(*node.value, nullptr);

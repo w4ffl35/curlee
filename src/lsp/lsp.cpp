@@ -982,6 +982,10 @@ const curlee::parser::Expr* find_expr_at(const curlee::parser::Expr& expr, std::
     }
     else if (const auto* port_io = std::get_if<curlee::parser::PortIOExpr>(&expr.node))
     {
+        if (port_io->port)
+        {
+            best = find_expr_at(*port_io->port, offset, best);
+        }
         if (port_io->value)
         {
             best = find_expr_at(*port_io->value, offset, best);
@@ -1066,6 +1070,10 @@ const curlee::parser::Expr* find_call_expr_at(const curlee::parser::Expr& expr, 
     }
     else if (const auto* port_io = std::get_if<curlee::parser::PortIOExpr>(&expr.node))
     {
+        if (port_io->port)
+        {
+            best = find_call_expr_at(*port_io->port, offset, best);
+        }
         if (port_io->value)
         {
             best = find_call_expr_at(*port_io->value, offset, best);
