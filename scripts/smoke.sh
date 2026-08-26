@@ -111,6 +111,14 @@ run_smoke_for_preset() {
   expect_ok "check: run_success.curlee" "$bin" check tests/fixtures/run_success.curlee
   expect_ok "run: run_success.curlee" "$bin" run tests/fixtures/run_success.curlee
 
+  # Issue #270: bitwise operators and modulo.
+  expect_ok "check: check_bitwise_ops.curlee" "$bin" check tests/fixtures/check_bitwise_ops.curlee
+  expect_ok "run: check_bitwise_ops.curlee" "$bin" run tests/fixtures/check_bitwise_ops.curlee
+  expect_ok "check: check_bitwise_modulo.curlee" "$bin" check tests/fixtures/check_bitwise_modulo.curlee
+  expect_ok "run: check_bitwise_modulo.curlee" "$bin" run tests/fixtures/check_bitwise_modulo.curlee
+  expect_ok "check: check_bitwise_equivalence.curlee" "$bin" check tests/fixtures/check_bitwise_equivalence.curlee
+  expect_ok "run: check_bitwise_equivalence.curlee" "$bin" run tests/fixtures/check_bitwise_equivalence.curlee
+
   # Examples (also expected success).
   expect_ok "check: mvp_run_int" "$bin" check examples/mvp_run_int.curlee
   expect_ok "run: mvp_run_control_flow" "$bin" run examples/mvp_run_control_flow.curlee

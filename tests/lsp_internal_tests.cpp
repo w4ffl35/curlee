@@ -235,6 +235,35 @@ int main()
         {
             fail("expected token_op_to_string(Slash) to return /");
         }
+        // Bitwise operators and modulo (issue #270).
+        if (token_op_to_string(curlee::lexer::TokenKind::Amp) != "&")
+        {
+            fail("expected token_op_to_string(Amp) to return &");
+        }
+        if (token_op_to_string(curlee::lexer::TokenKind::Pipe) != "|")
+        {
+            fail("expected token_op_to_string(Pipe) to return |");
+        }
+        if (token_op_to_string(curlee::lexer::TokenKind::Caret) != "^")
+        {
+            fail("expected token_op_to_string(Caret) to return ^");
+        }
+        if (token_op_to_string(curlee::lexer::TokenKind::Tilde) != "~")
+        {
+            fail("expected token_op_to_string(Tilde) to return ~");
+        }
+        if (token_op_to_string(curlee::lexer::TokenKind::ShiftLeft) != "<<")
+        {
+            fail("expected token_op_to_string(ShiftLeft) to return <<");
+        }
+        if (token_op_to_string(curlee::lexer::TokenKind::ShiftRight) != ">>")
+        {
+            fail("expected token_op_to_string(ShiftRight) to return >>");
+        }
+        if (token_op_to_string(curlee::lexer::TokenKind::Percent) != "%")
+        {
+            fail("expected token_op_to_string(Percent) to return %");
+        }
 
         curlee::parser::Pred p_true{.span = curlee::source::Span{.start = 0, .end = 0},
                                     .node = curlee::parser::PredBool{.value = true}};

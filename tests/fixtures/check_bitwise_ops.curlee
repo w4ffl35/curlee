@@ -1,0 +1,44 @@
+// Issue #270: bitwise operators (& | ^ ~ << >>) type-check and verify on Int,
+// and are accepted on the unsigned element kinds (U8/U16/U32/U64) in
+// freestanding/phys contexts.
+fn pack_flags(v: Int) -> Int [
+  requires 0 <= v && v < 256;
+  ensures result == ((v << 4) | (v >> 4));
+] {
+  return (v << 4) | (v >> 4);
+}
+
+fn mask_low_nibble(v: Int) -> Int [
+  requires 0 <= v && v < 256;
+  ensures result == (v & 15);
+] {
+  return v & 15;
+}
+
+fn flip_bits(v: Int) -> Int [
+  requires 0 <= v && v < 16;
+  ensures result == (~v);
+] {
+  return ~v;
+}
+
+fn xor_swap_parts(v: Int) -> Int [
+  requires 0 <= v && v < 256;
+  ensures result == ((v & 15) ^ (v >> 4));
+] {
+  return (v & 15) ^ (v >> 4);
+}
+
+fn main() -> Int [
+  ensures result == 0;
+] {
+  let f: Int = pack_flags(7);
+  let m: Int = mask_low_nibble(165);
+  let t: Int = flip_bits(5);
+  let x: Int = xor_swap_parts(165);
+  if (f == 112 && m == 5 && t == -6 && x == 15) {
+    return 0;
+  } else {
+    return 1;
+  }
+}

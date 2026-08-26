@@ -658,7 +658,9 @@ int main()
     }
 
     {
-        // Expression lowering: '/' is not supported by the solver-side expression language.
+        // Expression lowering: '/' now lowers to Z3 Euclidean division (issue #270).
+        // An unconstrained x can violate `result > 0` (x = -1 gives x / 2 = -1), so
+        // the ensures still fails, but via the contract, not an unsupported-op error.
         const std::string source = "fn bad_div(x: Int) -> Int [ ensures result > 0; ] {\n"
                                    "  return x / 2;\n"
                                    "}\n"
@@ -667,12 +669,12 @@ int main()
         const auto verified = verify_program(source, "division unsupported in verification expr");
         if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
         {
-            fail("expected verification to fail for division unsupported in verification expr");
+            fail("expected verification to fail for division in verification expr");
         }
         const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
-        if (!has_message_substr(diags, "unsupported binary operator in expression"))
+        if (!has_message_substr(diags, "ensures clause not satisfied"))
         {
-            fail("expected unsupported binary operator diagnostic for division");
+            fail("expected ensures clause diagnostic for division");
         }
     }
 
@@ -1877,6 +1879,123 @@ fn main() -> Int
         if (!has_message_substr(diags, "recursive call: fuel cost is not bounded"))
         {
             fail("expected recursion fuel diagnostic");
+        }
+    }
+
+    {
+        // Bitwise operators (issue #270): each operator verifies when the
+        // ensures matches the body expression (bit-precise 64-bit model).
+        const std::string source = "fn bit_ops(x: Int) -> Int [\n"
+                                   "  requires 0 <= x && x < 256;\n"
+                                   "  ensures result == ((x & 15) | (x ^ 3));\n"
+                                   "] {\n"
+                                   "  return (x & 15) | (x ^ 3);\n"
+                                   "}\n"
+                                   "fn shifts(x: Int) -> Int [\n"
+                                   "  requires 0 <= x && x < 256;\n"
+                                   "  ensures result == ((x << 2) >> 4);\n"
+                                   "] {\n"
+                                   "  return (x << 2) >> 4;\n"
+                                   "}\n"
+                                   "fn complement(x: Int) -> Int [\n"
+                                   "  ensures result == (~x);\n"
+                                   "] {\n"
+                                   "  return ~x;\n"
+                                   "}\n"
+                                   "fn main() -> Int [ ensures result == 0; ] {\n"
+                                   "  bit_ops(0);\n"
+                                   "  shifts(1);\n"
+                                   "  complement(5);\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "bitwise ops verification");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification to succeed for bitwise ops");
+        }
+    }
+
+    {
+        // Modulo identity (issue #270): a % b == a - (a / b) * b for
+        // non-negative operands (Z3 div/mod axioms).
+        const std::string source = "fn mod_id(a: Int, b: Int) -> Int [\n"
+                                   "  requires 0 <= a && 0 < b;\n"
+                                   "  ensures result == a - (a / b) * b;\n"
+                                   "] {\n"
+                                   "  return a % b;\n"
+                                   "}\n"
+                                   "fn main() -> Int [ ensures result == 0; ] {\n"
+                                   "  mod_id(17, 5);\n"
+                                   "  mod_id(0, 1);\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "modulo identity verification");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification to succeed for modulo identity");
+        }
+    }
+
+    {
+        // Glyph bit-extraction equivalence (issue #270): the shift-based form
+        // (bits >> 3) & 1 agrees with the division-based workaround
+        // bits - (bits / 16) * 16 >= 8 for every nibble value.
+        const std::string source = "fn glyph_shift(bits: Int) -> Int [\n"
+                                   "  requires 0 <= bits && bits < 16;\n"
+                                   "  ensures result == ((bits >> 3) & 1);\n"
+                                   "] {\n"
+                                   "  return (bits >> 3) & 1;\n"
+                                   "}\n"
+                                   "fn glyph_div(bits: Int) -> Bool [\n"
+                                   "  requires 0 <= bits && bits < 16;\n"
+                                   "  ensures result == (bits - (bits / 16) * 16 >= 8);\n"
+                                   "] {\n"
+                                   "  return bits - (bits / 16) * 16 >= 8;\n"
+                                   "}\n"
+                                   "fn glyph_equiv(bits: Int) -> Int [\n"
+                                   "  requires 0 <= bits && bits < 16;\n"
+                                   "  ensures result == 0;\n"
+                                   "] {\n"
+                                   "  let s: Int = glyph_shift(bits);\n"
+                                   "  let d: Bool = glyph_div(bits);\n"
+                                   "  if ((s & 1) != 0) {\n"
+                                   "    if (d) { return 0; } else { return 1; }\n"
+                                   "  } else {\n"
+                                   "    if (!d) { return 0; } else { return 1; }\n"
+                                   "  }\n"
+                                   "}\n"
+                                   "fn main() -> Int [ ensures result == 0; ] {\n"
+                                   "  glyph_equiv(0);\n"
+                                   "  glyph_equiv(15);\n"
+                                   "  return 0;\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "glyph equivalence verification");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification to succeed for glyph equivalence");
+        }
+    }
+
+    {
+        // Big-endian pack helper (issue #270): ns_wr32-style byte extraction
+        // with >> and & verifies against a constant-folded call.
+        const std::string source = "fn ns_wr32_top(v: Int) -> Int [\n"
+                                   "  ensures result == ((v >> 24) & 255);\n"
+                                   "] {\n"
+                                   "  return (v >> 24) & 255;\n"
+                                   "}\n"
+                                   "fn main() -> Int [ ensures result == 0; ] {\n"
+                                   "  let t: Int = ns_wr32_top(287454020);\n"
+                                   "  if (t == 17) { return 0; } else { return 1; }\n"
+                                   "}\n";
+
+        const auto verified = verify_program(source, "big-endian pack verification");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected verification to succeed for big-endian pack");
         }
     }
 

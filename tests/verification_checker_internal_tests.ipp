@@ -61,10 +61,38 @@ int main()
     using curlee::lexer::TokenKind;
 
     {
-        // token_to_string: cover Slash and default.
+        // token_to_string: cover arithmetic, bitwise (issue #270), and default.
         if (curlee::verification::token_to_string(TokenKind::Slash) != "/")
         {
             fail("token_to_string(Slash) mismatch");
+        }
+        if (curlee::verification::token_to_string(TokenKind::Percent) != "%")
+        {
+            fail("token_to_string(Percent) mismatch");
+        }
+        if (curlee::verification::token_to_string(TokenKind::Amp) != "&")
+        {
+            fail("token_to_string(Amp) mismatch");
+        }
+        if (curlee::verification::token_to_string(TokenKind::Pipe) != "|")
+        {
+            fail("token_to_string(Pipe) mismatch");
+        }
+        if (curlee::verification::token_to_string(TokenKind::Caret) != "^")
+        {
+            fail("token_to_string(Caret) mismatch");
+        }
+        if (curlee::verification::token_to_string(TokenKind::Tilde) != "~")
+        {
+            fail("token_to_string(Tilde) mismatch");
+        }
+        if (curlee::verification::token_to_string(TokenKind::ShiftLeft) != "<<")
+        {
+            fail("token_to_string(ShiftLeft) mismatch");
+        }
+        if (curlee::verification::token_to_string(TokenKind::ShiftRight) != ">>")
+        {
+            fail("token_to_string(ShiftRight) mismatch");
         }
         if (curlee::verification::token_to_string(TokenKind::Identifier) != "<op>")
         {
@@ -789,17 +817,101 @@ int main()
             fail("expected lower_expr(int * bool) to error");
         }
 
-        // Unsupported binary operator: '/'
-        auto e_lhs4 = make_expr(s, curlee::parser::IntExpr{.lexeme = "1"});
-        auto e_rhs4 = make_expr(s, curlee::parser::IntExpr{.lexeme = "2"});
-        auto e_div =
-            make_expr(s, curlee::parser::BinaryExpr{.op = TokenKind::Slash,
-                                                    .lhs = make_expr_ptr(std::move(e_lhs4)),
-                                                    .rhs = make_expr_ptr(std::move(e_rhs4))});
-        auto r_div = v.lower_expr(e_div);
-        if (!std::holds_alternative<curlee::diag::Diagnostic>(r_div))
+        // Division (issue #270): '/' now lowers to Z3 Euclidean division.
+        auto e_div = make_expr(
+            s, curlee::parser::BinaryExpr{
+                   .op = TokenKind::Slash,
+                   .lhs = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "7"})),
+                   .rhs = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "2"}))});
+        if (!std::holds_alternative<curlee::verification::ExprValue>(v.lower_expr(e_div)))
         {
-            fail("expected lower_expr(div) to error");
+            fail("expected lower_expr(7/2) to succeed");
+        }
+        // Division type mismatch: bool / int errors.
+        auto e_div_bad = make_expr(
+            s, curlee::parser::BinaryExpr{
+                   .op = TokenKind::Slash,
+                   .lhs = make_expr_ptr(make_expr(s, curlee::parser::BoolExpr{.value = true})),
+                   .rhs = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "2"}))});
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(v.lower_expr(e_div_bad)))
+        {
+            fail("expected lower_expr(bool / int) to error");
+        }
+
+        // Modulo (issue #270): '%' lowers to Z3 Euclidean modulo.
+        auto e_mod = make_expr(
+            s, curlee::parser::BinaryExpr{
+                   .op = TokenKind::Percent,
+                   .lhs = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "17"})),
+                   .rhs = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "5"}))});
+        if (!std::holds_alternative<curlee::verification::ExprValue>(v.lower_expr(e_mod)))
+        {
+            fail("expected lower_expr(17%5) to succeed");
+        }
+        // Modulo type mismatch: int % bool errors.
+        auto e_mod_bad = make_expr(
+            s, curlee::parser::BinaryExpr{
+                   .op = TokenKind::Percent,
+                   .lhs = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "17"})),
+                   .rhs = make_expr_ptr(make_expr(s, curlee::parser::BoolExpr{.value = true}))});
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(v.lower_expr(e_mod_bad)))
+        {
+            fail("expected lower_expr(int % bool) to error");
+        }
+
+        // Bitwise ops (issue #270): '&', '|', '^' lower via the 64-bit
+        // bit-vector model.
+        for (const auto op : {TokenKind::Amp, TokenKind::Pipe, TokenKind::Caret,
+                              TokenKind::ShiftLeft, TokenKind::ShiftRight})
+        {
+            auto e_bit = make_expr(
+                s, curlee::parser::BinaryExpr{
+                       .op = op,
+                       .lhs = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "15"})),
+                       .rhs = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "3"}))});
+            if (!std::holds_alternative<curlee::verification::ExprValue>(v.lower_expr(e_bit)))
+            {
+                fail("expected lower_expr(bitwise op) to succeed");
+            }
+        }
+        // Bitwise type mismatch: bool & int errors.
+        auto e_bit_bad = make_expr(
+            s, curlee::parser::BinaryExpr{
+                   .op = TokenKind::Amp,
+                   .lhs = make_expr_ptr(make_expr(s, curlee::parser::BoolExpr{.value = true})),
+                   .rhs = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "3"}))});
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(v.lower_expr(e_bit_bad)))
+        {
+            fail("expected lower_expr(bool & int) to error");
+        }
+        // Bitwise type mismatch on the rhs: int & bool errors (covers the
+        // rhs operand-kind check in lower_expr).
+        auto e_bit_bad_rhs = make_expr(
+            s, curlee::parser::BinaryExpr{
+                   .op = TokenKind::Amp,
+                   .lhs = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "3"})),
+                   .rhs = make_expr_ptr(make_expr(s, curlee::parser::BoolExpr{.value = true}))});
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(v.lower_expr(e_bit_bad_rhs)))
+        {
+            fail("expected lower_expr(int & bool) to error");
+        }
+
+        // Unary bitwise complement (issue #270): '~' lowers to -x - 1.
+        auto e_not_rhs = make_expr(s, curlee::parser::IntExpr{.lexeme = "5"});
+        auto e_bnot = make_expr(s, curlee::parser::UnaryExpr{.op = TokenKind::Tilde,
+                                                             .rhs = make_expr_ptr(std::move(e_not_rhs))});
+        if (!std::holds_alternative<curlee::verification::ExprValue>(v.lower_expr(e_bnot)))
+        {
+            fail("expected lower_expr(~5) to succeed");
+        }
+        // Unary '~' type mismatch: ~bool errors.
+        auto e_bnot_bad_rhs = make_expr(s, curlee::parser::BoolExpr{.value = true});
+        auto e_bnot_bad =
+            make_expr(s, curlee::parser::UnaryExpr{.op = TokenKind::Tilde,
+                                                   .rhs = make_expr_ptr(std::move(e_bnot_bad_rhs))});
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(v.lower_expr(e_bnot_bad)))
+        {
+            fail("expected lower_expr(~bool) to error");
         }
 
         // Call expressions unsupported.
@@ -2705,6 +2817,122 @@ int main()
             fail("expected check_function with no-arg Phys param to complete without diagnostics");
         }
         v.functions_.erase("phys_param_no_arg");
+    }
+
+    {
+        // Predicate lowering for bitwise/modulo/division (issue #270):
+        // lower_predicate exercises the new operator cases in
+        // predicate_lowering.cpp, including their type-error branches.
+        const curlee::source::Span s{.start = 0, .end = 1};
+        z3::context ctx;
+        curlee::verification::LoweringContext lctx(ctx);
+
+        // '/': Int operands lower to Z3 division (Int-valued clause).
+        auto p_div = make_pred(
+            s, curlee::parser::PredBinary{
+                   .op = TokenKind::Slash,
+                   .lhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "7"})),
+                   .rhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "2"}))});
+        if (!std::holds_alternative<z3::expr>(
+                curlee::verification::lower_predicate_int(p_div, lctx)))
+        {
+            fail("expected lower_predicate_int(7 / 2) to succeed");
+        }
+
+        // '/': Bool operand rejected.
+        auto p_div_bad = make_pred(
+            s, curlee::parser::PredBinary{
+                   .op = TokenKind::Slash,
+                   .lhs = make_pred_ptr(make_pred(s, curlee::parser::PredBool{.value = true})),
+                   .rhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "2"}))});
+        {
+            const auto res = curlee::verification::lower_predicate(p_div_bad, lctx);
+            if (!std::holds_alternative<curlee::diag::Diagnostic>(res))
+            {
+                fail("expected lower_predicate(bool / int) to error");
+            }
+        }
+
+        // '%': Int operands lower to Z3 Euclidean modulo.
+        auto p_mod = make_pred(
+            s, curlee::parser::PredBinary{
+                   .op = TokenKind::Percent,
+                   .lhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "17"})),
+                   .rhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "5"}))});
+        if (!std::holds_alternative<z3::expr>(
+                curlee::verification::lower_predicate_int(p_mod, lctx)))
+        {
+            fail("expected lower_predicate_int(17 % 5) to succeed");
+        }
+
+        // '%': non-Int operand rejected (rhs side).
+        auto p_mod_bad = make_pred(
+            s, curlee::parser::PredBinary{
+                   .op = TokenKind::Percent,
+                   .lhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "17"})),
+                   .rhs = make_pred_ptr(make_pred(s, curlee::parser::PredBool{.value = true}))});
+        {
+            const auto res = curlee::verification::lower_predicate(p_mod_bad, lctx);
+            if (!std::holds_alternative<curlee::diag::Diagnostic>(res))
+            {
+                fail("expected lower_predicate(int % bool) to error");
+            }
+        }
+
+        // Bitwise '&', '|', '^', '<<', '>>': Int operands lower via the
+        // 64-bit bit-vector model.
+        for (const auto op : {TokenKind::Amp, TokenKind::Pipe, TokenKind::Caret,
+                              TokenKind::ShiftLeft, TokenKind::ShiftRight})
+        {
+            auto p_bit = make_pred(
+                s, curlee::parser::PredBinary{
+                       .op = op,
+                       .lhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "15"})),
+                       .rhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "3"}))});
+            if (!std::holds_alternative<z3::expr>(
+                    curlee::verification::lower_predicate_int(p_bit, lctx)))
+            {
+                fail("expected lower_predicate_int(bitwise op) to succeed");
+            }
+        }
+
+        // Bitwise '&': Bool operand rejected.
+        auto p_bit_bad = make_pred(
+            s, curlee::parser::PredBinary{
+                   .op = TokenKind::Amp,
+                   .lhs = make_pred_ptr(make_pred(s, curlee::parser::PredBool{.value = true})),
+                   .rhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "3"}))});
+        {
+            const auto res = curlee::verification::lower_predicate(p_bit_bad, lctx);
+            if (!std::holds_alternative<curlee::diag::Diagnostic>(res))
+            {
+                fail("expected lower_predicate(bool & int) to error");
+            }
+        }
+
+        // Unary '~': Int operand lowers to -x - 1.
+        auto p_not_rhs = make_pred(s, curlee::parser::PredInt{.lexeme = "5"});
+        auto p_bnot = make_pred(s, curlee::parser::PredUnary{
+                                       .op = TokenKind::Tilde,
+                                       .rhs = make_pred_ptr(std::move(p_not_rhs))});
+        if (!std::holds_alternative<z3::expr>(
+                curlee::verification::lower_predicate_int(p_bnot, lctx)))
+        {
+            fail("expected lower_predicate_int(~5) to succeed");
+        }
+
+        // Unary '~': Bool operand rejected.
+        auto p_bnot_bad_rhs = make_pred(s, curlee::parser::PredBool{.value = true});
+        auto p_bnot_bad = make_pred(
+            s, curlee::parser::PredUnary{.op = TokenKind::Tilde,
+                                         .rhs = make_pred_ptr(std::move(p_bnot_bad_rhs))});
+        {
+            const auto res = curlee::verification::lower_predicate(p_bnot_bad, lctx);
+            if (!std::holds_alternative<curlee::diag::Diagnostic>(res))
+            {
+                fail("expected lower_predicate(~bool) to error");
+            }
+        }
     }
 
     std::cout << "OK\n";

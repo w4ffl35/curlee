@@ -762,6 +762,151 @@ int main()
     }
 
     {
+        // Bitwise binary operator typing (issue #270): '&' rejects Bool.
+        const std::string source = "fn main() -> Int { return true & 1; }";
+
+        const auto diags = type_check_should_fail(source, "bitwise '&' type mismatch test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("bitwise operators expect Int or unsigned integer") !=
+                std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected bitwise '&' type diagnostic");
+        }
+    }
+
+    {
+        // Bitwise binary operator typing (issue #270): same-typed Int operands
+        // type check cleanly; '1 | 2' must succeed.
+        const std::string source = "fn main() -> Int { return 1 | 2; }";
+        (void)type_check_should_succeed(source, "bitwise '|' typing test");
+    }
+
+    {
+        // Bitwise binary operator typing (issue #270): rhs-side mismatch
+        // ('1 & true') is also rejected by the operand-kind check.
+        const std::string source = "fn main() -> Int { return 1 & true; }";
+
+        const auto diags = type_check_should_fail(source, "bitwise rhs type mismatch test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("bitwise operators expect Int or unsigned integer") !=
+                std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected bitwise rhs type diagnostic");
+        }
+    }
+
+    {
+        // Bitwise binary operator typing (issue #270): mismatched operand types
+        // are rejected (U8 element kind is not the same type as Int).
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let x: U8 = phys<U8>(0x4000).read();
+    return x & 1;
+  }
+})";
+
+        const auto diags = type_check_should_fail(source, "bitwise mixed-kind typing test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("bitwise operators expect matching operand types") !=
+                std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected bitwise matching-type diagnostic");
+        }
+    }
+
+    {
+        // Bitwise unary operator typing (issue #270): '~' rejects Bool.
+        const std::string source = "fn main() -> Int { return ~true; }";
+
+        const auto diags = type_check_should_fail(source, "unary '~' type mismatch test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("unary '~' expects Int or an unsigned integer type") !=
+                std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected unary '~' type diagnostic");
+        }
+    }
+
+    {
+        // Bitwise unary operator typing (issue #270): '~' on an unsigned element
+        // kind (U32, from a Phys read) is accepted and keeps the type.
+        const std::string source = R"(fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let x: U32 = phys<U32>(0x4000).read();
+    let y: U32 = ~x;
+    return 0;
+  }
+})";
+        (void)type_check_should_succeed(source, "unary '~' on U32 typing test");
+    }
+
+    {
+        // Modulo typing (issue #270): '%' expects Int operands.
+        const std::string source = "fn main() -> Int { return true % 2; }";
+
+        const auto diags = type_check_should_fail(source, "'%' type mismatch test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("'%' expects Int operands") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected '%' type diagnostic");
+        }
+    }
+
+    {
+        // Modulo typing (issue #270): rhs-side mismatch is also rejected.
+        const std::string source = "fn main() -> Int { return 1 % true; }";
+
+        const auto diags = type_check_should_fail(source, "'%' rhs type mismatch test");
+        bool saw = false;
+        for (const auto& d : diags)
+        {
+            if (d.message.find("'%' expects Int operands") != std::string::npos)
+            {
+                saw = true;
+            }
+        }
+        if (!saw)
+        {
+            fail("expected '%' rhs type diagnostic");
+        }
+    }
+
+    {
         // Builtins: user programs cannot declare builtin function 'print'.
         const std::string source = "fn print(x: Int) -> Unit { } fn main() -> Unit { }";
 

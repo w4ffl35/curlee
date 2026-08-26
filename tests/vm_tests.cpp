@@ -1521,6 +1521,13 @@ int main(int argc, char** argv)
     expect_underflow(OpCode::LessEqual, "less-equal");
     expect_underflow(OpCode::Greater, "greater");
     expect_underflow(OpCode::GreaterEqual, "greater-equal");
+    expect_underflow(OpCode::BitAnd, "bitand");
+    expect_underflow(OpCode::BitOr, "bitor");
+    expect_underflow(OpCode::BitXor, "bitxor");
+    expect_underflow(OpCode::BitNot, "bitnot");
+    expect_underflow(OpCode::ShiftLeft, "shl");
+    expect_underflow(OpCode::ShiftRight, "shr");
+    expect_underflow(OpCode::Mod, "mod");
 
     // One-operand underflow paths for binary ops (distinct from empty-stack underflow).
     expect_underflow_one_operand(OpCode::Add, "add");
@@ -1533,6 +1540,12 @@ int main(int argc, char** argv)
     expect_underflow_one_operand(OpCode::LessEqual, "less-equal");
     expect_underflow_one_operand(OpCode::Greater, "greater");
     expect_underflow_one_operand(OpCode::GreaterEqual, "greater-equal");
+    expect_underflow_one_operand(OpCode::BitAnd, "bitand");
+    expect_underflow_one_operand(OpCode::BitOr, "bitor");
+    expect_underflow_one_operand(OpCode::BitXor, "bitxor");
+    expect_underflow_one_operand(OpCode::ShiftLeft, "shl");
+    expect_underflow_one_operand(OpCode::ShiftRight, "shr");
+    expect_underflow_one_operand(OpCode::Mod, "mod");
 
     {
         Chunk chunk;
@@ -2105,6 +2118,252 @@ int main(int argc, char** argv)
         if (res.ok || res.error != "neg expects Int")
         {
             fail("expected neg type error");
+        }
+    }
+
+    {
+        // Bitwise and (issue #270): 0x0F & 0x33 == 3.
+        const curlee::source::Span span{.start = 31, .end = 32};
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(15), span);
+        chunk.emit_constant(Value::int_v(51), span);
+        chunk.emit(OpCode::BitAnd, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (!res.ok || res.value.kind != ValueKind::Int || res.value.int_value != 3)
+        {
+            fail("expected bitand 3");
+        }
+    }
+
+    {
+        // Bitwise or (issue #270): 15 | 51 == 63.
+        const curlee::source::Span span{.start = 32, .end = 33};
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(15), span);
+        chunk.emit_constant(Value::int_v(51), span);
+        chunk.emit(OpCode::BitOr, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (!res.ok || res.value.kind != ValueKind::Int || res.value.int_value != 63)
+        {
+            fail("expected bitor 63");
+        }
+    }
+
+    {
+        // Bitwise xor (issue #270): 15 ^ 51 == 60.
+        const curlee::source::Span span{.start = 33, .end = 34};
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(15), span);
+        chunk.emit_constant(Value::int_v(51), span);
+        chunk.emit(OpCode::BitXor, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (!res.ok || res.value.kind != ValueKind::Int || res.value.int_value != 60)
+        {
+            fail("expected bitxor 60");
+        }
+    }
+
+    {
+        // Bitwise not (issue #270): ~15 == -16.
+        const curlee::source::Span span{.start = 34, .end = 35};
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(15), span);
+        chunk.emit(OpCode::BitNot, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (!res.ok || res.value.kind != ValueKind::Int || res.value.int_value != -16)
+        {
+            fail("expected bitnot -16");
+        }
+    }
+
+    {
+        // Left shift (issue #270): 1 << 4 == 16.
+        const curlee::source::Span span{.start = 35, .end = 36};
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1), span);
+        chunk.emit_constant(Value::int_v(4), span);
+        chunk.emit(OpCode::ShiftLeft, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (!res.ok || res.value.kind != ValueKind::Int || res.value.int_value != 16)
+        {
+            fail("expected shl 16");
+        }
+    }
+
+    {
+        // Right shift (issue #270): 65280 >> 8 == 255.
+        const curlee::source::Span span{.start = 36, .end = 37};
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(65280), span);
+        chunk.emit_constant(Value::int_v(8), span);
+        chunk.emit(OpCode::ShiftRight, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (!res.ok || res.value.kind != ValueKind::Int || res.value.int_value != 255)
+        {
+            fail("expected shr 255");
+        }
+    }
+
+    {
+        // Shift amount out of range (issue #270): 1 << 64 rejected.
+        const curlee::source::Span span{.start = 37, .end = 38};
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1), span);
+        chunk.emit_constant(Value::int_v(64), span);
+        chunk.emit(OpCode::ShiftLeft, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "shift amount out of range")
+        {
+            fail("expected shift amount out of range error");
+        }
+    }
+
+    {
+        // Modulo (issue #270): 17 % 5 == 2.
+        const curlee::source::Span span{.start = 38, .end = 39};
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(17), span);
+        chunk.emit_constant(Value::int_v(5), span);
+        chunk.emit(OpCode::Mod, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (!res.ok || res.value.kind != ValueKind::Int || res.value.int_value != 2)
+        {
+            fail("expected mod 2");
+        }
+    }
+
+    {
+        // Modulo by zero (issue #270): rejected.
+        const curlee::source::Span span{.start = 39, .end = 40};
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(17), span);
+        chunk.emit_constant(Value::int_v(0), span);
+        chunk.emit(OpCode::Mod, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "modulo by zero")
+        {
+            fail("expected modulo by zero error");
+        }
+    }
+
+    {
+        // Bitwise ops type errors (issue #270): & rejects Bool operand.
+        const curlee::source::Span span{.start = 40, .end = 41};
+        Chunk chunk;
+        chunk.emit_constant(Value::bool_v(true), span);
+        chunk.emit_constant(Value::int_v(1), span);
+        chunk.emit(OpCode::BitAnd, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "bitand expects Int")
+        {
+            fail("expected bitand type error");
+        }
+    }
+
+    {
+        // Bitwise ops type errors (issue #270): each remaining op rejects a
+        // Bool operand (covers the operand-kind error branches).
+        struct TypeErr
+        {
+            OpCode op;
+            std::string msg;
+        };
+        const TypeErr cases[] = {
+            {OpCode::BitOr, "bitor expects Int"},
+            {OpCode::BitXor, "bitxor expects Int"},
+            {OpCode::BitNot, "bitnot expects Int"},
+            {OpCode::ShiftLeft, "shl expects Int"},
+            {OpCode::ShiftRight, "shr expects Int"},
+            {OpCode::Mod, "mod expects Int"},
+        };
+        for (const auto& c : cases)
+        {
+            const curlee::source::Span span{.start = 40, .end = 41};
+            Chunk chunk;
+            chunk.emit_constant(Value::bool_v(true), span);
+            chunk.emit_constant(Value::bool_v(true), span);
+            chunk.emit(c.op, span);
+            chunk.emit(OpCode::Return, span);
+
+            VM vm;
+            const auto res = vm.run(chunk);
+            if (res.ok || res.error != c.msg)
+            {
+                fail("expected " + c.msg + " error");
+            }
+        }
+    }
+
+    {
+        // Modulo by zero (issue #270): '17 % 0' rejected even for valid kinds.
+        const curlee::source::Span span{.start = 40, .end = 41};
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(17), span);
+        chunk.emit_constant(Value::int_v(0), span);
+        chunk.emit(OpCode::Mod, span);
+        chunk.emit(OpCode::Return, span);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "modulo by zero")
+        {
+            fail("expected modulo by zero error");
+        }
+    }
+
+    {
+        // Shift amount out of range (issue #270): negative amount rejected
+        // for both shift directions.
+        struct ShiftCase
+        {
+            OpCode op;
+        };
+        const ShiftCase shift_cases[] = {{OpCode::ShiftLeft}, {OpCode::ShiftRight}};
+        for (const auto& c : shift_cases)
+        {
+            const curlee::source::Span span{.start = 40, .end = 41};
+            Chunk chunk;
+            chunk.emit_constant(Value::int_v(1), span);
+            chunk.emit_constant(Value::int_v(-1), span);
+            chunk.emit(c.op, span);
+            chunk.emit(OpCode::Return, span);
+
+            VM vm;
+            const auto res = vm.run(chunk);
+            if (res.ok || res.error != "shift amount out of range")
+            {
+                fail("expected shift amount out of range error");
+            }
         }
     }
 

@@ -730,5 +730,133 @@ int main()
         expect_diag(p.parse_struct_literal_after_name(fake_name));
     }
 
+    // --- Bitwise/shift/modulo expression parsing (issue #270).
+    {
+        // '1 | 2' parses to a BinaryExpr rooted at Pipe.
+        auto toks = make_tokens({
+            {TokenKind::IntLiteral, "1"},
+            {TokenKind::Pipe, "|"},
+            {TokenKind::IntLiteral, "2"},
+        });
+        curlee::parser::Parser p(toks);
+        auto res = p.parse_expr();
+        if (!std::holds_alternative<curlee::parser::Expr>(res))
+        {
+            fail("expected '1 | 2' to parse");
+        }
+        const auto& e = std::get<curlee::parser::Expr>(res);
+        const auto* bin = std::get_if<curlee::parser::BinaryExpr>(&e.node);
+        if (bin == nullptr || bin->op != TokenKind::Pipe)
+        {
+            fail("expected '|' root for '1 | 2'");
+        }
+    }
+
+    // Precedence (C order): '&' binds tighter than '|', so '1 | 2 & 3' is
+    // '1 | (2 & 3)'.
+    {
+        auto toks = make_tokens({
+            {TokenKind::IntLiteral, "1"},
+            {TokenKind::Pipe, "|"},
+            {TokenKind::IntLiteral, "2"},
+            {TokenKind::Amp, "&"},
+            {TokenKind::IntLiteral, "3"},
+        });
+        curlee::parser::Parser p(toks);
+        auto res = p.parse_expr();
+        if (!std::holds_alternative<curlee::parser::Expr>(res))
+        {
+            fail("expected '1 | 2 & 3' to parse");
+        }
+        const auto& e = std::get<curlee::parser::Expr>(res);
+        const auto* bin = std::get_if<curlee::parser::BinaryExpr>(&e.node);
+        if (bin == nullptr || bin->op != TokenKind::Pipe)
+        {
+            fail("expected '|' root for '1 | 2 & 3'");
+        }
+        const auto* rhs = std::get_if<curlee::parser::BinaryExpr>(&bin->rhs->node);
+        if (rhs == nullptr || rhs->op != TokenKind::Amp)
+        {
+            fail("expected '&' as rhs of '|' for '1 | 2 & 3'");
+        }
+    }
+
+    // Error propagation: '1 | ;' — the '|' rhs fails to parse.
+    {
+        auto toks = make_tokens({
+            {TokenKind::IntLiteral, "1"},
+            {TokenKind::Pipe, "|"},
+            {TokenKind::Semicolon, ";"},
+        });
+        curlee::parser::Parser p(toks);
+        expect_diag(p.parse_expr());
+    }
+
+    // Error propagation: '1 ^ ;' — the '^' rhs fails to parse.
+    {
+        auto toks = make_tokens({
+            {TokenKind::IntLiteral, "1"},
+            {TokenKind::Caret, "^"},
+            {TokenKind::Semicolon, ";"},
+        });
+        curlee::parser::Parser p(toks);
+        expect_diag(p.parse_expr());
+    }
+
+    // Error propagation: '1 & ;' — the '&' rhs fails to parse.
+    {
+        auto toks = make_tokens({
+            {TokenKind::IntLiteral, "1"},
+            {TokenKind::Amp, "&"},
+            {TokenKind::Semicolon, ";"},
+        });
+        curlee::parser::Parser p(toks);
+        expect_diag(p.parse_expr());
+    }
+
+    // Predicate bitwise: '1 | ;' in a predicate propagates the rhs diagnostic.
+    {
+        auto toks = make_tokens({
+            {TokenKind::IntLiteral, "1"},
+            {TokenKind::Pipe, "|"},
+            {TokenKind::Semicolon, ";"},
+        });
+        curlee::parser::Parser p(toks);
+        expect_diag(p.parse_pred());
+    }
+
+    // Predicate bitwise: '1 & ;' in a predicate propagates the rhs diagnostic.
+    {
+        auto toks = make_tokens({
+            {TokenKind::IntLiteral, "1"},
+            {TokenKind::Amp, "&"},
+            {TokenKind::Semicolon, ";"},
+        });
+        curlee::parser::Parser p(toks);
+        expect_diag(p.parse_pred());
+    }
+
+    // Predicate bitwise: '1 ^ ;' in a predicate propagates the rhs diagnostic.
+    {
+        auto toks = make_tokens({
+            {TokenKind::IntLiteral, "1"},
+            {TokenKind::Caret, "^"},
+            {TokenKind::Semicolon, ";"},
+        });
+        curlee::parser::Parser p(toks);
+        expect_diag(p.parse_pred());
+    }
+
+    // Predicate shift: '1 << ;' in a predicate propagates the rhs diagnostic.
+    {
+        auto toks = make_tokens({
+            {TokenKind::IntLiteral, "1"},
+            {TokenKind::ShiftLeft, "<<"},
+            {TokenKind::Semicolon, ";"},
+        });
+        curlee::parser::Parser p(toks);
+        expect_diag(p.parse_pred());
+    }
+
     return 0;
 }
