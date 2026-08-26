@@ -38,6 +38,7 @@ using curlee::parser::PhysExpr;
 using curlee::parser::PhysReadExpr;
 using curlee::parser::PhysWriteExpr;
 using curlee::parser::PortIOExpr;
+using curlee::parser::RuntimePhysReadExpr;
 using curlee::parser::ReturnStmt;
 using curlee::parser::ScopedNameExpr;
 using curlee::parser::Stmt;
@@ -459,6 +460,19 @@ CostResult CostModel::cost_expr(const Expr& expr, const LoweringContext& ctx,
                     return std::get<Diagnostic>(std::move(value));
                 }
                 return ctx.ctx.int_val(1) + std::get<z3::expr>(port) + std::get<z3::expr>(value);
+            }
+            else if constexpr (std::is_same_v<Node, RuntimePhysReadExpr>)
+            {
+                // Runtime phys read: the address expression cost (a leaf load
+                // is 1, e.g. a let-bound base) + the dereferenced load
+                // instruction (1). Mirrors the PhysReadExpr costing, with the
+                // address expression replacing the Phys base (issue #279).
+                auto addr = cost_expr(*node.addr, ctx, fuel_table);
+                if (std::holds_alternative<Diagnostic>(addr))
+                {
+                    return std::get<Diagnostic>(std::move(addr));
+                }
+                return ctx.ctx.int_val(1) + std::get<z3::expr>(addr);
             }
             // Leaf nodes: flat instruction cost.
             return CostResult{ctx.ctx.int_val(static_cast<int>(leaf_instruction_cost(expr)))};

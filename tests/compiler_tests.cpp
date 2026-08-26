@@ -1930,6 +1930,37 @@ fn main() -> Int {
                                    .value = std::make_unique<Expr>(std::move(value))};
             expect_port_io_reject(std::move(root));
         }
+
+        // Runtime-address physical memory reads (issue #279) are freestanding-
+        // only: the VM emitter must reject phys_read_u32 nodes the same way it
+        // rejects Phys and port I/O nodes.
+        using curlee::parser::RuntimePhysReadExpr;
+
+        auto expect_runtime_phys_reject = [&](Expr root)
+        {
+            const auto emitted = run_with_expr(std::move(root));
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for RuntimePhysReadExpr node");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("physical memory reads are freestanding-only") ==
+                    std::string::npos)
+            {
+                fail("expected freestanding-only diagnostic for RuntimePhysReadExpr node");
+            }
+        };
+
+        {
+            // phys_read_u32(base) with a runtime address expression.
+            Expr addr;
+            addr.node = curlee::parser::IntExpr{.lexeme = "0x1_0000"};
+            Expr root;
+            root.node = RuntimePhysReadExpr{.op = "phys_read_u32",
+                                            .addr = std::make_unique<Expr>(std::move(addr))};
+            expect_runtime_phys_reject(std::move(root));
+        }
     }
 
     {

@@ -1858,6 +1858,84 @@ int main()
     }
 
     {
+        // Runtime-address physical memory reads (issue #279): the address is a
+        // general Int/U64 expression (not a compile-time literal), so the
+        // builtin lowers to the uninterpreted function phys_read_at_<kind> :
+        // Int -> Int with the lowered address term as its argument. All four
+        // widths must lower, unknown builtin names and non-integer addresses
+        // must error, and a let binding from a runtime phys read must be marked
+        // opaque (comparison/bit-test only, never contracted on).
+        const curlee::source::Span s{.start = 0, .end = 1};
+
+        auto runtime_phys_read_ok = [&](std::string_view op, std::string_view base_name)
+        {
+            // A runtime address: base + 4 (mutable cursor offset over the
+            // boot-stub-captured multiboot2 info base).
+            auto addr = make_expr(
+                s, curlee::parser::BinaryExpr{
+                       .op = TokenKind::Plus,
+                       .lhs = make_expr_ptr(
+                           make_expr(s, curlee::parser::NameExpr{.name = base_name})),
+                       .rhs = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "4"}))});
+            auto e = make_expr(s, curlee::parser::RuntimePhysReadExpr{
+                                      .op = op, .addr = make_expr_ptr(std::move(addr))});
+            auto r = v.lower_expr(e);
+            if (!std::holds_alternative<curlee::verification::ExprValue>(r))
+            {
+                fail("expected lower_expr(runtime phys read) to succeed");
+            }
+        };
+
+        // All four widths (covers runtime_phys_read_element_kind).
+        v.declare_var("mb2_base", curlee::types::TypeKind::Int);
+        runtime_phys_read_ok("phys_read_u8", "mb2_base");
+        runtime_phys_read_ok("phys_read_u16", "mb2_base");
+        runtime_phys_read_ok("phys_read_u32", "mb2_base");
+        runtime_phys_read_ok("phys_read_u64", "mb2_base");
+
+        // Repeated same-kind calls exercise the cached func_decl branch in
+        // phys_read_at_fn.
+        runtime_phys_read_ok("phys_read_u32", "mb2_base");
+
+        // Unknown builtin name (element kind empty) -> hard error.
+        auto bad_op = make_expr(
+            s, curlee::parser::RuntimePhysReadExpr{
+                   .op = "phys_read_u128",
+                   .addr = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "0"}))});
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(v.lower_expr(bad_op)))
+        {
+            fail("expected lower_expr(unknown runtime phys read builtin) to error");
+        }
+
+        // Non-integer address -> hard error (defense in depth; the type
+        // checker reports the primary diagnostic).
+        auto bool_addr = make_expr(
+            s, curlee::parser::RuntimePhysReadExpr{
+                   .op = "phys_read_u32",
+                   .addr = make_expr_ptr(make_expr(s, curlee::parser::BoolExpr{.value = true}))});
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(v.lower_expr(bool_addr)))
+        {
+            fail("expected lower_expr(runtime phys read, Bool address) to error");
+        }
+
+        // A let binding initialized from a runtime phys read is marked opaque
+        // (mirrors the Phys<T>.read()/port_in* rule): comparison/bit-test only,
+        // never contractable.
+        curlee::parser::LetStmt ls;
+        ls.name = "ls_rt_phys";
+        ls.type = curlee::parser::TypeName{.span = s, .name = "U8"};
+        ls.value = make_expr(
+            s, curlee::parser::RuntimePhysReadExpr{
+                   .op = "phys_read_u8",
+                   .addr = make_expr_ptr(make_expr(s, curlee::parser::NameExpr{.name = "mb2_base"}))});
+        v.check_stmt_node(ls, s, curlee::types::TypeKind::Unit);
+        if (v.opaque_read_vars_.count("ls_rt_phys") == 0)
+        {
+            fail("expected runtime phys read binding to be marked opaque");
+        }
+    }
+
+    {
         // is_phys_address_literal: empty lexeme -> false (line 208).
         if (curlee::verification::is_phys_address_literal(""))
         {

@@ -1,0 +1,9 @@
+// Runtime phys read addresses must be Int or U64 expressions (issue #279); a
+// Bool address is rejected.
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let b: Bool = true;
+    let v: U32 = phys_read_u32(b);
+  }
+  return 0;
+}

@@ -1,0 +1,40 @@
+// Runtime-address physical memory reads (issue #279): the mb2.c multiboot2
+// tag-walk pattern verifies cleanly. The base is a RUNTIME Int value (the
+// boot stub captures the multiboot2 info address into a global at boot time),
+// the cursor is a mutable Int advanced by assignment (#268), and reads are
+// opaque to the verifier — so they can be compared/bit-tested but never
+// contracted on. The mb2 gate `bpp == 32 && fb_addr != 0` is expressible.
+fn mb2_fb_tag_usable(mb2_info_addr: Int, pm: cap phys.mem) -> Int {
+  unsafe {
+    let p: Int = mb2_info_addr + 8;
+    let total: U32 = phys_read_u32(p);
+    if (total < 8) { return 0; }
+
+    let guard: Int = 0;
+    while (guard < 8)
+      [ invariant 0 <= guard && guard <= 8;
+        decreases 8 - guard; ]
+    {
+      let tag_type: U32 = phys_read_u32(p);
+      let tag_size: U32 = phys_read_u32(p + 4);
+      if (tag_type == 8) {
+        let bpp: U8 = phys_read_u8(p + 28);       // u8 bpp at +28
+        let fb_lo: U32 = phys_read_u32(p + 8);    // u64 fb_addr low half
+        let fb_hi: U32 = phys_read_u32(p + 12);   // u64 fb_addr high half
+        if (bpp == 32 && !(fb_lo == 0 && fb_hi == 0)) {
+          return 1;
+        }
+        return 0;
+      }
+      let sz: Int = tag_size + 0;              // widen U32 -> Int
+      let step: Int = (sz + 7) & ~7;           // p += (size + 7) & ~7U
+      p = p + step;
+      guard = guard + 1;
+    }
+    return 0;
+  }
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  return mb2_fb_tag_usable(65536, pm);
+}

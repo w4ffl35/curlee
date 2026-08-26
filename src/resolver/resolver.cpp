@@ -709,6 +709,17 @@ class Resolver
         }
     }
 
+    void resolve_expr_node(const curlee::parser::RuntimePhysReadExpr& e, Span)
+    {
+        // The address is a general Int/U64 expression (issue #279) and may
+        // reference variables (the runtime multiboot2 info base, a mutable
+        // byte cursor advanced by assignment).
+        if (e.addr != nullptr)
+        {
+            resolve_expr(*e.addr);
+        }
+    }
+
     void resolve_expr_node(const ScopedNameExpr&, Span)
     {
         // `Enum::Variant` is not a variable reference; do not call use_name().
@@ -809,6 +820,8 @@ bool is_builtin_call_name(std::string_view name)
         "variant_is",      "variant_unwrap",
         "port_inb",        "port_outb",       "port_inw",
         "port_outw",       "port_inl",        "port_outl",
+        "phys_read_u8",    "phys_read_u16",   "phys_read_u32",
+        "phys_read_u64",
     };
     return builtins.contains(name);
 }

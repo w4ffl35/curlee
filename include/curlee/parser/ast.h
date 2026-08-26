@@ -279,6 +279,38 @@ struct PortIOExpr
 }
 
 /**
+ * @brief Runtime-address physical memory read builtin: `phys_read_u8(addr)`,
+ * `phys_read_u16(addr)`, `phys_read_u32(addr)`, `phys_read_u64(addr)`.
+ *
+ * Unlike `Phys<T>` (whose address must be a compile-time literal), the
+ * address is a general Int/U64 expression (issue #279): a runtime value such
+ * as the multiboot2 info base the 32-bit boot stub captures into a global
+ * (`mb2_info_addr`), possibly plus a mutable byte cursor advanced by
+ * assignment (#268). The read is trusted/opaque to the verifier exactly like
+ * `Phys<T>.read()` and `port_in*`: no axioms constrain the returned value.
+ */
+struct RuntimePhysReadExpr
+{
+    // Builtin name as spelled in source (phys_read_u8/.../phys_read_u64).
+    std::string_view op;
+    // The address expression: a general Int/U64 expression (runtime allowed).
+    std::unique_ptr<Expr> addr;
+};
+
+/**
+ * @brief True if `name` is a runtime-address physical memory read builtin
+ * (`phys_read_u8`/`phys_read_u16`/`phys_read_u32`/`phys_read_u64`).
+ *
+ * Single source of truth for the runtime phys read builtin surface, shared by
+ * the parser, resolver, type checker, verifier, codegen and VM emitter.
+ */
+[[nodiscard]] inline bool is_runtime_phys_read_builtin_name(std::string_view name)
+{
+    return name == "phys_read_u8" || name == "phys_read_u16" ||
+           name == "phys_read_u32" || name == "phys_read_u64";
+}
+
+/**
  * @brief A general expression node with id, span and variant payload.
  */
 struct Expr
@@ -287,7 +319,7 @@ struct Expr
     curlee::source::Span span;
     std::variant<IntExpr, BoolExpr, StringExpr, NameExpr, UnaryExpr, BinaryExpr, CallExpr,
                  MemberExpr, GroupExpr, ScopedNameExpr, StructLiteralExpr, PhysExpr, PhysReadExpr,
-                 PhysWriteExpr, PortIOExpr, IndexExpr, ArrayLiteralExpr>
+                 PhysWriteExpr, PortIOExpr, RuntimePhysReadExpr, IndexExpr, ArrayLiteralExpr>
         node;
 };
 
