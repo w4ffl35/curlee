@@ -1,0 +1,28 @@
+// Large Int literals in [2^63, 2^64-1] (issue #276 review finding regression
+// guard): the verifier's IntExpr lowering must keep these literals positive
+// (decimal IntLiteral and hex/underscore PhysAddrLiteral forms) instead of
+// corrupting them to negative via a uint64 -> int64 narrowing. `-9223372036854775808`
+// (unary minus over the 2^63 literal) must stay exactly -(2^63).
+fn two_63_decimal() -> Int
+  [ ensures result > 0; ]
+{
+  return 9223372036854775808; // 2^63
+}
+
+fn two_63_hex() -> Int
+  [ ensures result > 0; ]
+{
+  return 0x8000000000000000; // 2^63 in hex (PhysAddrLiteral lexeme)
+}
+
+fn two_63_underscore() -> Int
+  [ ensures result > 0; ]
+{
+  return 9_223_372_036_854_775_808; // 2^63 with separators
+}
+
+fn min_int() -> Int
+  [ ensures result < 0; ]
+{
+  return -9223372036854775808; // -(2^63)
+}
