@@ -54,16 +54,18 @@ int64_t curlee_main(void);
 
 static int64_t curlee_vring_fill(void)
 {
-    int64_t rx_buf = 1048576;
-    uint64_t addr = rx_buf;
-    uint32_t len = curlee_port_inl((uint16_t)(0xCFC));
-    uint16_t flags = curlee_port_inw((uint16_t)(0x1CF));
-    curlee_net_vring_desc desc = ((curlee_net_vring_desc){ .addr = addr, .len = len, .flags = flags });
-    if (((((desc).flags + 0)) != 0))
     {
-        curlee_port_outb((uint16_t)(0x3F8), (0x41));
+        int64_t rx_buf = 1048576;
+        uint64_t addr = rx_buf;
+        uint32_t len = curlee_port_inl((uint16_t)(0xCFC));
+        uint16_t flags = curlee_port_inw((uint16_t)(0x1CF));
+        curlee_net_vring_desc desc = ((curlee_net_vring_desc){ .addr = addr, .len = len, .flags = flags });
+        if (((((desc).flags + 0)) != 0))
+        {
+            curlee_port_outb((uint16_t)(0x3F8), (0x41));
+        }
+        return ((desc).len + 0);
     }
-    return ((desc).len + 0);
 }
 
 static int64_t curlee_widen_probe(void)
@@ -80,14 +82,16 @@ static int64_t curlee_widen_probe(void)
 
 int64_t curlee_main(void)
 {
-    uint64_t w = 2097152;
-    uint32_t len = curlee_port_inl((uint16_t)(0xCFC));
-    uint16_t flags = curlee_port_inw((uint16_t)(0x1CF));
-    curlee_net_vring_desc d = ((curlee_net_vring_desc){ .addr = w, .len = len, .flags = flags });
-    if (((((d).len + 0)) == 0))
     {
-        curlee_port_outb((uint16_t)(0x3F8), (0x41));
+        uint64_t w = 2097152;
+        uint32_t len = curlee_port_inl((uint16_t)(0xCFC));
+        uint16_t flags = curlee_port_inw((uint16_t)(0x1CF));
+        curlee_net_vring_desc d = ((curlee_net_vring_desc){ .addr = w, .len = len, .flags = flags });
+        if (((((d).len + 0)) == 0))
+        {
+            curlee_port_outb((uint16_t)(0x3F8), (0x41));
+        }
+        return ((curlee_vring_fill() + curlee_widen_probe()) + 1);
     }
-    return ((curlee_vring_fill() + curlee_widen_probe()) + 1);
 }
 

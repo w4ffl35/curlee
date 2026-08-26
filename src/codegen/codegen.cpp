@@ -1652,16 +1652,30 @@ class CEmitter
         writer_.line(std::string(stmt.name) + "[" + index + "] = " + value + ";");
     }
 
+    // A Curlee `{ ... }` block is a lexical scope (the resolver, type checker
+    // and verifier all push a scope for it), so the emitted C must be a
+    // compound statement — NOT inlined into the enclosing scope. Inlining
+    // flattened two same-named shadowed declarations (e.g. `let q: [T; N]` in
+    // a nested block shadowing an outer `q`) into one C scope and produced
+    // `redefinition of 'q'` (issue #286 review round 1, inherited from #278).
     void emit_stmt_node(const BlockStmt& stmt, Span span)
     {
         (void)span;
+        writer_.open_brace();
         emit_block_stmts(*stmt.block);
+        writer_.close_brace();
     }
 
+    // `unsafe { ... }` is likewise a lexical scope in Curlee (the verifier
+    // checks its body in a pushed scope), so emit a C compound statement to
+    // preserve shadowing semantics in the generated C (issue #286 review
+    // round 1).
     void emit_stmt_node(const UnsafeStmt& stmt, Span span)
     {
         (void)span;
+        writer_.open_brace();
         emit_block_stmts(*stmt.body);
+        writer_.close_brace();
     }
 
     void emit_stmt_node(const IfStmt& stmt, Span span)

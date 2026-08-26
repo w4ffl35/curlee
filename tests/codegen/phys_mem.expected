@@ -7,9 +7,11 @@ uint32_t curlee_main(void);
 
 uint32_t curlee_main(void)
 {
-    /* unit binding fb */
-    (*(volatile uint32_t*)(uintptr_t)(0xFD000000)) = (0xFF8800);
-    uint32_t v = (*(volatile uint32_t*)(uintptr_t)(0xFD000000));
-    return v;
+    {
+        /* unit binding fb */
+        (*(volatile uint32_t*)(uintptr_t)(0xFD000000)) = (0xFF8800);
+        uint32_t v = (*(volatile uint32_t*)(uintptr_t)(0xFD000000));
+        return v;
+    }
 }
 

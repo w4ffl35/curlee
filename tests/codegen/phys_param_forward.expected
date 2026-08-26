@@ -9,19 +9,25 @@ uint32_t curlee_main(void);
 
 static uint32_t curlee_b(uint32_t* r)
 {
-    uint32_t v = (*(r));
-    (*(r)) = (v);
-    return (*(r));
+    {
+        uint32_t v = (*(r));
+        (*(r)) = (v);
+        return (*(r));
+    }
 }
 
 static uint32_t curlee_a(uint32_t* r)
 {
-    return curlee_b(r);
+    {
+        return curlee_b(r);
+    }
 }
 
 uint32_t curlee_main(void)
 {
-    /* unit binding reg */
-    return curlee_a((void*)(uintptr_t)(0x4000));
+    {
+        /* unit binding reg */
+        return curlee_a((void*)(uintptr_t)(0x4000));
+    }
 }
 

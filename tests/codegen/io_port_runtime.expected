@@ -44,9 +44,11 @@ uint16_t curlee_main(void);
 
 uint16_t curlee_main(void)
 {
-    int64_t io_base = 49152;
-    int64_t qsel = 0;
-    curlee_port_outw((uint16_t)((io_base + 0x0E)), (qsel));
-    return curlee_port_inw((uint16_t)((io_base + 0x0C)));
+    {
+        int64_t io_base = 49152;
+        int64_t qsel = 0;
+        curlee_port_outw((uint16_t)((io_base + 0x0E)), (qsel));
+        return curlee_port_inw((uint16_t)((io_base + 0x0C)));
+    }
 }
 

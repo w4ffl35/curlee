@@ -50,6 +50,15 @@ the generated C is linked against `runtime/rt.c` + `runtime/crt0.S` +
   alignment done as Int arithmetic on the addr_of value, and the raw
   alignment of static/local arrays measured and reported over COM1 (the
   language guarantees only element-type alignment; the driver must round up).
+- Shadowing regression (issue #286 review round 1): `addr_of`'s opaque
+  constant is keyed by the array BINDING, not its name, so a local shadowing
+  a static (or nested shadowed locals) lowers to DISTINCT constants — the
+  solver can no longer prove `addr_of(static q) == addr_of(local q)`. The
+  false-contract fixtures (`tests/fixtures/check_addr_of_shadow_static.curlee`
+  / `check_addr_of_shadow_local.curlee`) now FAIL `curlee check` with
+  "ensures clause not satisfied"; the honest shadow pattern checks cleanly
+  and the emitted C keeps each shadow in its own compound statement (see
+  `tests/codegen/shadow_arrays.curlee`).
 - `joeos_09_net_stack_globals.curlee` — the net_stack.c shim's shape (scalar
   phase/seq/port fields + a 256-byte response body, read/written from several
   functions across separate poll calls) in pure Curlee (issue #287).

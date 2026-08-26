@@ -7,26 +7,28 @@ int64_t curlee_main(void);
 
 int64_t curlee_main(void)
 {
-    int64_t mb2_info_addr = 65536;
-    int64_t p = (mb2_info_addr + 8);
-    uint32_t total = (*(volatile uint32_t*)(uintptr_t)(p));
-    if ((total < 8))
     {
+        int64_t mb2_info_addr = 65536;
+        int64_t p = (mb2_info_addr + 8);
+        uint32_t total = (*(volatile uint32_t*)(uintptr_t)(p));
+        if ((total < 8))
+        {
+            return 0;
+        }
+        uint32_t size = (*(volatile uint32_t*)(uintptr_t)((p + 4)));
+        int64_t step = (((((size + 0)) + 7)) & ~(7));
+        p = (p + step);
+        uint8_t bpp = (*(volatile uint8_t*)(uintptr_t)((p + 28)));
+        uint32_t fb_lo = (*(volatile uint32_t*)(uintptr_t)((p + 8)));
+        uint32_t fb_hi = (*(volatile uint32_t*)(uintptr_t)((p + 12)));
+        uint16_t pitch = (*(volatile uint16_t*)(uintptr_t)((p + 16)));
+        uint64_t wide = (*(volatile uint64_t*)(uintptr_t)((p + 24)));
+        uint64_t zero64 = 0;
+        if ((((bpp == 32) && !((((fb_lo == 0) && (fb_hi == 0))))) && !(((wide == zero64)))))
+        {
+            return (pitch + 0);
+        }
         return 0;
     }
-    uint32_t size = (*(volatile uint32_t*)(uintptr_t)((p + 4)));
-    int64_t step = (((((size + 0)) + 7)) & ~(7));
-    p = (p + step);
-    uint8_t bpp = (*(volatile uint8_t*)(uintptr_t)((p + 28)));
-    uint32_t fb_lo = (*(volatile uint32_t*)(uintptr_t)((p + 8)));
-    uint32_t fb_hi = (*(volatile uint32_t*)(uintptr_t)((p + 12)));
-    uint16_t pitch = (*(volatile uint16_t*)(uintptr_t)((p + 16)));
-    uint64_t wide = (*(volatile uint64_t*)(uintptr_t)((p + 24)));
-    uint64_t zero64 = 0;
-    if ((((bpp == 32) && !((((fb_lo == 0) && (fb_hi == 0))))) && !(((wide == zero64)))))
-    {
-        return (pitch + 0);
-    }
-    return 0;
 }
 

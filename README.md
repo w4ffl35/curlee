@@ -215,8 +215,10 @@ bootable **x86-64 multiboot2 kernel ELF**:
   identity paging (crt0.S), so the virtual address IS the physical address. The value flows
   into the runtime phys builtins as an `Int` address (issues #279/#285) and into a
   descriptor's `U64` field via the #277 widening. Gated like the other unsafe primitives
-  (`unsafe` + `cap phys.mem`) and **trusted/opaque** to the verifier: it lowers to a per-array
-  opaque `Int` constant, so the same array binding always yields the same address
+  (`unsafe` + `cap phys.mem`) and **trusted/opaque** to the verifier: it lowers to a per-binding
+  opaque `Int` constant (keyed by the array declaration, not its name — shadowed arrays that
+  share a name get distinct constants, so `addr_of(static q) == addr_of(local q)` is never
+  provable), so the same array binding always yields the same address
   (`a == addr_of(q)` is provable) but the numeric value is never assumed. MVP scope: the
   target must be a plain fixed-size array binding — no element addresses, no scalars, no
   pointer arithmetic (that remains out of scope). **Alignment guarantee:** the codegen places

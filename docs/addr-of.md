@@ -44,14 +44,20 @@ unsafe {
 - **Gating:** requires an `unsafe` block and `cap phys.mem`, mirroring
   `Phys<T>`, the port I/O builtins and the runtime phys builtins.
 - **Verifier semantics:** trusted/opaque. `addr_of(arr)` lowers to a
-  **per-array opaque `Int` constant** (created once per array binding per
-  function). The same array binding therefore always yields the **same**
-  address — `let a = addr_of(q); ...; a == addr_of(q)` is provable — but the
-  numeric **value** is never assumed by the solver (an `ensures` claiming a
-  specific address is unprovable, see `check_addr_of_opaque`). Unlike an MMIO
-  read, `addr_of` is not an *opaque read*: two `addr_of(q)` calls cannot
-  differ, so bindings from it are ordinary `Int` bindings with equality
-  facts.
+  **per-array opaque `Int` constant** keyed by the array **binding** (each
+  `let`/`static` declaration has a unique per-function binding id), created
+  once per binding per function. The same array binding therefore always
+  yields the **same** address — `let a = addr_of(q); ...; a == addr_of(q)` is
+  provable — but the numeric **value** is never assumed by the solver (an
+  `ensures` claiming a specific address is unprovable, see
+  `check_addr_of_opaque`). Two *different* arrays that share a name (a local
+  shadowing a static, or nested shadowed lets) get **distinct** constants, so
+  the solver can never prove `addr_of(static q) == addr_of(local q)` — a false
+  fact the emitted kernel would contradict at runtime (review round 1
+  soundness fix; regression fixtures `check_addr_of_shadow_static` /
+  `check_addr_of_shadow_local`). Unlike an MMIO read, `addr_of` is not an
+  *opaque read*: two `addr_of(q)` calls cannot differ, so bindings from it
+  are ordinary `Int` bindings with equality facts.
 
 ## Codegen
 
@@ -117,8 +123,12 @@ local `% 16 == 0` — none of which is a language guarantee).
 - Type/verifier: `tests/fixtures/check_addr_of.curlee` (positive),
   `check_addr_of_scalar` / `check_addr_of_element` /
   `check_addr_of_outside_unsafe` / `check_addr_of_opaque` (negative) +
-  goldens.
-- Codegen: `tests/codegen/addr_of.curlee` + `.expected` + freestanding
+  goldens. Shadowing (review round 1): `check_addr_of_shadow_static` /
+  `check_addr_of_shadow_local` (negative — the conflation regression),
+  `check_addr_of_shadow_scoped` / `check_addr_of_shadow_honest` (positive —
+  no scope leakage / no over-rejection).
+- Codegen: `tests/codegen/addr_of.curlee` + `shadow_arrays.curlee` (nested
+  shadowed arrays emit valid scoped C) + `.expected` + freestanding
   compile-smoke.
 - Fuel: `verification_checker_tests.cpp` prices `addr_of` as a 1-instruction
   leaf.
