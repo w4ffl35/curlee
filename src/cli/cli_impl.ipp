@@ -144,7 +144,8 @@ void print_build_usage(std::ostream& out)
     out << "freestanding subset (no hosted builtins):\n";
     out << "  - Supported: Int, Bool, U8/U16/U32/U64 arithmetic, structs/enums (storable\n";
     out << "    payloads only), match, if/else, while, verified contracts, extern fn,\n";
-    out << "    Phys<T> + read()/write(), the runtime-address reads\n";
+    out << "    module-level `static name: Type = expr;` state (issue #287), Phys<T> +\n";
+    out << "    read()/write(), the runtime-address reads\n";
     out << "    (phys_read_u8/u16/u32/u64; a general Int/U64 address, issue #279) and the\n";
     out << "    x86 port I/O builtins\n";
     out << "    (port_inb/port_outb/port_inw/port_outw/port_inl/port_outl; constant or\n";

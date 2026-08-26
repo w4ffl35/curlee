@@ -1604,9 +1604,10 @@ fn main() -> Unit {
         }
     }
 
-    // Top-level declaration error.
+    // Top-level declaration error (the message lists the accepted forms,
+    // which include module-level `static` since issue #287).
     expect_parse_error_contains("let x: Int = 1;\n",
-                                "expected 'import', 'struct', 'enum', or 'fn'");
+                                "expected 'import', 'struct', 'enum', 'static'");
 
     // Import declaration errors.
     expect_parse_error_contains("import ;\n", "expected module name after 'import'");

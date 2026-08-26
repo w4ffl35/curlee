@@ -1,0 +1,108 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #287: module-level mutable state (persists across separate function
+// calls) — freestanding C codegen. Each `static name: T = expr;` lowers to a
+// file-scope C `static` variable: `static <type> name = <init>;` for scalars,
+// `static <elem> name[N] = { ... };` for arrays. File-scope `static` is
+// exactly the linkage model Curlee models: initialized once, private to this
+// translation unit, persistent across separate calls into the module (a host
+// harness calling curlee_main() twice observes the second call seeing the
+// first call's writes — acceptance criterion 1's "call the entry point twice
+// and observe the second call sees the first call's mutation").
+//
+// Shapes covered:
+//   - vbe_state.c (issue #11): a probe writes 4 scalar globals, read later by
+//     a separate function (vbe_set / vbe_get).
+//   - net_stack.c (issue #12): scalar phase/seq/port fields + a 256-byte
+//     response body buffer, written from one function and read by another
+//     (ns_open / ns_poll).
+//   - fb.c tool_queue: a [Int; 8] ring array at module scope plus head/count
+//     bookkeeping, mutated from two functions (tool_push / tool_pop).
+//
+// The unsigned scalar fields use Int (an Int literal cannot initialize a U8
+// static, mirroring the `let` rule); only the byte arrays are unsigned, via
+// the #278 repeat-literal adaptation.
+
+static fb_addr: Int = 0;
+static fb_pitch: Int = 0;
+static fb_width: Int = 0;
+static fb_height: Int = 0;
+
+fn vbe_set(a: Int, p: Int, w: Int, h: Int) -> Unit {
+  fb_addr = a;
+  fb_pitch = p;
+  fb_width = w;
+  fb_height = h;
+  return;
+}
+
+fn vbe_get() -> Int {
+  return fb_addr + fb_pitch + fb_width + fb_height;
+}
+
+static conn_state: Int = 0;
+static seq: Int = 0;
+static ack: Int = 0;
+static local_port: Int = 0;
+static rx_phase: Int = 0;
+static response_body: [U8; 256] = [0; 256];
+
+fn ns_open(port: Int) -> Int {
+  local_port = port;
+  conn_state = 1;
+  seq = 0;
+  ack = 0;
+  return conn_state;
+}
+
+fn ns_poll() -> Int {
+  let i: Int = 0;
+  while (i < 4)
+    [ invariant 0 <= i && i <= 4;
+      decreases 4 - i; ]
+  {
+    response_body[i] = 0x41;
+    i = i + 1;
+  }
+  ack = seq;
+  rx_phase = 2;
+  conn_state = 0;
+  let first: U8 = response_body[0];
+  return first + ack + local_port;
+}
+
+static tool_queue: [Int; 8] = [0; 8];
+static tool_head: Int = 0;
+static tool_count: Int = 0;
+
+fn tool_push(v: Int) -> Unit {
+  tool_queue[tool_head % 8] = v;
+  tool_head = (tool_head + 1) % 8;
+  tool_count = tool_count + 1;
+  return;
+}
+
+fn tool_pop() -> Int {
+  let idx: Int = (tool_head + 8 - tool_count) % 8;
+  let v: Int = tool_queue[idx];
+  tool_count = tool_count - 1;
+  return v;
+}
+
+fn main() -> Int {
+  vbe_set(1, 2, 3, 4);
+  let vbe_total: Int = vbe_get(); // 1 + 2 + 3 + 4 = 10
+  let opened: Int = ns_open(1234); // 1
+  let polled: Int = ns_poll(); // 0x41 + 0 + 1234 = 1299
+  tool_push(10);
+  tool_push(20);
+  let popped: Int = tool_pop(); // 10
+  // First call returns 10 + 1 + 1299 + 10 = 1320. A host harness that calls
+  // curlee_main() a SECOND time observes cross-call persistence: the statics
+  // are file-scope C `static` variables (initialized once, not per call), so
+  // the second call starts from tool_head == 2 / tool_count == 1 and its
+  // tool_pop() drains the leftover slot 1 (20 from the first call), returning
+  // 10 + 1 + 1299 + 20 = 1330 — different from the first call, which is only
+  // possible because the storage survives across entry-point invocations.
+  return vbe_total + opened + polled + popped;
+}

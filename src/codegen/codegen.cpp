@@ -507,6 +507,15 @@ class CEmitter
             return diags_;
         }
 
+        // Module-level mutable state (issue #287): file-scope `static`
+        // variables, emitted before the function declarations so every
+        // function body sees them.
+        emit_statics();
+        if (!diags_.empty())
+        {
+            return diags_;
+        }
+
         // Forward declarations for all functions (C requires declaration
         // before use; no implicit declarations in strict C).
         emit_forward_decls();
@@ -1138,6 +1147,104 @@ class CEmitter
     // -----------------------------------------------------------------------
     // Functions
     // -----------------------------------------------------------------------
+
+    // Module-level mutable state (issue #287): each `static name: T = expr;`
+    // lowers to a file-scope C `static` variable — `static <C type> name =
+    // <init>;` for scalars, `static <elem> name[N] = { ... };` for arrays.
+    // File-scope `static` is exactly the linkage model Curlee models: the
+    // storage is initialized once, is private to this translation unit (the
+    // MVP has no cross-module extern mechanism), and persists across separate
+    // calls into the module. A local `let` shadowing a static emits the same
+    // raw name, which C resolves to the local (shadowing semantics match).
+    void emit_statics()
+    {
+        for (const auto& s : program_->statics)
+        {
+            if (s.type.is_array())
+            {
+                const std::string elem_c = c_type_for_type_name(s.type);
+                const std::string len = strip_underscores(*s.type.array_len);
+                const auto* arr = std::get_if<ArrayLiteralExpr>(&s.value.node);
+                if (arr == nullptr || arr->value == nullptr)
+                {
+                    push_error(s.span, "static array '" + std::string(s.name) +
+                                           "': initializer must be an array repeat "
+                                           "literal [v; N]");
+                    return;
+                }
+                // Zero-repeat shortcut: `static T name[N] = {0};` zero-fills all
+                // slots (mirrors the local-array let emission).
+                const auto* lit = std::get_if<curlee::parser::IntExpr>(&arr->value->node);
+                const bool zero_repeat =
+                    lit != nullptr &&
+                    lit->lexeme.find_first_not_of("0_") == std::string_view::npos;
+                std::string init;
+                if (zero_repeat)
+                {
+                    init = "{0}";
+                }
+                else
+                {
+                    const std::string elem = emit_expr_as_text(*arr->value);
+                    if (!diags_.empty())
+                    {
+                        return;
+                    }
+                    std::size_t count = 0;
+                    bool count_ok = false;
+                    try
+                    {
+                        count = std::stoull(len);
+                        count_ok = true;
+                    }
+                    catch (const std::exception&)
+                    {
+                        count_ok = false;
+                    }
+                    if (!count_ok || count == 0 || count > 4096)
+                    {
+                        push_error(s.span, "static array '" + std::string(s.name) +
+                                               "': invalid length '" + len + "'");
+                        return;
+                    }
+                    std::string list = "{";
+                    for (std::size_t i = 0; i < count; ++i)
+                    {
+                        if (i != 0)
+                        {
+                            list += ", ";
+                        }
+                        list += elem;
+                    }
+                    list += "}";
+                    init = std::move(list);
+                }
+                writer_.line("static " + elem_c + " " + std::string(s.name) + "[" + len + "] = " +
+                             init + ";");
+                continue;
+            }
+
+            const std::string c_type = c_type_for_type_name(s.type);
+            if (c_type == "void")
+            {
+                push_error(s.span, "static '" + std::string(s.name) + "': type '" +
+                                       std::string(s.type.name) +
+                                       "' is not supported in freestanding target");
+                return;
+            }
+            const std::string init = emit_expr_as_text(s.value);
+            if (!diags_.empty())
+            {
+                return;
+            }
+            writer_.line("static " + c_type + " " + std::string(s.name) + " = " + init + ";");
+        }
+
+        if (!program_->statics.empty())
+        {
+            writer_.newline();
+        }
+    }
 
     void emit_function(const Function& fn, bool is_main)
     {

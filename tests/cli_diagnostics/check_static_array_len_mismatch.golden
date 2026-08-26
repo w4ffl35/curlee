@@ -1,0 +1,8 @@
+tests/fixtures/check_static_array_len_mismatch.curlee:7:1: error: array type mismatch in static: expected [Int; 4], got [Int; 2]
+  |
+  | static a: [Int; 4] = [0; 2];
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/fixtures/check_static_array_len_mismatch.curlee:10:10: error: unknown name 'a'
+  |
+  |   return a[0];
+  |          ^^^^

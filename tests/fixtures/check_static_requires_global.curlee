@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #287: like ensures, a `requires` clause that mentions module-level
+// mutable state is unprovable (each function sees a fresh opaque symbol per
+// global) and must be rejected with a hard diagnostic. Expected error:
+//   "cannot prove requires on module-level mutable state (opaque to the
+//    verifier)"
+
+static counter: Int = 0;
+
+fn f() -> Int [
+  requires counter > 0;
+] {
+  return counter;
+}
+
+fn main() -> Int {
+  return f();
+}

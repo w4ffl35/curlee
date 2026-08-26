@@ -111,10 +111,23 @@ class Resolver
         push_scope();
         resolve_imports(program);
 
-        // First pass: declare top-level functions.
+        // First pass: declare module-level mutable state, then top-level
+        // functions (a static and a function sharing a name is a duplicate in
+        // the root scope, reported by declare).
+        for (const auto& s : program.statics)
+        {
+            declare(s.name, s.span, "duplicate static variable");
+        }
         for (const auto& f : program.functions)
         {
             declare(f.name, f.span, "duplicate function");
+        }
+
+        // Resolve static initializers (literal-only by type-checker rule, but
+        // resolve like any expression so uses are recorded).
+        for (const auto& s : program.statics)
+        {
+            resolve_expr(s.value);
         }
 
         // Second pass: resolve bodies.

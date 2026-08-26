@@ -1,0 +1,8 @@
+tests/fixtures/check_static_non_literal.curlee:9:17: error: static 'x': initializer must be a compile-time literal (Int, Bool, or [v; N] repeat)
+  |
+  | static x: Int = 1 + 2;
+  |                 ^^^^^
+tests/fixtures/check_static_non_literal.curlee:12:10: error: unknown name 'x'
+  |
+  |   return x;
+  |          ^

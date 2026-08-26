@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #287: unsigned SCALAR statics reject an Int-literal initializer,
+// mirroring the existing `let` rule (`let x: U8 = 0;` is rejected; unsigned
+// values come from unsigned sources, and static initializers must be
+// literals — so only U64 (the #277 widening) and unsigned ARRAYS (the #278
+// repeat-literal adaptation) are initializable from literals). Expected
+// error contains: "type mismatch in static"
+
+static phase: U8 = 0;
+
+fn main() -> Int {
+  return phase;
+}

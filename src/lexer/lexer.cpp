@@ -403,6 +403,10 @@ class Lexer
         {
             return TokenKind::KwMatch;
         }
+        if (lexeme == "static")
+        {
+            return TokenKind::KwStatic;
+        }
         if (lexeme == "phys")
         {
             return TokenKind::KwPhys;

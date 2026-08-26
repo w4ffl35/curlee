@@ -1,0 +1,4 @@
+tests/fixtures/run_static_array_vm_reject.curlee:10:1: error: arrays are freestanding-only and not supported in the VM
+  |
+  | static a: [Int; 4] = [0; 4];
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^

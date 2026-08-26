@@ -204,6 +204,25 @@ bootable **x86-64 multiboot2 kernel ELF**:
   `let` bindings only — no struct fields/params/returns/ghost snapshots, no multi-dimensional
   indexing, and predicates cannot reference array elements. `curlee run` rejects arrays (they
   are freestanding-only).
+- **Module-level mutable state** `static name: Type = expr;` (issue #287): a file-scope
+  binding initialized exactly once, readable and assignable (via #268's assignment mechanism)
+  from any function in the module, and persisting **across separate top-level calls** — the C
+  `static`/global-variable equivalent that the joeos driver shims (`kernel/vbe_state.c`'s four
+  framebuffer globals, `kernel/net_stack.c`'s phase/seq/port fields + 256-byte response body)
+  needed. Types are the storable scalars (`Int`/`Bool`/`U8`/`U16`/`U32`/`U64`) and
+  fixed-size arrays `[T; N]` (#278); the initializer must be a compile-time literal (an
+  `Int`/`Bool` literal for scalars — `U64` via the #277 widening, `U8`/`U16`/`U32` rejecting
+  `Int` literals exactly like `let` — and a `[v; N]` repeat literal for arrays). Codegen
+  emits file-scope C `static` variables (arrays as `static <elem> name[N]`), so a host
+  harness calling `curlee_main()` twice observes the second call seeing the first call's
+  writes. **Verifier story (MVP):** each function sees a fresh opaque symbol per global, so
+  reads are uninterpreted and contracts/refinements/invariants mentioning a global are
+  rejected with a hard diagnostic — the honest answer for state that persists across
+  independent entry points; within one function, assignment rebinds the name (the #268 path),
+  giving read-over-write coherence. Statics are module-private (no cross-module extern
+  mechanism). Scalar statics run on the VM (persistent low locals slots); array statics are
+  freestanding-only, and global array element accesses are still bounds-checked like local
+  arrays.
 - The VM never runs freestanding programs (`curlee run` rejects `Phys`/`extern`/port I/O
   bodies); `curlee build` is the freestanding execution path.
 

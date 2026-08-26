@@ -1014,6 +1014,34 @@ int main(int argc, char** argv)
         fs::path("tests/fixtures/check_array_reject_unsupported_elem.curlee");
     const fs::path rel_run_array_vm_reject =
         fs::path("tests/fixtures/run_array_vm_reject.curlee");
+    // Module-level mutable state (issue #287) diagnostics.
+    const fs::path rel_static_state = fs::path("tests/fixtures/check_static_state.curlee");
+    const fs::path rel_static_contract_global =
+        fs::path("tests/fixtures/check_static_contract_global.curlee");
+    const fs::path rel_static_requires_global =
+        fs::path("tests/fixtures/check_static_requires_global.curlee");
+    const fs::path rel_static_invariant_global =
+        fs::path("tests/fixtures/check_static_invariant_global.curlee");
+    const fs::path rel_static_type_mismatch =
+        fs::path("tests/fixtures/check_static_type_mismatch.curlee");
+    const fs::path rel_static_non_literal =
+        fs::path("tests/fixtures/check_static_non_literal.curlee");
+    const fs::path rel_static_duplicate =
+        fs::path("tests/fixtures/check_static_duplicate.curlee");
+    const fs::path rel_static_fn_conflict =
+        fs::path("tests/fixtures/check_static_fn_conflict.curlee");
+    const fs::path rel_static_unsupported_type =
+        fs::path("tests/fixtures/check_static_unsupported_type.curlee");
+    const fs::path rel_static_array_len_mismatch =
+        fs::path("tests/fixtures/check_static_array_len_mismatch.curlee");
+    const fs::path rel_static_array_not_repeat =
+        fs::path("tests/fixtures/check_static_array_not_repeat.curlee");
+    const fs::path rel_static_u8_scalar =
+        fs::path("tests/fixtures/check_static_u8_scalar.curlee");
+    const fs::path rel_static_oob = fs::path("tests/fixtures/check_static_oob.curlee");
+    const fs::path rel_run_global_state = fs::path("tests/fixtures/run_global_state.curlee");
+    const fs::path rel_run_static_array_vm_reject =
+        fs::path("tests/fixtures/run_static_array_vm_reject.curlee");
 
     const fs::path check_requires_divide_golden = dir / "check_requires_divide.golden";
     const fs::path check_refinement_implies_golden = dir / "check_refinement_implies.golden";
@@ -1436,6 +1464,18 @@ int main(int argc, char** argv)
             return 1;
         }
 
+        // Module-level mutable state runs in the VM (issue #287): the scalar
+        // statics live in persistent low slots of the locals array, so
+        // separate function calls observe each other's mutations (bump/bump/
+        // peek/bump -> 1,2,2,3 => 1223). If the statics were re-initialized
+        // per call, peek() would see 0 and the result would differ.
+        if (!run_stdio_case("run-global-state", {"curlee", "run", rel_run_global_state.string()},
+                            dir / "run_global_state.stdout.golden",
+                            dir / "run_global_state.stderr.golden", true))
+        {
+            return 1;
+        }
+
         if (!run_stdio_case("run-success-with-cap",
                             {"curlee", "run", "--cap", "python.ffi", rel_run_success.string()},
                             dir / "run_success.stdout.golden", dir / "run_success.stderr.golden",
@@ -1705,6 +1745,114 @@ int main(int argc, char** argv)
         if (!run_stderr_case("run-array-vm-reject",
                              {"curlee", "run", rel_run_array_vm_reject.string()},
                              dir / "run_array_vm_reject.golden", false))
+        {
+            return 1;
+        }
+        // ...including module-level arrays (issue #287): the scalar half of
+        // module state runs in the VM (see run-global-state above), the array
+        // half is freestanding-only, rejected by the VM emitter.
+        if (!run_stderr_case("run-static-array-vm-reject",
+                             {"curlee", "run", rel_run_static_array_vm_reject.string()},
+                             dir / "run_static_array_vm_reject.golden", false))
+        {
+            return 1;
+        }
+
+        // Module-level mutable state (issue #287) diagnostics.
+        // Acceptance criteria 1-4 pass (see check_static_state.curlee): a
+        // module-level scalar and [T; N] array are declared, read, and
+        // reassigned from multiple functions; the net_stack.c shape (scalar
+        // phase/seq/port fields + a 256-byte response buffer) and the
+        // vbe_state.c shape (a probe writing 4 scalar globals, read later by
+        // a separate function) are expressible end-to-end.
+        if (!run_stderr_case("check-static-state",
+                             {"curlee", "check", rel_static_state.string()},
+                             dir / "check_static_state.golden", true))
+        {
+            return 1;
+        }
+        // The verifier story is explicit (MVP scope): module-level state is
+        // opaque per function (a fresh uninterpreted symbol per global), so
+        // contracts mentioning a global are rejected with a hard diagnostic
+        // rather than silently modeled — ensures, requires, and loop
+        // invariants all get the module-state message.
+        if (!run_stderr_case("check-static-contract-global",
+                             {"curlee", "check", rel_static_contract_global.string()},
+                             dir / "check_static_contract_global.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-static-requires-global",
+                             {"curlee", "check", rel_static_requires_global.string()},
+                             dir / "check_static_requires_global.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-static-invariant-global",
+                             {"curlee", "check", rel_static_invariant_global.string()},
+                             dir / "check_static_invariant_global.golden", false))
+        {
+            return 1;
+        }
+        // Front-end diagnostics: literal-only initializers, declared-type
+        // matching (same adaptation rules as `let`), root-scope duplicates,
+        // MVP type gate, array repeat-length matching, and the unsigned
+        // scalar `let`-mirror rule (`static p: U8 = 0;` is rejected — only
+        // U64 scalars and unsigned ARRAYS accept literals).
+        if (!run_stderr_case("check-static-type-mismatch",
+                             {"curlee", "check", rel_static_type_mismatch.string()},
+                             dir / "check_static_type_mismatch.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-static-non-literal",
+                             {"curlee", "check", rel_static_non_literal.string()},
+                             dir / "check_static_non_literal.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-static-duplicate",
+                             {"curlee", "check", rel_static_duplicate.string()},
+                             dir / "check_static_duplicate.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-static-fn-conflict",
+                             {"curlee", "check", rel_static_fn_conflict.string()},
+                             dir / "check_static_fn_conflict.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-static-unsupported-type",
+                             {"curlee", "check", rel_static_unsupported_type.string()},
+                             dir / "check_static_unsupported_type.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-static-array-len-mismatch",
+                             {"curlee", "check", rel_static_array_len_mismatch.string()},
+                             dir / "check_static_array_len_mismatch.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-static-array-not-repeat",
+                             {"curlee", "check", rel_static_array_not_repeat.string()},
+                             dir / "check_static_array_not_repeat.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-static-u8-scalar",
+                             {"curlee", "check", rel_static_u8_scalar.string()},
+                             dir / "check_static_u8_scalar.golden", false))
+        {
+            return 1;
+        }
+        // Global arrays are still bounds-checked exactly like local arrays:
+        // the VALUE of a global is opaque across calls, but a constant
+        // out-of-bounds write is never silently compiled to C.
+        if (!run_stderr_case("check-static-oob",
+                             {"curlee", "check", rel_static_oob.string()},
+                             dir / "check_static_oob.golden", false))
         {
             return 1;
         }

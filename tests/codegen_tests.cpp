@@ -122,14 +122,14 @@ int main(int argc, char** argv)
     // multi_function.expected, extern_fn.expected, assign.expected,
     // bitwise.expected, io_port.expected, io_port_runtime.expected,
     // unsigned_widen.expected, u64_widen.expected, array.expected,
-    // phys_read_runtime.expected.
+    // phys_read_runtime.expected, static_state.expected.
     for (const char* name :
          {"arith", "control_flow", "while_loop", "struct_fixture", "enum_match",
           "match_stmt", "phys_mem", "phys_param", "empty_union_enum", "forward_ref",
           "unit_empty", "match_unit_arms", "mixed_payload_enum", "phys_param_forward",
           "while_loop_unit", "multi_function", "extern_fn", "assign", "bitwise",
           "io_port", "io_port_runtime", "unsigned_widen", "u64_widen", "array",
-          "phys_read_runtime"})
+          "phys_read_runtime", "static_state"})
     {
         run_positive_case(fixtures_dir / (std::string(name) + ".curlee"),
                           fixtures_dir / (std::string(name) + ".expected"));

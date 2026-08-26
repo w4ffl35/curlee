@@ -1614,6 +1614,12 @@ int main()
                     find_exprs_in_stmt(stmt, *offset_opt, best_expr);
                 }
             }
+            // Module-level static initializers are ordinary expressions
+            // (issue #287): make them reachable for hover/type inspection too.
+            for (const auto& stat : analysis->program.statics)
+            {
+                best_expr = find_expr_at(stat.value, *offset_opt, best_expr);
+            }
 
             Json::Object response;
             response["jsonrpc"] = Json{std::string("2.0")};

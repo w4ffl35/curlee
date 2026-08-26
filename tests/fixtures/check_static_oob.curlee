@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #287: module-level arrays are still bounds-checked exactly like local
+// arrays — the value of a global is opaque across calls, but the per-access
+// bounds obligation is discharged by the same machinery (a constant
+// out-of-bounds write is never silently compiled to C). Expected error:
+//   "array index out of bounds for 'a' (array length 4)"
+
+static a: [Int; 4] = [0; 4];
+
+fn f() -> Unit {
+  a[9] = 1;
+  return;
+}
+
+fn main() -> Int {
+  return 0;
+}

@@ -20,6 +20,17 @@ These are intentionally separate from `tests/diagnostics/` (renderer unit tests)
   cursor, opaque reads); `check_phys_read_runtime_addr.golden` covers the non-integer
   address rejection; `check_phys_read_runtime_contract.golden` covers the opaque-read
   contract rejection (never silently proven).
+- Module-level mutable state (issue #287): `check_static_state.golden` (empty on success)
+  covers acceptance #1-#4 (scalar + `[T; N]` array statics read/reassigned from multiple
+  functions, the net_stack.c and vbe_state.c shim shapes); `run_global_state.stdout.golden`
+  asserts VM cross-call persistence (result 1223); `check_static_contract_global.golden`,
+  `check_static_requires_global.golden`, and `check_static_invariant_global.golden` cover
+  the opaque-module-state contract rejections (ensures/requires/invariant); the remaining
+  `check_static_*.golden` cover the front-end MVP diagnostics (type mismatch, non-literal
+  initializer, duplicate / function-conflict names, unsupported type, array length
+  mismatch, non-repeat array initializer, the unsigned-scalar `let`-mirror rule, and
+  constant out-of-bounds on a global array); `run_static_array_vm_reject.golden` asserts
+  `curlee run` rejects module-level arrays (freestanding-only, like local arrays).
 - Tests run with working directory set to the repo root so relative paths are stable.
 
 ## Ownership conventions

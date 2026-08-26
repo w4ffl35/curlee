@@ -1,0 +1,180 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #287: module-level / global mutable state (persists across separate
+// function calls).
+//
+// The freestanding grammar's top level previously accepted only `import`,
+// `struct`, `enum`, `fn`, or `extern fn` — there was no declaration form for
+// state that survives across separate top-level calls into a module (the
+// thing C `static`/global variables provide). This fixture exercises the new
+// `static name: Type = expr;` form end-to-end through type-check +
+// verification.
+//
+// Acceptance criteria covered:
+//   1. A module-level mutable scalar is declared, read, and reassigned from
+//      multiple functions in the same file; the value persists across
+//      separate top-level invocations (see the VM run fixture
+//      run_global_state.curlee and the codegen fixture static_state.curlee,
+//      which observe real cross-call persistence).
+//   2. A module-level mutable fixed-size array behaves the same way
+//      (`[T; N]` at module scope, indexed read/write from several functions).
+//   3. The net_stack.c shim's shape — a handful of scalar phase/seq/port
+//      fields plus a 256-byte response body buffer, read/written from
+//      several functions across separate poll calls — is expressible (the
+//      net_stack() function below + joeos_09 audit probe).
+//   4. The vbe_state.c shim's shape — a probe function that writes 4 scalar
+//      globals, read later by a separate function — is expressible (vbe_set/
+//      vbe_get below + joeos_10 audit probe).
+//
+// MVP notes:
+//   - Statics are module-private: there is no cross-module extern mechanism.
+//   - The initializer must be a compile-time literal, exactly like a C
+//     `static` initializer: an Int/Bool literal for scalars, an `[v; N]`
+//     repeat literal for arrays.
+//   - Unsigned SCALAR statics (U8/U16/U32) reject an Int-literal initializer,
+//     mirroring the existing `let` rule (`let x: U8 = 0;` is rejected;
+//     unsigned values come from unsigned sources). U64 statics accept an
+//     Int literal via the #277 widening rule, and unsigned ARRAY statics
+//     accept the `[0; N]` repeat literal via the #278 adaptation. The joeos
+//     scalar fields map to Int; only the byte arrays are unsigned.
+//   - Verification story (explicit MVP scope): each function sees a FRESH
+//     opaque symbol per global, so reads are uninterpreted (like a Phys/port
+//     read) and contracts mentioning a global are rejected with a hard
+//     diagnostic — the verifier cannot track state across independent entry
+//     points. Within one function, assignment rebinds the name (the #268
+//     path), giving read-over-write coherence without claiming anything
+//     about other calls. See check_static_contract_global.curlee for the
+//     rejection.
+
+// vbe_state.c shape (issue #11): a probe that writes 4 scalar globals, read
+// later by a separate function.
+static fb_addr : Int = 0;
+static fb_pitch : Int = 0;
+static fb_width : Int = 0;
+static fb_height : Int = 0;
+
+fn vbe_set(a : Int, p : Int, w : Int, h : Int) -> Unit
+{
+    fb_addr = a;
+    fb_pitch = p;
+    fb_width = w;
+    fb_height = h;
+    return;
+}
+
+fn vbe_get() -> Int
+{
+    return fb_addr + fb_pitch + fb_width + fb_height;
+}
+
+// net_stack.c shape (issue #12): scalar phase/seq/port fields + a 256-byte
+// response body buffer, read/written from several functions across separate
+// poll calls.
+static conn_state : Int = 0;
+static seq : Int = 0;
+static ack : Int = 0;
+static local_port : Int = 0;
+static rx_phase : Int = 0;
+static response_body : [U8; 256] = [0; 256];
+
+fn ns_open(port : Int) -> Int
+{
+    local_port = port;
+    conn_state = 1;
+    seq = 0;
+    ack = 0;
+    return conn_state;
+}
+
+fn ns_send(len : Int) -> Int
+{
+    seq = seq + 1;
+    rx_phase = 1; // waiting for a response
+    return len;
+}
+
+fn ns_poll() -> Int
+{
+    // Copy the (simulated) response into the shared buffer, slot by slot.
+    let i : Int = 0;
+    while (i < 4)
+        [invariant 0 <= i && i <= 4; decreases 4 - i;]
+        {
+            response_body[i] = 0x41;
+            i = i + 1;
+        } ack = seq;
+    rx_phase = 2;
+    conn_state = 0;
+    let first : U8 = response_body[0];
+    return first + ack + local_port;
+}
+
+// fb.c tool_queue shape: an Int ring array at module scope plus head/count
+// bookkeeping, mutated from two functions.
+static tool_queue : [Int; 8] = [0; 8];
+static tool_head : Int = 0;
+static tool_count : Int = 0;
+
+fn tool_push(v : Int) -> Unit
+{
+    // fb.c maintains tool_head in [0, TOOL_QUEUE_SLOTS) by construction, but the
+    // verifier cannot see that across calls (module state is opaque per
+    // function). The `% 8` normalizes the opaque global index so the per-access
+    // bounds obligation 0 <= tool_head % 8 < 8 discharges (Z3's mod property) —
+    // the same value fb.c stores, since tool_head is already in range.
+    tool_queue[tool_head % 8] = v;
+    tool_head = (tool_head + 1) % 8;
+    tool_count = tool_count + 1;
+    return;
+}
+
+fn tool_pop() -> Int
+{
+    let idx : Int = (tool_head + 8 - tool_count) % 8;
+    let v : Int = tool_queue[idx];
+    tool_count = tool_count - 1;
+    return v;
+}
+
+// A Bool static plus a U64 static (Int-literal widening, issue #277) are
+// initializable from literals.
+static ready : Bool = false;
+static io_base : U64 = 0;
+
+fn init(hw_ready : Bool) -> Int
+{
+    ready = hw_ready;
+    // U64 statics accept an Int literal via the #277 widening rule; assigning
+    // one is a U64-to-U64 write (the widening applies at binding positions).
+    let base : U64 = 0xFD00_0000;
+    io_base = base;
+    if (ready)
+    {
+        return 1;
+    }
+    return 0;
+}
+
+// A local `let` shadowing a static is an ordinary local binding (scope rules
+// match C: the local shadows the file-scope variable).
+fn shadow() -> Int
+{
+    let conn_state : Int = 99;
+    return conn_state;
+}
+
+fn main() -> Int
+{
+    vbe_set(1, 2, 3, 4);
+    let vbe_total : Int = vbe_get();
+    let opened : Int = ns_open(1234);
+    let sent : Int = ns_send(64);
+    let polled : Int = ns_poll();
+    tool_push(10);
+    tool_push(20);
+    let popped : Int = tool_pop();
+    let inited : Int = init(true);
+    let shadowed : Int = shadow();
+    // 10 + 96 + 1 + 5 + 2 + 20 + 1 + 99
+    return vbe_total + opened + sent + polled + popped + inited + shadowed;
+}

@@ -188,6 +188,36 @@ class Emitter
             return diags_;
         }
 
+        // Module-level mutable state (issue #287): allocate a global slot per
+        // scalar `static` and emit its one-time initializer at program start.
+        // The slots occupy the LOW region of the VM's locals array (before any
+        // function's locals), so they persist across the whole run and separate
+        // function calls observe each other's mutations. Fixed-size array
+        // statics are freestanding-only (the VM has no array storage, exactly
+        // like array `let`s).
+        globals_.clear();
+        std::uint16_t global_slot = 0;
+        for (const auto& s : program.statics)
+        {
+            if (s.type.is_array())
+            {
+                diags_.push_back(
+                    error_at(s.span, "arrays are freestanding-only and not supported in the VM"));
+                return diags_;
+            }
+            globals_.emplace(s.name, global_slot++);
+        }
+        for (const auto& s : program.statics)
+        {
+            emit_expr(s.value);
+            if (!diags_.empty())
+            {
+                return diags_;
+            }
+            chunk_.emit_local(OpCode::StoreLocal, globals_.at(s.name), s.span);
+        }
+        next_local_base_ = global_slot;
+
         // Emit main first so the VM entry point is ip=0.
         emit_function(*entry, /*is_main=*/true);
         for (const auto& f : program.functions)
@@ -245,6 +275,10 @@ class Emitter
     Chunk chunk_;
     std::vector<Diagnostic> diags_;
     std::unordered_map<std::string_view, std::uint16_t> locals_;
+    // Module-level mutable state (issue #287): name -> VM local-slot. The slots
+    // live in the low region of the locals array and persist across the whole
+    // run (function locals start after them).
+    std::unordered_map<std::string_view, std::uint16_t> globals_;
     std::uint16_t local_base_ = 0;
     std::uint16_t next_local_base_ = 0;
     bool current_is_main_ = false;
@@ -457,10 +491,12 @@ class Emitter
 
     void emit_stmt_node(const AssignStmt& stmt, Span span)
     {
-        // `x = expr;` reassigns an existing local: evaluate the RHS, then
+        // `x = expr;` reassigns an existing binding: evaluate the RHS, then
         // StoreLocal into the binding's existing slot (a `let` would allocate
         // a NEW slot; an assignment reuses the slot so loop-carried mutation
-        // works and the VM's StoreLocal overwrites the slot in place).
+        // works and the VM's StoreLocal overwrites the slot in place). A
+        // module-level static (issue #287) stores into its persistent global
+        // slot.
         emit_expr(stmt.value);
         if (!diags_.empty())
         {
@@ -468,13 +504,19 @@ class Emitter
         }
 
         auto it = locals_.find(stmt.name);
-        if (it == locals_.end())
+        if (it != locals_.end())
         {
-            diags_.push_back(error_at(span, "unknown name '" + std::string(stmt.name) +
-                                                "' in runnable code"));
+            chunk_.emit_local(OpCode::StoreLocal, it->second, span);
             return;
         }
-        chunk_.emit_local(OpCode::StoreLocal, it->second, span);
+        auto git = globals_.find(stmt.name);
+        if (git != globals_.end())
+        {
+            chunk_.emit_local(OpCode::StoreLocal, git->second, span);
+            return;
+        }
+        diags_.push_back(error_at(span, "unknown name '" + std::string(stmt.name) +
+                                            "' in runnable code"));
     }
 
     void emit_stmt_node(const ReturnStmt& stmt, Span span)
@@ -768,12 +810,21 @@ class Emitter
     void emit_expr_node(const NameExpr& expr, Span span)
     {
         auto it = locals_.find(expr.name);
-        if (it == locals_.end())
+        if (it != locals_.end())
         {
-            diags_.push_back(error_at(span, "unknown name '" + std::string(expr.name) + "'"));
+            chunk_.emit_local(OpCode::LoadLocal, it->second, span);
             return;
         }
-        chunk_.emit_local(OpCode::LoadLocal, it->second, span);
+        // Module-level static reads load the persistent global slot (issue
+        // #287); the local lookup first makes a shadowing `let` win, matching
+        // the type checker's scope resolution.
+        auto git = globals_.find(expr.name);
+        if (git != globals_.end())
+        {
+            chunk_.emit_local(OpCode::LoadLocal, git->second, span);
+            return;
+        }
+        diags_.push_back(error_at(span, "unknown name '" + std::string(expr.name) + "'"));
     }
 
     void emit_expr_node(const MemberExpr& expr, Span span)

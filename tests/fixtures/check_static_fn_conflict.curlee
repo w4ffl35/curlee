@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #287: a static and a top-level function share the root scope; a name
+// collision is a duplicate declaration, reported by the resolver (and
+// defended in the type checker). Expected error contains:
+//   "duplicate static variable 'f'"  (resolver) and/or
+//   "static variable 'f' conflicts with a function of the same name"
+
+static f: Int = 1;
+
+fn f() -> Int {
+  return 0;
+}
+
+fn main() -> Int {
+  return f;
+}

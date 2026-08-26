@@ -1,0 +1,75 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 9: the net_stack.c shim's exact shape in
+// pure Curlee (issue #287). The 119-line C shim (gh issue #12) exists only
+// because Curlee had no module-level mutable state: "the mutable state and
+// the response body store that Curlee cannot own (no module-level globals, no
+// arrays)". This probe expresses the whole shape — a handful of scalar
+// phase/seq/port fields plus a 256-byte response body buffer, read/written
+// from several functions across separate poll calls — as module-level
+// `static` declarations.
+//
+// Cross-call persistence is load-bearing here: net_stack_poll() reads `seq`,
+// which was advanced by a SEPARATE earlier call (net_send), and `ack = seq`
+// only observes the right value because the statics are real file-scope
+// storage, not per-call locals. main() drives the sequence the kernel's
+// render loop does: connect, send, then poll repeatedly.
+//
+// Build + boot:
+//   ./build/linux-debug/curlee build --link -o build/audit/09.elf \
+//     tests/audit/joeos_09_net_stack_globals.curlee
+//   (then bash scripts/audit_qemu_boot.sh <generated.c> 09, expect rc=3)
+
+extern fn curlee_halt() -> Unit;
+
+// net_stack.c shim state: connection phase/seq/ports...
+static conn_state: Int = 0;
+static seq: Int = 0;
+static ack: Int = 0;
+static local_port: Int = 0;
+static rx_phase: Int = 0;
+// ...and the one-shot 256-byte response body store (net_stack.c:256 bytes).
+static response_body: [U8; 256] = [0; 256];
+
+fn net_connect(port: Int) -> Int {
+  local_port = port;
+  conn_state = 1;
+  seq = 0;
+  ack = 0;
+  return conn_state;
+}
+
+fn net_send(len: Int) -> Int {
+  seq = seq + 1;    // one-shot connection: sequence advances per send
+  rx_phase = 1;     // waiting for a response
+  return len;
+}
+
+fn net_stack_poll() -> Int {
+  // Simulated NIC DMA into the shared response buffer, slot by slot
+  // (net_stack.c's response body store, written by the ISR / poll path).
+  let i: Int = 0;
+  while (i < 4)
+    [ invariant 0 <= i && i <= 4;
+      decreases 4 - i; ]
+  {
+    response_body[i] = 0x41;
+    i = i + 1;
+  }
+  ack = seq;        // must observe net_send's seq: cross-call persistence
+  rx_phase = 2;
+  conn_state = 0;
+  let first: U8 = response_body[0];
+  return first + ack + local_port;
+}
+
+fn main() -> Int {
+  let opened: Int = net_connect(1234); // 1
+  let sent: Int = net_send(64);        // seq -> 1, rx_phase -> 1
+  let polled: Int = net_stack_poll();  // 0x41 + 1 + 1234 = 1300
+  // 1 + 64 + 1300 = 1365. If the statics were re-initialized per call
+  // (locals), ack would be 0 and polled would be 1299 — the shape only
+  // works because the state persists across separate calls.
+  curlee_halt();
+  return opened + sent + polled;
+}

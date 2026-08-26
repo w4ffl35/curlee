@@ -1,0 +1,8 @@
+tests/fixtures/check_static_type_mismatch.curlee:8:1: error: type mismatch in static: expected Int, got Bool
+  |
+  | static x: Int = true;
+  | ^^^^^^^^^^^^^^^^^^^^^
+tests/fixtures/check_static_type_mismatch.curlee:11:10: error: unknown name 'x'
+  |
+  |   return x;
+  |          ^

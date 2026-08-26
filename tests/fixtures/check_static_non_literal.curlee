@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #287: static initializers must be compile-time literals, exactly like
+// C `static` initializers — an arbitrary expression has no single value to
+// emit in the freestanding C output. Expected error:
+//   "static 'x': initializer must be a compile-time literal (Int, Bool, or
+//    [v; N] repeat)"
+
+static x: Int = 1 + 2;
+
+fn main() -> Int {
+  return x;
+}

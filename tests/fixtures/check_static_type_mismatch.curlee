@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #287: a static's initializer must match the declared type with the
+// same adaptation rules as `let` bindings. A Bool literal cannot initialize
+// an Int static. Expected error:
+//   "type mismatch in static: expected Int, got Bool"
+
+static x: Int = true;
+
+fn main() -> Int {
+  return x;
+}

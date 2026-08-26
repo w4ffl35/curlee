@@ -580,12 +580,39 @@ struct EnumDecl
     std::vector<EnumDeclVariant> variants;
 };
 
-/** @brief Full parsed program (imports, types and functions). */
+/**
+ * @brief Module-level mutable state declaration: `static name: Type = expr;`.
+ *
+ * Declares a file-scope mutable binding initialized exactly once, readable and
+ * assignable (via #268's assignment mechanism) from any function in the module,
+ * and persisting across separate top-level calls into the module (issue #287 —
+ * the C `static`/global-variable equivalent). MVP types are the storable
+ * scalars (Int/Bool/U8/U16/U32/U64) and fixed-size arrays `[T; N]` (#278), so
+ * the joeos driver patterns (`vbe_state.c`'s four scalar framebuffer globals,
+ * `net_stack.c`'s phase/seq/port scalars + 256-byte response body) are
+ * expressible. The initializer must be a compile-time literal (an Int/Bool
+ * literal for scalars, an `[v; N]` repeat literal for arrays), mirroring C
+ * `static` initializers. Module-private: there is no cross-module extern
+ * mechanism in the MVP.
+ */
+struct StaticVarDecl
+{
+    curlee::source::Span span;
+    std::string_view name;
+    TypeName type;
+    Expr value;
+};
+
+/** @brief Full parsed program (imports, types, module state and functions). */
 struct Program
 {
     std::vector<ImportDecl> imports;
     std::vector<StructDecl> structs;
     std::vector<EnumDecl> enums;
+    // Module-level mutable state (`static name: Type = expr;`), in declaration
+    // order (initializers are emitted in this order in the freestanding C
+    // output).
+    std::vector<StaticVarDecl> statics;
     std::vector<Function> functions;
 };
 
