@@ -120,6 +120,47 @@ fn main(v: Option) -> Unit {
         }
     }
 
+    // Assignment statement: parse success. `x = expr;` is a reassignment of an
+    // existing binding (no declaration); the parser accepts a bare NameExpr
+    // target followed by '=' and the dump renders it as `name = <expr>;`.
+    {
+        const std::string src = R"(fn main() -> Int {
+    let x: Int = 0;
+    x = x + 1;
+    x = x * 2;
+    return x;
+}
+)";
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on assignment program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on assignment program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("x = (x plus 1);") == std::string::npos ||
+            dumped.find("x = (x star 2);") == std::string::npos)
+        {
+            fail("dump missing expected assignment rendering");
+        }
+    }
+
+    // Assignment statement: `=` is not an expression operator, so a missing
+    // RHS or semicolon fails with a deterministic diagnostic.
+    {
+        expect_parse_error_contains("fn main() -> Int { let x: Int = 0; x = ; return x; }",
+                                    "expected expression");
+        expect_parse_error_contains("fn main() -> Int { let x: Int = 0; x = 1 return x; }",
+                                    "expected ';' after assignment");
+    }
+
     // Match statement: malformed arm separator should fail.
     {
         const std::string src = R"(enum Option { Some(Int); None; }

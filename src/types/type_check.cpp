@@ -15,6 +15,7 @@ namespace
 
 using curlee::diag::Diagnostic;
 using curlee::diag::Severity;
+using curlee::parser::AssignStmt;
 using curlee::parser::BinaryExpr;
 using curlee::parser::BlockStmt;
 using curlee::parser::CallExpr;
@@ -91,6 +92,15 @@ static bool collect_member_chain(const Expr& expr, std::vector<std::string_view>
 struct Scope
 {
     std::unordered_map<std::string_view, Type> vars;
+
+    // Names in this scope that are not assignable: parameters and ghost
+    // snapshot bindings. Parameters cannot be reassigned because call-site
+    // ensures inheritance assumes a callee's parameters keep their entry
+    // values (post_ctx binds callee param names to the caller's argument
+    // expressions); ghost snapshots freeze a pre-state value and must never
+    // be mutated. Assignment targets are therefore limited to local `let`
+    // bindings (MVP semantics, documented in docs/loop-contracts.md).
+    std::unordered_set<std::string_view> read_only;
 };
 
 class Checker
@@ -283,13 +293,33 @@ class Checker
         return std::nullopt;
     }
 
-    void declare_var(std::string_view name, Type t)
+    void declare_var(std::string_view name, Type t, bool read_only = false)
     {
         if (scopes_.empty()) // GCOVR_EXCL_LINE
         {
             push_scope(); // GCOVR_EXCL_LINE
         }
         scopes_.back().vars[name] = t;
+        if (read_only)
+        {
+            scopes_.back().read_only.insert(name);
+        }
+    }
+
+    // Resolve the type of a name for an assignment target, along with whether
+    // the binding is assignable. Returns std::nullopt when the name is not a
+    // variable (or is a function name).
+    [[nodiscard]] std::optional<std::pair<Type, bool>>
+    lookup_assignable_var(std::string_view name) const
+    {
+        for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it)
+        {
+            if (auto found = it->vars.find(name); found != it->vars.end())
+            {
+                return std::make_pair(found->second, !it->read_only.contains(name));
+            }
+        }
+        return std::nullopt;
     }
 
     void error_at(Span span, std::string message)
@@ -417,7 +447,9 @@ class Checker
         push_scope();
         for (std::size_t i = 0; i < f.params.size(); ++i)
         {
-            declare_var(f.params[i].name, it->second.params[i]);
+            // Parameters are read-only (not assignable): call-site ensures
+            // inheritance assumes callee parameters keep their entry values.
+            declare_var(f.params[i].name, it->second.params[i], /*read_only=*/true);
         }
 
         // Contract-block ghost snapshots are declared (and their initializers
@@ -494,12 +526,55 @@ class Checker
                                         std::string(to_string(*declared)) + ", got " +
                                         std::string(to_string(*init)));
             }
-            declare_var(s.name, *declared);
+            // Ghost snapshots freeze a pre-state value; they are read-only.
+            declare_var(s.name, *declared, /*read_only=*/true);
         }
         else
         {
             // Infer the snapshot type from the initializer.
-            declare_var(s.name, *init);
+            declare_var(s.name, *init, /*read_only=*/true);
+        }
+    }
+
+    void check_stmt_node(const AssignStmt& s, Span stmt_span, Type)
+    {
+        // Assignment target must be an existing, assignable local binding.
+        const auto target = lookup_assignable_var(s.name);
+        if (!target.has_value())
+        {
+            if (functions_.find(s.name) != functions_.end())
+            {
+                error_at(stmt_span,
+                         "cannot assign to function name '" + std::string(s.name) + "'");
+            }
+            else
+            {
+                error_at(stmt_span,
+                         "cannot assign to unknown name '" + std::string(s.name) + "'");
+            }
+            return;
+        }
+
+        if (!target->second)
+        {
+            error_at(stmt_span,
+                     "cannot assign to '" + std::string(s.name) +
+                         "': parameters and ghost snapshots are read-only "
+                         "(assignment targets must be local 'let' bindings)");
+            return;
+        }
+
+        auto value_t = check_expr(s.value);
+        if (!value_t.has_value())
+        {
+            return;
+        }
+
+        if (*value_t != target->first)
+        {
+            error_at(stmt_span, "type mismatch in assignment: expected " +
+                                    std::string(to_string(target->first)) + ", got " +
+                                    std::string(to_string(*value_t)));
         }
     }
 

@@ -1,0 +1,29 @@
+fn sum_to(n: Int) -> Int [
+  requires n >= 0;
+  ensures result >= 0;
+  fuel 20 * n + 20;
+] {
+  // The bounded-sum case from docs/loop-contracts.md: a genuinely loop-carried
+  // variable (`i`) mutated via assignment inside a `while` body, with the
+  // `decreases n - i` variant provable only because assignment lands (M3/M4).
+  // The fuel clause's `(D_0 + 1) * (cost(c) + cost(B))` formula is exercisable:
+  // D_0 = n at loop entry, so the static bound is linear in n.
+  let total: Int = 0;
+  let i: Int = 0;
+  while (i < n)
+    [ invariant 0 <= i && i <= n && total >= 0;
+      decreases n - i; ]
+  {
+    i = i + 1;
+    total = total + i;
+  }
+  return total;
+}
+
+fn main() -> Int {
+  // Straight-line reassignment of an existing binding.
+  let x: Int = 0;
+  x = x + 1;
+  x = x * 2;
+  return sum_to(3) + x;
+}

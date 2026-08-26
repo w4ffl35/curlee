@@ -1,0 +1,16 @@
+fn main() -> Int {
+  let i: Int = 0;
+  let n: Int = 10;
+  while (i < n)
+    [ invariant 0 <= i && i <= n;
+      decreases n - i; ]
+  {
+    // A shadowing `let` binds a FRESH solver symbol (issue #268), so the
+    // preservation obligation re-checks the invariant against the shadowed
+    // value instead of the invariant fact assumed at loop entry: this loop
+    // must FAIL verification.
+    let i: Int = -5;
+    let _dummy: Int = i + 1;
+  }
+  return i;
+}

@@ -1,0 +1,18 @@
+tests/fixtures/check_assign_shadowed_invariant.curlee:5:17: error: loop invariant is not preserved by an iteration
+  |
+  |     [ invariant 0 <= i && i <= n;
+  |                 ^^^^^^^^^^^^^^^^
+note: goal: ((0 <= i) && (i <= n))
+note: model:
+i@2 = (- 5)
+n@1 = 10
+note: hint: add or strengthen preconditions/refinements to satisfy this contract
+tests/fixtures/check_assign_shadowed_invariant.curlee:6:17: error: decreases expression does not strictly decrease each iteration
+  |
+  |       decreases n - i; ]
+  |                 ^^^^^
+note: goal: (n - i)
+note: model:
+i@2 = (- 5)
+n@1 = 10
+note: hint: add or strengthen preconditions/refinements to satisfy this contract

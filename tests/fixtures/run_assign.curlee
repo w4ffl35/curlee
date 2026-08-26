@@ -1,0 +1,16 @@
+fn main() -> Int {
+  let total: Int = 0;
+  let i: Int = 0;
+  let n: Int = 3;
+  while (i < n)
+    [ invariant 0 <= i && i <= n && total >= 0;
+      decreases n - i; ]
+  {
+    i = i + 1;
+    total = total + i;
+  }
+  let x: Int = 0;
+  x = x + 1;
+  x = x * 2;
+  return total + x;
+}

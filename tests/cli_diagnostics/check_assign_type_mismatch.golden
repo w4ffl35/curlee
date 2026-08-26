@@ -1,0 +1,4 @@
+tests/fixtures/check_assign_type_mismatch.curlee:3:3: error: type mismatch in assignment: expected Int, got Bool
+  |
+  |   y = true;
+  |   ^^^^^^^^^

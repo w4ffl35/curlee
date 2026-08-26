@@ -1,0 +1,14 @@
+fn main() -> Int {
+  let x: Int = 0;
+  x = x + 1;
+  x = x * 2;
+  let i: Int = 0;
+  let n: Int = 3;
+  while (i < n)
+    [ invariant 0 <= i && i <= n;
+      decreases n - i; ]
+  {
+    i = i + 1;
+  }
+  return x + i;
+}

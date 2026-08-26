@@ -1,0 +1,25 @@
+// Regression for the #268 rework: the loop post-state must carry the
+// loop-carried bindings into the continuation. `sum_to(5)` returns 5, so
+// `ensures result == 0` is FALSE and must be rejected. Before the rework the
+// continuation saw the PRE-loop `total == 0` binding and accepted this
+// vacuously (the post-state kept the entry `let` facts instead of the
+// post-body bindings).
+fn sum_to(n: Int) -> Int [
+  requires n >= 0;
+  ensures result == 0;
+] {
+  let total: Int = 0;
+  let i: Int = 0;
+  while (i < n)
+    [ invariant 0 <= i && i <= n && total >= 0;
+      decreases n - i; ]
+  {
+    i = i + 1;
+    total = total + i;
+  }
+  return total;
+}
+
+fn main() -> Int {
+  return sum_to(5);
+}

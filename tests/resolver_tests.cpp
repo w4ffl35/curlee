@@ -224,6 +224,44 @@ fn main() -> Unit {
         }
     }
 
+    // Assignment does not declare (issue #268): an assignment target must
+    // resolve to an EXISTING binding, so assigning to an unknown name is a
+    // resolver error, while the target name itself is a (non-declaring) use.
+    {
+        const std::string src = R"(fn main() -> Int {
+  z = 4;
+  return z;
+})";
+
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_assign_unknown.curlee");
+        if (!std::holds_alternative<std::vector<diag::Diagnostic>>(res))
+        {
+            fail("expected resolver error on assignment to unknown name");
+        }
+
+        const auto& ds = std::get<std::vector<diag::Diagnostic>>(res);
+        if (ds.empty())
+        {
+            fail("expected at least one diagnostic for assignment to unknown name");
+        }
+    }
+
+    // Assignment to a declared local resolves (no error): the target is a use
+    // of the existing binding, and the RHS is resolved normally.
+    {
+        const std::string src = R"(fn main() -> Int {
+  let x: Int = 0;
+  x = x + 1;
+  return x;
+})";
+
+        const auto res = resolve_with_source(src, "tests/fixtures/resolve_assign_ok.curlee");
+        if (!std::holds_alternative<curlee::resolver::Resolution>(res))
+        {
+            fail("expected assignment to a declared local to resolve");
+        }
+    }
+
     {
         const std::string src = R"(fn main() -> Unit {
   let x: Int = 1;

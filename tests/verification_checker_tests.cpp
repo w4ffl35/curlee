@@ -1479,16 +1479,13 @@ fn main() -> Int {
         }
     }
 
-    // Shadowing quirk regression test (documented limitation, NOT fixed):
-    // shadowing the loop-carried variable inside the body (e.g. `let i: Int =
-    // -5`) currently verifies, even with a `decreases` clause. This is a
-    // consequence of the verifier's name-based Z3 constant reuse: `declare_var`
-    // binds a shadowing `let` to the SAME logical constant as the outer
-    // binding, and the preservation obligation re-proves the invariant from
-    // the invariant fact assumed at loop entry (vacuous). Lock this behavior in
-    // so a future change cannot silently alter it. M3/M4 (assignment / affine
-    // mutation) must introduce fresh symbols per binding to make shadowing
-    // sound; until then, shadowing in a loop body is unsound-but-documented.
+    // Shadowing in a loop body is SOUND since issue #268 (assignment) landed:
+    // the verifier binds each declaration/assignment to a FRESH Z3 symbol (the
+    // documented "fresh symbols per binding" requirement), so a shadowing
+    // `let i: Int = -5;` inside the body is a distinct constant and the
+    // preservation obligation re-checks the invariant against the post-body
+    // state, NOT the invariant fact assumed at loop entry. A shadowed value
+    // that violates the invariant or variant therefore fails loudly.
     {
         const std::string source = R"(
 fn main() -> Int {
@@ -1505,20 +1502,21 @@ fn main() -> Int {
 }
 )";
         const auto verified = verify_program(source, "loop shadowing quirk regression");
-        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
         {
-            fail("expected loop shadowing quirk to verify (documented behavior)");
+            fail("expected shadowed loop-carried variable to fail verification (fresh symbols)");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "loop invariant is not preserved by an iteration"))
+        {
+            fail("expected the preservation obligation to report the shadowed invariant");
         }
     }
 
-    // Preservation semantics under immutability (documented MVP behavior):
-    // the preservation obligation assumes the invariant as a fact and re-proves
-    // it from itself at body end, so it is vacuously satisfied when the body
-    // cannot mutate state. Even a body that shadows the loop variable with a
-    // value violating the invariant verifies today. This is the intended
-    // fail-open-for-preservation semantic while the language lacks assignment;
-    // opaque effects (vec.set/push, phys write) will make preservation
-    // non-vacuous once M3/M4 land.
+    // Preservation is checked against the POST-mutation state (not vacuous):
+    // since issue #268 the body's shadowing `let i: Int = 100;` rebinds `i` to
+    // a fresh solver constant, so the invariant `i <= n` is re-proven against
+    // the shadowed value (100 <= 10 is false) and preservation fails.
     {
         const std::string source = R"(
 fn main() -> Int {
@@ -1534,9 +1532,14 @@ fn main() -> Int {
 }
 )";
         const auto verified = verify_program(source, "vacuous preservation semantics");
-        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
         {
-            fail("expected vacuous preservation to verify (documented behavior)");
+            fail("expected shadowing that violates the invariant to fail verification");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "loop invariant is not preserved by an iteration"))
+        {
+            fail("expected the preservation obligation to report the violated invariant");
         }
     }
 
@@ -1560,6 +1563,399 @@ fn main() -> Int {
         if (!std::holds_alternative<curlee::verification::Verified>(verified))
         {
             fail("expected sufficient fuel bound to verify");
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Assignment statements (issue #268)
+    // ---------------------------------------------------------------------
+
+    // `let x: Int = 0; x = x + 1;` parses, type-checks, verifies, and the
+    // reassignment is modeled with a fresh solver symbol.
+    {
+        const std::string source = R"(
+fn main() -> Int {
+  let x: Int = 0;
+  x = x + 1;
+  x = x * 2;
+  return x;
+}
+)";
+        const auto verified = verify_program(source, "straight-line assignment");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected straight-line assignment to verify");
+        }
+    }
+
+    // A `while` loop with a `decreases` variant that MUTATES the loop-carried
+    // variable (the bounded-sum case from docs/loop-contracts.md): the variant
+    // is provable only because assignment makes D_after < D_before real.
+    {
+        const std::string source = R"(
+fn sum_to(n: Int) -> Int [
+  requires n >= 0;
+  ensures result >= 0;
+]
+{
+  let total: Int = 0;
+  let i: Int = 0;
+  while (i < n)
+    [ invariant 0 <= i && i <= n && total >= 0;
+      decreases n - i; ]
+  {
+    i = i + 1;
+    total = total + i;
+  }
+  return total;
+}
+
+fn main() -> Int {
+  return sum_to(3);
+}
+)";
+        const auto verified = verify_program(source, "bounded-sum loop with mutation");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected bounded-sum loop with mutated loop-carried variable to verify");
+        }
+    }
+
+    // The invariant is re-checked against the POST-mutation state: a body that
+    // breaks the invariant (total exceeds n once i is large) fails, because the
+    // preservation proof quantifies over every state satisfying invariant &&
+    // cond (loop-carried variables are abstracted), not just the first
+    // iteration.
+    {
+        const std::string source = R"(
+fn main() -> Int {
+  let total: Int = 0;
+  let i: Int = 0;
+  let n: Int = 10;
+  while (i < n)
+    [ invariant 0 <= i && i <= n && total <= n;
+      decreases n - i; ]
+  {
+    total = total + i;
+    i = i + 1;
+  }
+  return total;
+}
+)";
+        const auto verified = verify_program(source, "broken invariant via mutation");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected mutation that breaks the invariant to fail verification");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "loop invariant is not preserved by an iteration"))
+        {
+            fail("expected the preservation obligation to report the broken invariant");
+        }
+    }
+
+    // The loop POST-STATE carries the loop-carried bindings into the
+    // continuation (review rework: the continuation previously saw the PRE-loop
+    // binding, so a false postcondition like `result == 0` verified vacuously
+    // and the true `result == n` failed). A TRUE postcondition over the final
+    // loop-carried value must now verify.
+    {
+        const std::string source = R"(
+fn count_to(n: Int) -> Int [
+  requires n >= 0;
+  ensures result == n;
+]
+{
+  let total: Int = 0;
+  let i: Int = 0;
+  while (i < n)
+    [ invariant 0 <= i && i <= n && total == i;
+      decreases n - i; ]
+  {
+    i = i + 1;
+    total = total + 1;
+  }
+  return total;
+}
+
+fn main() -> Int {
+  return count_to(3);
+}
+)";
+        const auto verified = verify_program(source, "loop post-state true postcondition");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected the loop post-state to carry loop-carried values so "
+                 "`ensures result == n` verifies");
+        }
+    }
+
+    // The loop post-state must NOT make a false postcondition about a
+    // loop-carried value verifiable: `bad(5)` returns 5, so `ensures
+    // result == 0` must be rejected (this was the reopened #268 finding — the
+    // continuation saw the pre-loop `total == 0` and accepted it vacuously).
+    {
+        const std::string source = R"(
+fn bad(n: Int) -> Int [
+  requires n >= 0;
+  ensures result == 0;
+]
+{
+  let total: Int = 0;
+  let i: Int = 0;
+  while (i < n)
+    [ invariant 0 <= i && i <= n && total == i;
+      decreases n - i; ]
+  {
+    i = i + 1;
+    total = total + 1;
+  }
+  return total;
+}
+
+fn main() -> Int {
+  return bad(5);
+}
+)";
+        const auto verified = verify_program(source, "loop post-state false postcondition");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected a false postcondition over a loop-carried value to be rejected");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "ensures clause not satisfied"))
+        {
+            fail("expected the ensures diagnostic for the false loop postcondition");
+        }
+    }
+
+    // A branch that ASSIGNS a variable must join its post-state into the
+    // continuation: `if (c) { x = 1; }` leaves x in {0, 1}, so the false
+    // postcondition `result == 0` must be rejected (the continuation used to
+    // see the pre-branch binding pinned to 0 and accepted it vacuously).
+    {
+        const std::string source = R"(
+fn f(c: Bool) -> Int [
+  ensures result == 0;
+]
+{
+  let x: Int = 0;
+  if (c) {
+    x = 1;
+  }
+  return x;
+}
+
+fn main() -> Int {
+  return f(true);
+}
+)";
+        const auto verified = verify_program(source, "branch join false postcondition");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected a false postcondition after a mutating branch to be rejected");
+        }
+    }
+
+    // The branch join is precise: the disjunction of the reachable values is
+    // provable from the continuation.
+    {
+        const std::string source = R"(
+fn f(c: Bool) -> Int [
+  ensures result == 0 || result == 1;
+]
+{
+  let x: Int = 0;
+  if (c) {
+    x = 1;
+  }
+  return x;
+}
+
+fn main() -> Int {
+  return f(true);
+}
+)";
+        const auto verified = verify_program(source, "branch join disjunction");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected the disjunction of branch-end values to verify after an if");
+        }
+    }
+
+    // If/else with both branches assigning: x' is exactly {1, 2}.
+    {
+        const std::string source = R"(
+fn f(c: Bool) -> Int [
+  ensures result == 1 || result == 2;
+]
+{
+  let x: Int = 0;
+  if (c) {
+    x = 1;
+  } else {
+    x = 2;
+  }
+  return x;
+}
+
+fn main() -> Int {
+  return f(true);
+}
+)";
+        const auto verified = verify_program(source, "if/else join disjunction");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected if/else branch join to verify the disjunction");
+        }
+    }
+
+    // If/else join must not let the continuation assume a specific branch:
+    // `result == 1` is false when the else branch runs (x == 2).
+    {
+        const std::string source = R"(
+fn f(c: Bool) -> Int [
+  ensures result == 1;
+]
+{
+  let x: Int = 0;
+  if (c) {
+    x = 1;
+  } else {
+    x = 2;
+  }
+  return x;
+}
+
+fn main() -> Int {
+  return f(true);
+}
+)";
+        const auto verified = verify_program(source, "if/else join false postcondition");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected a false postcondition after if/else to be rejected");
+        }
+    }
+
+    // Legacy loops (no contract block) that assign a variable leave its
+    // post-loop value unknown: a false postcondition must not verify.
+    {
+        const std::string source = R"(
+fn f(c: Bool) -> Int [
+  ensures result == 0;
+]
+{
+  let x: Int = 0;
+  while (c) {
+    x = x + 1;
+  }
+  return x;
+}
+
+fn main() -> Int {
+  return f(true);
+}
+)";
+        const auto verified = verify_program(source, "legacy loop assignment post-state");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected a false postcondition after a legacy mutating loop to be rejected");
+        }
+    }
+
+    // Match arms are branches too: a name assigned in one arm joins to
+    // {assigned value, pre-match value}.
+    {
+        const std::string source = R"(
+enum E { A; B; }
+
+fn f() -> Int [
+  ensures result == 0 || result == 1;
+]
+{
+  let x: Int = 0;
+  match (E::A) {
+    E::A => {
+      x = 1;
+    }
+    E::B => {
+      let _dummy: Int = 0;
+    }
+  }
+  return x;
+}
+
+fn main() -> Int {
+  return f();
+}
+)";
+        const auto verified = verify_program(source, "match arm join disjunction");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected the disjunction of match-arm values to verify");
+        }
+    }
+
+    // A name SHADOWED by a `let` inside a branch is branch-local: assignments
+    // to it target the shadow, so the outer binding is unchanged after the if.
+    {
+        const std::string source = R"(
+fn f(c: Bool) -> Int [
+  ensures result == 0;
+]
+{
+  let x: Int = 0;
+  if (c) {
+    let x: Int = 5;
+    x = x + 1;
+    let _dummy: Int = x;
+  }
+  return x;
+}
+
+fn main() -> Int {
+  return f(true);
+}
+)";
+        const auto verified = verify_program(source, "branch shadowing stays branch-local");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected a shadowed branch binding not to leak into the continuation");
+        }
+    }
+
+    // The `fuel` clause's loop formula (D_0 + 1) * (cost(c) + cost(B)) is
+    // exercisable by a genuinely bounded loop: D_0 = n at loop entry (the
+    // variant is lowered against the PRE-loop bindings, not a post-mutation
+    // symbol), so the input-dependent bound `20*n + 20` is met.
+    {
+        const std::string source = R"(
+fn sum_to(n: Int) -> Int [
+  requires n >= 0;
+  fuel 20 * n + 20;
+]
+{
+  let total: Int = 0;
+  let i: Int = 0;
+  while (i < n)
+    [ invariant 0 <= i && i <= n;
+      decreases n - i; ]
+  {
+    i = i + 1;
+    total = total + i;
+  }
+  return total;
+}
+
+fn main() -> Int {
+  return sum_to(3);
+}
+)";
+        const auto verified = verify_program(source, "bounded loop under fuel clause");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected bounded loop with an input-dependent fuel bound to verify");
         }
     }
 

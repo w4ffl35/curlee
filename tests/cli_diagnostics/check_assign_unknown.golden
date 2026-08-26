@@ -1,0 +1,4 @@
+tests/fixtures/check_assign_unknown.curlee:2:3: error: unknown name 'z'
+  |
+  |   z = 4;
+  |   ^^^^^^
