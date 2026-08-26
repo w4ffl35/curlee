@@ -1,0 +1,13 @@
+// x86 port I/O codegen fixture (issue #269): exercises all six builtins with
+// the constant ports used by real drivers (COM1 serial, Bochs VBE, PCI config).
+fn main(pm: cap phys.mem) -> U32 {
+  unsafe {
+    port_outb(0x3FB, 0x03);         // COM1 LCR: 8N1
+    let lsr: U8 = port_inb(0x3FD);  // COM1 LSR (opaque read)
+    port_outb(0x3F8, lsr);          // COM1 THR: write the read byte back
+    port_outw(0x1CE, 0x0004);       // Bochs VBE index register
+    port_inw(0x1CF);                // Bochs VBE data register (opaque read)
+    port_outl(0xCF8, 0x80000000);   // PCI config address register
+    return port_inl(0xCFC);         // PCI config data register (opaque read)
+  }
+}

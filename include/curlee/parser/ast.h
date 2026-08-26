@@ -200,6 +200,39 @@ struct PhysWriteExpr
 };
 
 /**
+ * @brief x86 port I/O builtin: `port_inb(0x3FD)`, `port_outb(0x3F8, v)`.
+ *
+ * The port address must be a compile-time constant literal (hex or decimal,
+ * underscores preserved). The optional value expression (out* variants only)
+ * may be any expression of the matching width, mirroring `PhysWriteExpr`.
+ * Reads (`port_in*`) are trusted/opaque to the verifier, exactly like
+ * `Phys<T>` reads: no axioms constrain the returned value.
+ */
+struct PortIOExpr
+{
+    // Builtin name as spelled in source (port_inb/port_outb/port_inw/port_outw/
+    // port_inl/port_outl).
+    std::string_view op;
+    // The port literal lexeme (decimal or hex, underscores preserved).
+    std::string_view port_lexeme;
+    // The value expression for out* variants; null for in* variants.
+    std::unique_ptr<Expr> value;
+};
+
+/**
+ * @brief True if `name` is an x86 port I/O builtin (`port_inb`/`port_outb`/
+ * `port_inw`/`port_outw`/`port_inl`/`port_outl`).
+ *
+ * Single source of truth for the port I/O builtin surface, shared by the
+ * parser, resolver, type checker, verifier, codegen and VM emitter.
+ */
+[[nodiscard]] inline bool is_port_io_builtin_name(std::string_view name)
+{
+    return name == "port_inb" || name == "port_outb" || name == "port_inw" ||
+           name == "port_outw" || name == "port_inl" || name == "port_outl";
+}
+
+/**
  * @brief A general expression node with id, span and variant payload.
  */
 struct Expr
@@ -208,7 +241,7 @@ struct Expr
     curlee::source::Span span;
     std::variant<IntExpr, BoolExpr, StringExpr, NameExpr, UnaryExpr, BinaryExpr, CallExpr,
                  MemberExpr, GroupExpr, ScopedNameExpr, StructLiteralExpr, PhysExpr, PhysReadExpr,
-                 PhysWriteExpr>
+                 PhysWriteExpr, PortIOExpr>
         node;
 };
 

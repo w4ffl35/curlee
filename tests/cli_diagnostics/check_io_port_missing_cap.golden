@@ -1,0 +1,4 @@
+tests/fixtures/check_io_port_missing_cap.curlee:4:17: error: missing capability value 'phys.mem' (add a parameter of type cap phys.mem)
+  |
+  |     let v: U8 = port_inb(0x3FD);
+  |                 ^^^^^^^^^^^^^^^

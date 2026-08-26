@@ -1571,6 +1571,205 @@ int main()
     }
 
     {
+        // x86 port I/O (issue #269): lower_expr on the six builtins must produce
+        // opaque ExprValues (reads: Int term; writes: Unit) with no axioms, and
+        // the constant-port + integer-value rules are enforced in the verifier
+        // too (defense in depth, mirroring Phys).
+        const curlee::source::Span s{.start = 0, .end = 1};
+
+        auto read_ok = [&](std::string_view op, std::string_view port_lexeme)
+        {
+            auto e =
+                make_expr(s, curlee::parser::PortIOExpr{.op = op, .port_lexeme = port_lexeme});
+            auto r = v.lower_expr(e);
+            if (!std::holds_alternative<curlee::verification::ExprValue>(r))
+            {
+                fail("expected lower_expr(port read) to succeed");
+            }
+        };
+
+        auto write_ok = [&](std::string_view op, std::string_view port_lexeme)
+        {
+            auto value = make_expr(s, curlee::parser::IntExpr{.lexeme = "1"});
+            auto e = make_expr(
+                s, curlee::parser::PortIOExpr{.op = op,
+                                              .port_lexeme = port_lexeme,
+                                              .value = make_expr_ptr(std::move(value))});
+            auto r = v.lower_expr(e);
+            if (!std::holds_alternative<curlee::verification::ExprValue>(r))
+            {
+                fail("expected lower_expr(port write) to succeed");
+            }
+        };
+
+        // All three widths for reads and writes (covers port_width_for_op "b"/"w"/"l").
+        read_ok("port_inb", "0x3FD");
+        read_ok("port_inw", "0x1CF");
+        read_ok("port_inl", "0xCFC");
+        write_ok("port_outb", "0x3F8");
+        write_ok("port_outw", "0x1CE");
+        write_ok("port_outl", "0xCF8");
+
+        // Underscore-separated port: '_' is stripped before handing the lexeme to Z3.
+        read_ok("port_inb", "0x3F_8");
+
+        // Repeated same-width calls exercise the cached func_decl branch in
+        // port_in_fn/port_out_fn.
+        read_ok("port_inb", "0x3F9");
+        write_ok("port_outb", "0x3F9");
+
+        // Non-literal port -> hard error.
+        auto bad_port = make_expr(
+            s, curlee::parser::PortIOExpr{.op = "port_inb", .port_lexeme = "base"});
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(v.lower_expr(bad_port)))
+        {
+            fail("expected lower_expr(port read, non-literal port) to error");
+        }
+
+        // Unknown builtin name (width.empty()) -> hard error.
+        auto bad_op = make_expr(
+            s, curlee::parser::PortIOExpr{.op = "port_inx", .port_lexeme = "0x3FD"});
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(v.lower_expr(bad_op)))
+        {
+            fail("expected lower_expr(unknown port builtin) to error");
+        }
+
+        // Write value must be an integer expression.
+        auto bool_value = make_expr(s, curlee::parser::BoolExpr{.value = true});
+        auto bad_val = make_expr(
+            s, curlee::parser::PortIOExpr{.op = "port_outb",
+                                          .port_lexeme = "0x3F8",
+                                          .value = make_expr_ptr(std::move(bool_value))});
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(v.lower_expr(bad_val)))
+        {
+            fail("expected lower_expr(port write, non-integer value) to error");
+        }
+    }
+
+    {
+        // Port I/O reads are opaque (issue #269): a U8 binding initialized from
+        // port_inb marks the name opaque under both MMIO and port provenance,
+        // and the opaque helpers must detect port reads through group/unary/
+        // binary wrappers and predicates through call/unary/binary/group shapes.
+        const curlee::source::Span s{.start = 0, .end = 1};
+
+        curlee::parser::LetStmt ls;
+        ls.name = "lsr";
+        ls.type = curlee::parser::TypeName{.span = s, .name = "U8"};
+        ls.value = make_expr(
+            s, curlee::parser::PortIOExpr{.op = "port_inb", .port_lexeme = "0x3FD"});
+        v.check_stmt_node(ls, s, curlee::types::TypeKind::Unit);
+        if (v.opaque_read_vars_.count("lsr") == 0 ||
+            v.opaque_port_read_vars_.count("lsr") == 0)
+        {
+            fail("expected port read binding to be marked opaque");
+        }
+
+        // expr_is_port_opaque_read through GroupExpr.
+        auto port_read =
+            make_expr(s, curlee::parser::PortIOExpr{.op = "port_inb", .port_lexeme = "0x3FD"});
+        auto grouped = make_expr(
+            s, curlee::parser::GroupExpr{.inner = make_expr_ptr(std::move(port_read))});
+        if (!v.expr_is_port_opaque_read(grouped))
+        {
+            fail("expected grouped port read to be port-opaque");
+        }
+
+        // expr_is_port_opaque_read through UnaryExpr (rhs).
+        auto port_read2 =
+            make_expr(s, curlee::parser::PortIOExpr{.op = "port_inb", .port_lexeme = "0x3FD"});
+        auto unary = make_expr(
+            s, curlee::parser::UnaryExpr{.op = TokenKind::Minus,
+                                         .rhs = make_expr_ptr(std::move(port_read2))});
+        if (!v.expr_is_port_opaque_read(unary))
+        {
+            fail("expected unary-wrapped port read to be port-opaque");
+        }
+
+        // expr_is_port_opaque_read through BinaryExpr (lhs).
+        auto port_read3 =
+            make_expr(s, curlee::parser::PortIOExpr{.op = "port_inb", .port_lexeme = "0x3FD"});
+        auto bin_lhs = make_expr(
+            s, curlee::parser::BinaryExpr{
+                   .op = TokenKind::Plus,
+                   .lhs = make_expr_ptr(std::move(port_read3)),
+                   .rhs = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "1"}))});
+        if (!v.expr_is_port_opaque_read(bin_lhs))
+        {
+            fail("expected binary port read (lhs) to be port-opaque");
+        }
+
+        // expr_is_port_opaque_read through BinaryExpr (rhs).
+        auto port_read4 =
+            make_expr(s, curlee::parser::PortIOExpr{.op = "port_inb", .port_lexeme = "0x3FD"});
+        auto bin_rhs = make_expr(
+            s, curlee::parser::BinaryExpr{
+                   .op = TokenKind::Plus,
+                   .lhs = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "1"})),
+                   .rhs = make_expr_ptr(std::move(port_read4))});
+        if (!v.expr_is_port_opaque_read(bin_rhs))
+        {
+            fail("expected binary port read (rhs) to be port-opaque");
+        }
+
+        // pred_mentions_port_opaque_read: PredCall args.
+        auto pred_name = [&](std::string_view name)
+        {
+            return make_pred(s, curlee::parser::PredName{.name = name});
+        };
+        std::vector<curlee::parser::Pred> p_call_args;
+        p_call_args.push_back(std::move(pred_name("lsr")));
+        auto p_call = make_pred(
+            s, curlee::parser::PredCall{.callee = "f", .args = std::move(p_call_args)});
+        if (!v.pred_mentions_port_opaque_read(p_call))
+        {
+            fail("expected PredCall arg to be port-opaque");
+        }
+
+        // pred_mentions_port_opaque_read: PredUnary rhs.
+        auto p_unary = make_pred(
+            s, curlee::parser::PredUnary{.op = TokenKind::Bang,
+                                         .rhs = make_pred_ptr(pred_name("lsr"))});
+        if (!v.pred_mentions_port_opaque_read(p_unary))
+        {
+            fail("expected PredUnary operand to be port-opaque");
+        }
+
+        // pred_mentions_port_opaque_read: PredBinary lhs.
+        auto p_binary_lhs = make_pred(
+            s, curlee::parser::PredBinary{
+                   .op = TokenKind::Greater,
+                   .lhs = make_pred_ptr(pred_name("lsr")),
+                   .rhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "0"}))});
+        if (!v.pred_mentions_port_opaque_read(p_binary_lhs))
+        {
+            fail("expected PredBinary lhs to be port-opaque");
+        }
+
+        // pred_mentions_port_opaque_read: PredBinary rhs.
+        auto p_binary_rhs = make_pred(
+            s, curlee::parser::PredBinary{
+                   .op = TokenKind::Greater,
+                   .lhs = make_pred_ptr(make_pred(s, curlee::parser::PredInt{.lexeme = "0"})),
+                   .rhs = make_pred_ptr(pred_name("lsr"))});
+        if (!v.pred_mentions_port_opaque_read(p_binary_rhs))
+        {
+            fail("expected PredBinary rhs to be port-opaque");
+        }
+
+        // pred_mentions_port_opaque_read: PredGroup inner.
+        auto p_group = make_pred(
+            s, curlee::parser::PredGroup{.inner = make_pred_ptr(pred_name("lsr"))});
+        if (!v.pred_mentions_port_opaque_read(p_group))
+        {
+            fail("expected PredGroup inner to be port-opaque");
+        }
+
+        v.opaque_read_vars_.clear();
+        v.opaque_port_read_vars_.clear();
+    }
+
+    {
         // is_phys_address_literal: empty lexeme -> false (line 208).
         if (curlee::verification::is_phys_address_literal(""))
         {

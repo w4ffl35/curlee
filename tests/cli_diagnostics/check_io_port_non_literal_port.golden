@@ -1,0 +1,4 @@
+tests/fixtures/check_io_port_non_literal_port.curlee:6:26: error: port_inb() expects a constant integer port
+  |
+  |     let v: U8 = port_inb(base);
+  |                          ^^^^

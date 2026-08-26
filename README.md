@@ -167,9 +167,11 @@ bootable **x86-64 multiboot2 kernel ELF**:
 - The **verification gate applies**: no proof, no build (nothing is emitted on failure).
 - The freestanding target is **Linux/x86-64 only** and has **no hosted builtins** (no `print`,
   no `String`, no `Vec`). Physical memory access uses `Phys<T>` + `read()`/`write()` under
-  `unsafe` and requires the `phys.mem` capability.
-- The VM never runs freestanding programs (`curlee run` rejects `Phys`/`extern` bodies);
-  `curlee build` is the freestanding execution path.
+  `unsafe` and requires the `phys.mem` capability. The x86 **port I/O** builtins
+  (`port_inb`/`port_outb`/`port_inw`/`port_outw`/`port_inl`/`port_outl`, constant ports only)
+  are gated the same way and codegen to inline `in`/`out` assembly.
+- The VM never runs freestanding programs (`curlee run` rejects `Phys`/`extern`/port I/O
+  bodies); `curlee build` is the freestanding execution path.
 
 End-to-end hello-kernel walkthrough:
 

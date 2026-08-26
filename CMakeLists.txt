@@ -1164,7 +1164,7 @@ if(CURLEE_ENABLE_FREESTANDING_SMOKE)
 
   # Each smoke test writes its emitted .c into its own subdirectory to avoid
   # races when ctest runs tests in parallel.
-  foreach(_fixture arith control_flow while_loop struct_fixture enum_match match_stmt phys_mem phys_param empty_union_enum forward_ref unit_empty match_unit_arms mixed_payload_enum phys_param_forward while_loop_unit multi_function extern_fn)
+  foreach(_fixture arith control_flow while_loop struct_fixture enum_match match_stmt phys_mem phys_param empty_union_enum forward_ref unit_empty match_unit_arms mixed_payload_enum phys_param_forward while_loop_unit multi_function extern_fn io_port)
     set(_fixture_workdir "${CMAKE_BINARY_DIR}/codegen_smoke_${_fixture}")
     file(MAKE_DIRECTORY "${_fixture_workdir}")
     add_test(
@@ -1201,10 +1201,12 @@ if(CURLEE_ENABLE_FREESTANDING_SMOKE)
   # Freestanding CI flow (issue #257): codegen -> gcc -ffreestanding -c ->
   # link -> entry/PVH check -> qemu boot smoke (skips visibly if qemu missing).
   # Uses the same script the `freestanding` CI job runs, so local `ctest` and
-  # CI stay in sync.
+  # CI stay in sync. The binary is passed explicitly so the test works in ANY
+  # preset build tree (e.g. linux-debug-coverage in the coverage gate), not
+  # just linux-debug.
   add_test(
     NAME curlee_freestanding_ci
-    COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/freestanding_ci.sh --preset linux-debug
+    COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/freestanding_ci.sh --binary $<TARGET_FILE:curlee>
   )
   set_tests_properties(curlee_freestanding_ci PROPERTIES
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}

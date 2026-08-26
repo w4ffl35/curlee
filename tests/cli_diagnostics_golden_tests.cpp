@@ -904,6 +904,17 @@ int main(int argc, char** argv)
         fs::path("tests/fixtures/check_phys_string_element.curlee");
     const fs::path rel_phys_read_non_phys =
         fs::path("tests/fixtures/check_phys_read_non_phys.curlee");
+    const fs::path rel_io_port_ok = fs::path("tests/fixtures/check_io_port_ok.curlee");
+    const fs::path rel_io_port_outside_unsafe =
+        fs::path("tests/fixtures/check_io_port_outside_unsafe.curlee");
+    const fs::path rel_io_port_missing_cap =
+        fs::path("tests/fixtures/check_io_port_missing_cap.curlee");
+    const fs::path rel_io_port_non_literal_port =
+        fs::path("tests/fixtures/check_io_port_non_literal_port.curlee");
+    const fs::path rel_io_port_read_contract =
+        fs::path("tests/fixtures/check_io_port_read_contract.curlee");
+    const fs::path rel_io_port_value_type =
+        fs::path("tests/fixtures/check_io_port_value_type.curlee");
     const fs::path rel_run_missing_stdout_cap = fs::path("tests/fixtures/r.curlee");
     const fs::path rel_run_missing_tty_cap = fs::path("tests/fixtures/run_missing_tty_cap.curlee");
     const fs::path rel_run_read_line = fs::path("tests/fixtures/run_read_line.curlee");
@@ -1117,6 +1128,50 @@ int main(int argc, char** argv)
         if (!run_stderr_case("check-phys-read-requires",
                              {"curlee", "check", rel_phys_read_requires.string()},
                              dir / "check_phys_read_requires.golden", false))
+        {
+            return 1;
+        }
+
+        // x86 port I/O builtins (issue #269): positive COM1 fixture verifies with
+        // zero obligations; gate and constant-port violations are hard errors;
+        // contracts cannot see through opaque port reads.
+        if (!run_stderr_case("check-io-port-ok", {"curlee", "check", rel_io_port_ok.string()},
+                             dir / "check_io_port_ok.golden", true))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("check-io-port-outside-unsafe",
+                             {"curlee", "check", rel_io_port_outside_unsafe.string()},
+                             dir / "check_io_port_outside_unsafe.golden", false))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("check-io-port-missing-cap",
+                             {"curlee", "check", rel_io_port_missing_cap.string()},
+                             dir / "check_io_port_missing_cap.golden", false))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("check-io-port-non-literal-port",
+                             {"curlee", "check", rel_io_port_non_literal_port.string()},
+                             dir / "check_io_port_non_literal_port.golden", false))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("check-io-port-read-contract",
+                             {"curlee", "check", rel_io_port_read_contract.string()},
+                             dir / "check_io_port_read_contract.golden", false))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("check-io-port-value-type",
+                             {"curlee", "check", rel_io_port_value_type.string()},
+                             dir / "check_io_port_value_type.golden", false))
         {
             return 1;
         }

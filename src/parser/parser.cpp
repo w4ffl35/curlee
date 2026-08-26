@@ -2360,6 +2360,18 @@ class Parser
                 continue;
             }
 
+            // x86 port I/O builtins: `port_inb(0x3FD)`, `port_outw(0x1CE, v)`.
+            // The port must be a compile-time constant literal; the optional
+            // value (out* variants) is a general expression of the matching
+            // width. Parsed as a dedicated node so the constant-port rule is
+            // enforced here (mirroring `phys<U>(literal)`).
+            if (const auto* port_name = std::get_if<NameExpr>(&expr.node);
+                port_name != nullptr && curlee::parser::is_port_io_builtin_name(port_name->name) &&
+                check(TokenKind::LParen))
+            {
+                return parse_port_io_call(expr.span, *port_name);
+            }
+
             if (!match(TokenKind::LParen))
             {
                 break;
@@ -2404,6 +2416,68 @@ class Parser
             expr = std::move(call);
         }
 
+        return expr;
+    }
+
+    // Parse an x86 port I/O builtin call: `port_inb(0x3FD)` or
+    // `port_outb(0x3F8, v)`. The caller has verified the next token is `(`.
+    [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic>
+    parse_port_io_call(const curlee::source::Span& start_span, const NameExpr& name)
+    {
+        advance(); // consume '('
+
+        // The port must be a compile-time constant: decimal (IntLiteral) or
+        // hex/underscore form (PhysAddrLiteral), mirroring phys() addresses.
+        if (!check(TokenKind::IntLiteral) && !check(TokenKind::PhysAddrLiteral))
+        {
+            return error_at(peek(), std::string(name.name) +
+                                        "() expects a constant integer port");
+        }
+        const Token port = advance();
+
+        std::unique_ptr<Expr> value;
+        const bool is_out = name.name.rfind("port_out", 0) == 0;
+        if (is_out)
+        {
+            if (auto err = consume(TokenKind::Comma, "expected ',' after port in " +
+                                                         std::string(name.name) + "()");
+                err.has_value())
+            {
+                return *err;
+            }
+            if (check(TokenKind::PhysAddrLiteral))
+            {
+                // Hex/underscore constant: only meaningful as a literal value
+                // here, so consume it and wrap as a constant Int expression
+                // (mirrors the write() value handling).
+                const Token lit = advance();
+                value = std::make_unique<Expr>();
+                value->span = lit.span;
+                value->node = IntExpr{.lexeme = lit.lexeme};
+            }
+            else
+            {
+                auto value_res = parse_expr();
+                if (std::holds_alternative<curlee::diag::Diagnostic>(value_res))
+                {
+                    return std::get<curlee::diag::Diagnostic>(std::move(value_res));
+                }
+                value = std::make_unique<Expr>(std::get<Expr>(std::move(value_res)));
+            }
+        }
+
+        if (auto err = consume(TokenKind::RParen, "expected ')' after port I/O arguments");
+            err.has_value())
+        {
+            return *err;
+        }
+        const Token rparen = previous();
+
+        Expr expr;
+        expr.span = span_cover(start_span, rparen.span);
+        expr.node = PortIOExpr{.op = name.name,
+                               .port_lexeme = port.lexeme,
+                               .value = std::move(value)};
         return expr;
     }
 
@@ -3036,6 +3110,17 @@ class Dumper
         dump_expr(*e.base);
         out_ << ".write(";
         dump_expr(*e.value);
+        out_ << ")";
+    }
+
+    void dump_expr_node(const PortIOExpr& e)
+    {
+        out_ << e.op << "(" << e.port_lexeme;
+        if (e.value != nullptr)
+        {
+            out_ << ", ";
+            dump_expr(*e.value);
+        }
         out_ << ")";
     }
 

@@ -658,6 +658,16 @@ class Resolver
         }
     }
 
+    void resolve_expr_node(const curlee::parser::PortIOExpr& e, Span)
+    {
+        // The port is a compile-time literal (no variable references). The
+        // out* value is a general expression and may reference variables.
+        if (e.value != nullptr)
+        {
+            resolve_expr(*e.value);
+        }
+    }
+
     void resolve_expr_node(const ScopedNameExpr&, Span)
     {
         // `Enum::Variant` is not a variable reference; do not call use_name().
@@ -756,6 +766,8 @@ bool is_builtin_call_name(std::string_view name)
         "__vec_push_bool", "__vec_get_bool",  "__vec_set_bool",
         "__set_new_int",   "__set_has_int",   "__set_insert_int",
         "variant_is",      "variant_unwrap",
+        "port_inb",        "port_outb",       "port_inw",
+        "port_outw",       "port_inl",        "port_outl",
     };
     return builtins.contains(name);
 }

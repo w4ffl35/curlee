@@ -108,8 +108,9 @@ void print_usage(std::ostream& out)
     out << "            (requires a C compiler and ld; x86-64 multiboot2 image)\n";
     out << "    -o <path>: output path (default out.c; --link requires -o).\n";
     out << "  curlee run --cap phys.mem <file.curlee>  # phys.mem is freestanding-only\n";
-    out << "    phys.mem: grants Phys<T> read()/write() MMIO access. Phys programs are\n";
-    out << "    rejected by the VM (freestanding-only); use `curlee build` instead.\n";
+    out << "    phys.mem: grants Phys<T> read()/write() MMIO access and the x86 port I/O\n";
+    out << "    builtins (port_inb/port_outb/port_inw/port_outw/port_inl/port_outl). Port\n";
+    out << "    programs are rejected by the VM (freestanding-only); use `curlee build`.\n";
     out << "  curlee fmt [--check] <file>\n";
     out << "  curlee bundle build [--root <dir>] [--stdlib-root <dir>] [--cap <capability>]... "
            "<entry.curlee> <out.bundle>\n";
@@ -142,7 +143,9 @@ void print_build_usage(std::ostream& out)
     out << "freestanding subset (no hosted builtins):\n";
     out << "  - Supported: Int, Bool, U8/U16/U32/U64 arithmetic, structs/enums (storable\n";
     out << "    payloads only), match, if/else, while, verified contracts, extern fn,\n";
-    out << "    Phys<T> + read()/write() under `unsafe` with `cap phys.mem`.\n";
+    out << "    Phys<T> + read()/write() and the x86 port I/O builtins\n";
+    out << "    (port_inb/port_outb/port_inw/port_outw/port_inl/port_outl, constant ports\n";
+    out << "    only) under `unsafe` with `cap phys.mem`.\n";
     out << "  - Rejected: print, String, Vec, python_ffi, and all hosted builtins; Phys/Unit\n";
     out << "    cannot be stored (struct fields, enum payloads), returned, or used as\n";
     out << "    parameters.\n";

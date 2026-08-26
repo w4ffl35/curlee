@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+#include <charconv>
 #include <cstddef>
 #include <curlee/lexer/token.h>
 #include <curlee/types/type.h>
@@ -37,6 +38,7 @@ using curlee::parser::MatchStmt;
 using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
+using curlee::parser::PortIOExpr;
 using curlee::parser::Stmt;
 using curlee::parser::UnsafeStmt;
 using curlee::parser::WhileStmt;
@@ -291,6 +293,9 @@ struct ScopeState
     std::unordered_map<std::string_view, std::string_view> phys_vars;
     // Names bound from a Phys read() result (opaque values that cannot be contracted).
     std::unordered_set<std::string_view> opaque_read_vars;
+    // Names bound from a port_in* read result (opaque; distinct provenance for
+    // the port-specific opaque diagnostic).
+    std::unordered_set<std::string_view> opaque_port_read_vars;
     std::size_t facts_size = 0;
 };
 
@@ -375,6 +380,9 @@ class Verifier
     std::unordered_map<std::string_view, std::string_view> phys_vars_;
     // Names bound from a Phys read() result; contracts referencing these cannot be proven.
     std::unordered_set<std::string_view> opaque_read_vars_;
+    // Names bound from a port_in* read result; contracts referencing these get the
+    // port-specific opaque diagnostic.
+    std::unordered_set<std::string_view> opaque_port_read_vars_;
 
     // Per-function counter for fresh solver symbol names (see fresh_symbol).
     // Reset in check_function so symbol names are short and stable in model
@@ -402,6 +410,7 @@ class Verifier
         state.bool_vars = lower_ctx_.bool_vars;
         state.phys_vars = phys_vars_;
         state.opaque_read_vars = opaque_read_vars_;
+        state.opaque_port_read_vars = opaque_port_read_vars_;
         state.facts_size = facts_.size();
     }
 
@@ -417,6 +426,7 @@ class Verifier
         lower_ctx_.bool_vars = state.bool_vars;
         phys_vars_ = state.phys_vars;
         opaque_read_vars_ = state.opaque_read_vars;
+        opaque_port_read_vars_ = state.opaque_port_read_vars;
         if (facts_.size() > state.facts_size)
         {
             facts_.erase(facts_.begin() + static_cast<std::ptrdiff_t>(state.facts_size),
@@ -669,6 +679,93 @@ class Verifier
         return inserted_it->second;
     }
 
+    // Width tag ("b"/"w"/"l") for a port I/O builtin name; empty for non-port names.
+    static std::string_view port_width_for_op(std::string_view op)
+    {
+        if (op == "port_inb" || op == "port_outb")
+        {
+            return "b";
+        }
+        if (op == "port_inw" || op == "port_outw")
+        {
+            return "w";
+        }
+        if (op == "port_inl" || op == "port_outl")
+        {
+            return "l";
+        }
+        return {};
+    }
+
+    // Parse a constant port literal (decimal or 0x-hex, with optional '_'
+    // separators) into its numeric value. Z3's rational parser accepts decimal
+    // numerals only — not '0x' hex prefixes or '_' separators — so the port
+    // must be converted to a plain decimal value before int_val(). Ports are
+    // 16-bit, so uint64_t is ample.
+    static std::optional<std::uint64_t> parse_port_literal(std::string_view lexeme)
+    {
+        std::string cleaned;
+        cleaned.reserve(lexeme.size());
+        for (const char ch : lexeme)
+        {
+            if (ch != '_')
+            {
+                cleaned.push_back(ch);
+            }
+        }
+        std::uint64_t value = 0;
+        const char* begin = cleaned.data();
+        const char* end = cleaned.data() + cleaned.size();
+        int base = 10;
+        if (cleaned.size() > 2 && cleaned[0] == '0' && (cleaned[1] == 'x' || cleaned[1] == 'X'))
+        {
+            base = 16;
+            begin += 2;
+        }
+        const auto res = std::from_chars(begin, end, value, base);
+        if (res.ec != std::errc{} || res.ptr != end)
+        {
+            return std::nullopt;
+        }
+        return value;
+    }
+
+    // One fresh uninterpreted read function per width: port_in_<b|w|l> : Int -> Int.
+    // No axioms constrain them, so the returned value is opaque to the solver.
+    std::unordered_map<std::string_view, z3::func_decl> port_in_fns_;
+
+    const z3::func_decl& port_in_fn(std::string_view width)
+    {
+        auto it = port_in_fns_.find(width);
+        if (it != port_in_fns_.end())
+        {
+            return it->second;
+        }
+        auto& ctx = solver_.context();
+        const std::string name = "port_in_" + std::string(width);
+        auto [inserted_it, _] =
+            port_in_fns_.emplace(width, ctx.function(name.c_str(), ctx.int_sort(), ctx.int_sort()));
+        return inserted_it->second;
+    }
+
+    // Uninterpreted write function per width: port_out_<b|w|l> : Int x Int -> Unit.
+    // No axioms relate writes to reads, so writes are opaque too.
+    std::unordered_map<std::string_view, z3::func_decl> port_out_fns_;
+
+    const z3::func_decl& port_out_fn(std::string_view width)
+    {
+        auto it = port_out_fns_.find(width);
+        if (it != port_out_fns_.end())
+        {
+            return it->second;
+        }
+        auto& ctx = solver_.context();
+        const std::string name = "port_out_" + std::string(width);
+        auto [inserted_it, _] = port_out_fns_.emplace(
+            width, ctx.function(name.c_str(), ctx.int_sort(), ctx.int_sort(), ctx.int_sort()));
+        return inserted_it->second;
+    }
+
     std::optional<std::string_view> lookup_phys_var(std::string_view name)
     {
         if (auto it = phys_vars_.find(name); it != phys_vars_.end())
@@ -723,6 +820,62 @@ class Verifier
                 else if constexpr (std::is_same_v<Node, curlee::parser::PredGroup>)
                 {
                     if (node.inner != nullptr && pred_mentions_opaque_read(*node.inner))
+                    {
+                        found = true;
+                    }
+                }
+            },
+            pred.node);
+        return found;
+    }
+
+    // Like pred_mentions_opaque_read, but only for port_in* provenance, so the
+    // opaque diagnostic can name the right access kind.
+    bool pred_mentions_port_opaque_read(const curlee::parser::Pred& pred) const
+    {
+        bool found = false;
+        std::visit(
+            [&](const auto& node)
+            {
+                using Node = std::decay_t<decltype(node)>;
+                if constexpr (std::is_same_v<Node, curlee::parser::PredName>)
+                {
+                    if (opaque_port_read_vars_.count(node.name) != 0)
+                    {
+                        found = true;
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PredCall>)
+                {
+                    for (const auto& arg : node.args)
+                    {
+                        if (pred_mentions_port_opaque_read(arg))
+                        {
+                            found = true;
+                        }
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PredUnary>)
+                {
+                    if (node.rhs != nullptr && pred_mentions_port_opaque_read(*node.rhs))
+                    {
+                        found = true;
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PredBinary>)
+                {
+                    if (node.lhs != nullptr && pred_mentions_port_opaque_read(*node.lhs))
+                    {
+                        found = true;
+                    }
+                    if (node.rhs != nullptr && pred_mentions_port_opaque_read(*node.rhs))
+                    {
+                        found = true;
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PredGroup>)
+                {
+                    if (node.inner != nullptr && pred_mentions_port_opaque_read(*node.inner))
                     {
                         found = true;
                     }
@@ -806,9 +959,10 @@ class Verifier
         return {};
     }
 
-    // True if an expression derives from an opaque MMIO read, transitively. A value is opaque
-    // if it is a PhysReadExpr, or a NameExpr bound to an opaque read (directly or via aliases),
-    // or a compound expression containing one.
+    // True if an expression derives from an opaque read (MMIO or port I/O),
+    // transitively. A value is opaque if it is a PhysReadExpr, a port_in*
+    // PortIOExpr, or a NameExpr bound to an opaque read (directly or via
+    // aliases), or a compound expression containing one.
     bool expr_is_opaque_read(const Expr& e) const
     {
         return std::visit(
@@ -818,6 +972,10 @@ class Verifier
                 if constexpr (std::is_same_v<Node, curlee::parser::PhysReadExpr>)
                 {
                     return true;
+                }
+                else if constexpr (std::is_same_v<Node, PortIOExpr>)
+                {
+                    return node.op.rfind("port_in", 0) == 0;
                 }
                 else if constexpr (std::is_same_v<Node, NameExpr>)
                 {
@@ -844,31 +1002,73 @@ class Verifier
             e.node);
     }
 
-    void add_opaque_read_note(Diagnostic& d)
+    // Like expr_is_opaque_read but restricted to port_in* provenance, so the
+    // opaque diagnostic can name the right access kind.
+    bool expr_is_port_opaque_read(const Expr& e) const
+    {
+        return std::visit(
+            [&](const auto& node) -> bool
+            {
+                using Node = std::decay_t<decltype(node)>;
+                if constexpr (std::is_same_v<Node, PortIOExpr>)
+                {
+                    return node.op.rfind("port_in", 0) == 0;
+                }
+                else if constexpr (std::is_same_v<Node, NameExpr>)
+                {
+                    return opaque_port_read_vars_.count(node.name) != 0;
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::GroupExpr>)
+                {
+                    return node.inner != nullptr && expr_is_port_opaque_read(*node.inner);
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::UnaryExpr>)
+                {
+                    return node.rhs != nullptr && expr_is_port_opaque_read(*node.rhs);
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::BinaryExpr>)
+                {
+                    if (node.lhs != nullptr && expr_is_port_opaque_read(*node.lhs))
+                    {
+                        return true;
+                    }
+                    return node.rhs != nullptr && expr_is_port_opaque_read(*node.rhs);
+                }
+                return false;
+            },
+            e.node);
+    }
+
+    void add_opaque_read_note(Diagnostic& d, bool is_port)
     {
         Related note;
-        note.message = "MMIO read is opaque; cannot prove this contract";
+        note.message = is_port ? "port I/O read is opaque; cannot prove this contract"
+                               : "MMIO read is opaque; cannot prove this contract";
         note.span = std::nullopt;
         d.notes.push_back(std::move(note));
     }
 
-    // Hard diagnostic for a contract that mentions an opaque MMIO read value. The build must
-    // fail rather than silently accept an unprovable contract.
-    void reject_opaque_read_contract(Span span, std::string_view message)
+    // Hard diagnostic for a contract that mentions an opaque read value
+    // (MMIO or port I/O). The build must fail rather than silently accept an
+    // unprovable contract.
+    void reject_opaque_read_contract(Span span, std::string_view message, bool is_port = false)
     {
         auto d = error_at(span, std::string(message));
-        add_opaque_read_note(d);
+        add_opaque_read_note(d, is_port);
         diags_.push_back(std::move(d));
     }
 
     void add_fact(const curlee::parser::Pred& pred)
     {
-        // Opaque MMIO read values can never satisfy a contract: reject unconditionally
+        // Opaque read values can never satisfy a contract: reject unconditionally
         // before attempting to lower, so no opaque-derived contract can silently pass.
         if (pred_mentions_opaque_read(pred))
         {
+            const bool is_port = pred_mentions_port_opaque_read(pred);
             reject_opaque_read_contract(pred.span,
-                                        "cannot prove contract on opaque MMIO read value");
+                                        is_port ? "cannot prove contract on opaque port I/O read value"
+                                                : "cannot prove contract on opaque MMIO read value",
+                                        is_port);
             return;
         }
         auto lowered = lower_predicate(pred, lower_ctx_);
@@ -1193,6 +1393,60 @@ class Verifier
                     (void)phys_write_fn(elem)(base.expr, value.expr);
                     return ExprValue{solver_.context().bool_val(true), TypeKind::Unit, false};
                 }
+                else if constexpr (std::is_same_v<Node, PortIOExpr>)
+                {
+                    // Second-line enforcement: the port must be a constant literal.
+                    // The front-end guarantees this, but the verifier does not trust the AST.
+                    if (!is_phys_address_literal(node.port_lexeme))
+                    {
+                        return error_at(e.span, "port I/O address must be a constant literal");
+                    }
+                    const std::string_view width = port_width_for_op(node.op);
+                    if (width.empty())
+                    {
+                        return error_at(e.span,
+                                        "unknown port I/O builtin '" + std::string(node.op) + "'");
+                    }
+                    // The port lowers to its constant integer value. Hex and
+                    // underscore forms are converted to a decimal numeral because
+                    // Z3's rational parser does not accept them.
+                    const auto port_value = parse_port_literal(node.port_lexeme);
+                    if (!port_value.has_value())
+                    {
+                        return error_at(e.span, "port I/O address must be a constant literal");
+                    }
+                    const z3::expr port_term =
+                        solver_.context().int_val(static_cast<int>(*port_value));
+
+                    if (node.op.rfind("port_out", 0) == 0)
+                    {
+                        // Writes lower to the uninterpreted function
+                        // port_out_<b|w|l> : Int x Int -> Unit. No axioms relate
+                        // writes to reads, so writes are opaque too.
+                        if (node.value == nullptr) // GCOVR_EXCL_LINE
+                        {
+                            return error_at(e.span, "missing port I/O write value"); // GCOVR_EXCL_LINE
+                        }
+                        auto value_res = lower_expr(*node.value);
+                        if (std::holds_alternative<Diagnostic>(value_res))
+                        {
+                            return std::get<Diagnostic>(value_res);
+                        }
+                        auto value = std::get<ExprValue>(value_res);
+                        if (value.kind != TypeKind::Int && !is_phys_element_kind(value.kind))
+                        {
+                            return error_at(e.span,
+                                            "port I/O write value must be an integer expression");
+                        }
+                        // Unit result: represent with a dummy Bool true (Unit is not a Z3 sort).
+                        (void)port_out_fn(width)(port_term, value.expr);
+                        return ExprValue{solver_.context().bool_val(true), TypeKind::Unit, false};
+                    }
+
+                    // Reads lower to the uninterpreted function port_in_<b|w|l> : Int -> Int.
+                    // No axioms constrain them, so the returned value is opaque to the solver.
+                    return ExprValue{port_in_fn(width)(port_term), TypeKind::Int, false};
+                }
                 else if constexpr (std::is_same_v<Node, CallExpr>)
                 {
                     return error_at(e.span, "calls are not supported in verification expressions");
@@ -1348,16 +1602,20 @@ class Verifier
             return;
         }
 
-        // An opaque MMIO read value must never flow into a contract silently. Check argument
-        // provenance before the MVP gate so that a call like consume(reg.read()) with a
-        // requires-guarded unsigned parameter is a hard error, not a silent skip.
+        // An opaque read value (MMIO or port I/O) must never flow into a contract silently.
+        // Check argument provenance before the MVP gate so that a call like consume(reg.read())
+        // with a requires-guarded unsigned parameter is a hard error, not a silent skip.
         bool arg_is_opaque = false;
+        bool arg_is_port_opaque = false;
         for (const auto& arg : call.args)
         {
             if (expr_is_opaque_read(arg))
             {
                 arg_is_opaque = true;
-                break;
+            }
+            if (expr_is_port_opaque_read(arg))
+            {
+                arg_is_port_opaque = true;
             }
         }
 
@@ -1367,7 +1625,7 @@ class Verifier
             if (k != TypeKind::Int && k != TypeKind::Bool)
             {
                 // The callee has non-scalar parameters (e.g. unsigned element kinds). If an
-                // argument derives from an opaque MMIO read, any contract on that parameter
+                // argument derives from an opaque read, any contract on that parameter
                 // cannot be proven - fail loudly instead of silently skipping.
                 if (arg_is_opaque)
                 {
@@ -1375,7 +1633,10 @@ class Verifier
                     // guaranteed non-empty here (the ternary fallback was dead code).
                     reject_opaque_read_contract(
                         call.args[0].span,
-                        "cannot prove call contract on opaque MMIO read argument");
+                        arg_is_port_opaque
+                            ? "cannot prove call contract on opaque port I/O read argument"
+                            : "cannot prove call contract on opaque MMIO read argument",
+                        arg_is_port_opaque);
                 }
                 return;
             }
@@ -1433,12 +1694,16 @@ class Verifier
 
         for (const auto& req : sig.decl->requires_clauses)
         {
-            // A requires clause mentioning an opaque MMIO read value can never be proven;
+            // A requires clause mentioning an opaque read value can never be proven;
             // reject unconditionally before lowering.
             if (pred_mentions_opaque_read(req))
             {
-                reject_opaque_read_contract(req.span,
-                                            "cannot prove requires on opaque MMIO read value");
+                const bool is_port = pred_mentions_port_opaque_read(req);
+                reject_opaque_read_contract(
+                    req.span,
+                    is_port ? "cannot prove requires on opaque port I/O read value"
+                            : "cannot prove requires on opaque MMIO read value",
+                    is_port);
                 continue;
             }
             auto lowered = lower_predicate(req, call_ctx);
@@ -1522,8 +1787,12 @@ class Verifier
             {
                 if (pred_mentions_opaque_read(ens))
                 {
-                    reject_opaque_read_contract(ens.span,
-                                                "cannot prove ensures on opaque MMIO read value");
+                    const bool is_port = pred_mentions_port_opaque_read(ens);
+                    reject_opaque_read_contract(
+                        ens.span,
+                        is_port ? "cannot prove ensures on opaque port I/O read value"
+                                : "cannot prove ensures on opaque MMIO read value",
+                        is_port);
                     continue;
                 }
                 auto lowered_ens = lower_predicate(ens, post_ctx);
@@ -1628,6 +1897,14 @@ class Verifier
                         check_expr_for_calls(*node.value, nullptr);
                     }
                 }
+                else if constexpr (std::is_same_v<Node, PortIOExpr>)
+                {
+                    // Port I/O is not a function call; scan the out* value for calls.
+                    if (node.value)
+                    {
+                        check_expr_for_calls(*node.value, nullptr);
+                    }
+                }
                 else
                 {
                     (void)node;
@@ -1672,18 +1949,22 @@ class Verifier
             return;
         }
 
-        // A function returning an opaque MMIO read value has an unprovable `result`: any
-        // ensures clause mentioning it must be rejected with the opaque note, never silently
-        // satisfied.
+        // A function returning an opaque read value (MMIO or port I/O) has an
+        // unprovable `result`: any ensures clause mentioning it must be rejected
+        // with the opaque note, never silently satisfied.
         const bool result_is_opaque = expr_is_opaque_read(*s.value);
         if (result_is_opaque)
         {
+            const bool result_is_port = expr_is_port_opaque_read(*s.value);
             for (const auto& ens : func->ensures)
             {
                 if (pred_mentions_result(ens))
                 {
-                    reject_opaque_read_contract(ens.span,
-                                                "cannot prove ensures on opaque MMIO read result");
+                    reject_opaque_read_contract(
+                        ens.span,
+                        result_is_port ? "cannot prove ensures on opaque port I/O read result"
+                                       : "cannot prove ensures on opaque MMIO read result",
+                        result_is_port);
                 }
             }
             return;
@@ -1836,19 +2117,27 @@ class Verifier
         {
             // Uninterpreted: do not declare a solver variable, but still scan for calls.
             // Opaque provenance is transitive: a binding whose initializer derives from a
-            // Phys read() (directly or via an alias chain) is itself opaque and must not be
-            // contractable.
+            // Phys read() or port_in* read (directly or via an alias chain) is itself
+            // opaque and must not be contractable.
             if (std::holds_alternative<curlee::parser::PhysReadExpr>(s.value.node) ||
                 expr_is_opaque_read(s.value))
             {
                 opaque_read_vars_.insert(s.name);
             }
+            if (expr_is_port_opaque_read(s.value))
+            {
+                opaque_port_read_vars_.insert(s.name);
+            }
             // A refinement on an opaque read value cannot be proven; surface it as a hard
             // diagnostic with the opaque-value note rather than silently passing.
             if (s.refinement.has_value() && pred_mentions_opaque_read(*s.refinement))
             {
-                reject_opaque_read_contract(s.refinement->span,
-                                            "cannot prove refinement on opaque MMIO read value");
+                const bool is_port = pred_mentions_port_opaque_read(*s.refinement);
+                reject_opaque_read_contract(
+                    s.refinement->span,
+                    is_port ? "cannot prove refinement on opaque port I/O read value"
+                            : "cannot prove refinement on opaque MMIO read value",
+                    is_port);
             }
             check_expr_for_calls(s.value);
             return;
@@ -2311,7 +2600,7 @@ class Verifier
     }
 
     // Lower a loop contract clause into a Z3 term with the opaque-read
-    // rejection applied first (an opaque MMIO value can never satisfy a
+    // rejection applied first (an opaque read value can never satisfy a
     // contract). `int_clause` selects the Int-valued lowering used by
     // `decreases` variant expressions.
     std::optional<z3::expr> lower_loop_clause(const curlee::parser::Pred& pred,
@@ -2319,8 +2608,11 @@ class Verifier
     {
         if (pred_mentions_opaque_read(pred))
         {
+            const bool is_port = pred_mentions_port_opaque_read(pred);
             reject_opaque_read_contract(pred.span,
-                                        "cannot prove contract on opaque MMIO read value");
+                                        is_port ? "cannot prove contract on opaque port I/O read value"
+                                                : "cannot prove contract on opaque MMIO read value",
+                                        is_port);
             return std::nullopt;
         }
         auto lowered =

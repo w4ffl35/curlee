@@ -51,6 +51,29 @@ static std::string join_path(const std::vector<std::string_view>& parts)
     return out;
 } // GCOVR_EXCL_LINE
 
+// True if a lexeme is a plain compile-time integer literal: decimal digits,
+// hex (0x...) form, with optional underscore separators. Used for phys()
+// addresses and port I/O ports (both must be constants).
+static bool is_constant_int_literal(std::string_view lexeme)
+{
+    if (lexeme.empty())
+    {
+        return false;
+    }
+    for (std::size_t i = 0; i < lexeme.size(); ++i)
+    {
+        const char c = lexeme[i];
+        const bool is_digit = (c >= '0' && c <= '9');
+        const bool is_hex_digit = (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        const bool is_hex_marker = (c == 'x' || c == 'X') && i == 1 && lexeme[0] == '0';
+        if (!is_digit && c != '_' && !is_hex_digit && !is_hex_marker)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool is_reserved_builtin_name(std::string_view name)
 {
     static const std::unordered_set<std::string_view> reserved = {
@@ -60,6 +83,8 @@ static bool is_reserved_builtin_name(std::string_view name)
         "__vec_set_int",   "__vec_new_bool",   "__vec_len_bool",   "__vec_push_bool",
         "__vec_get_bool",  "__vec_set_bool",   "__set_new_int",    "__set_has_int",
         "__set_insert_int",
+        "port_inb",        "port_outb",        "port_inw",
+        "port_outw",       "port_inl",         "port_outl",
     }; // GCOVR_EXCL_LINE
     return reserved.contains(name);
 }
@@ -1647,25 +1672,7 @@ class Checker
     [[nodiscard]] std::optional<Type> check_expr_node(const curlee::parser::PhysExpr& e, Span span)
     {
         // Rule (1): the address must be a compile-time integer literal (decimal or hex).
-        const std::string_view lexeme = e.lexeme;
-        bool is_literal = !lexeme.empty();
-        if (is_literal)
-        {
-            for (std::size_t i = 0; i < lexeme.size(); ++i)
-            {
-                const char c = lexeme[i];
-                const bool is_digit = (c >= '0' && c <= '9');
-                const bool is_hex_digit = (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-                const bool is_hex_marker =
-                    (c == 'x' || c == 'X') && i == 1 && lexeme[0] == '0';
-                if (!is_digit && c != '_' && !is_hex_digit && !is_hex_marker)
-                {
-                    is_literal = false;
-                    break;
-                }
-            }
-        }
-        if (!is_literal)
+        if (!is_constant_int_literal(e.lexeme))
         {
             error_at(span, "physical address must be a constant literal");
             return std::nullopt;
@@ -1763,6 +1770,67 @@ class Checker
             error_at(span, "write() value type mismatch: expected " +
                                std::string(base_t->element_name) + ", got " +
                                std::string(to_string(*value_t)));
+        }
+        return Type{.kind = TypeKind::Unit};
+    }
+
+    [[nodiscard]] std::optional<Type> check_expr_node(const curlee::parser::PortIOExpr& e,
+                                                      Span span)
+    {
+        // Rules (2)+(3): port I/O only inside `unsafe` and requires `cap phys.mem`,
+        // mirroring the Phys<T> read()/write() gate. Ports have no address-range
+        // fault model in the verifier, so no OOB obligation is introduced.
+        if (unsafe_depth_ == 0)
+        {
+            error_at(span, "port I/O access requires an unsafe block");
+            return std::nullopt;
+        }
+        require_capability("phys.mem", span);
+
+        // Rule (1): the port must be a compile-time integer literal (decimal or hex).
+        if (!is_constant_int_literal(e.port_lexeme))
+        {
+            error_at(span, "port I/O address must be a constant literal");
+            return std::nullopt;
+        }
+
+        const std::string_view op = e.op;
+        const bool is_out = op.rfind("port_out", 0) == 0;
+        const bool is_word = op == "port_inw" || op == "port_outw";
+        const bool is_long = op == "port_inl" || op == "port_outl";
+        const TypeKind width_kind = is_long ? TypeKind::U32 : (is_word ? TypeKind::U16 : TypeKind::U8);
+
+        if (!is_out)
+        {
+            // Reads (port_in*) take only the port; the parser never attaches a value.
+            if (e.value != nullptr) // GCOVR_EXCL_LINE
+            {
+                return std::nullopt; // GCOVR_EXCL_LINE
+            }
+            return Type{.kind = width_kind};
+        }
+
+        // Writes (port_out*) take a value of the matching unsigned width. Int
+        // literals are accepted (e.g. `port_outb(0x3F8, 0x48)`) mirroring the
+        // Phys write() handling of hex/underscore constants.
+        if (e.value == nullptr) // GCOVR_EXCL_LINE
+        {
+            return std::nullopt; // GCOVR_EXCL_LINE
+        }
+        const auto value_t = check_expr(*e.value);
+        if (!value_t.has_value())
+        {
+            return std::nullopt;
+        }
+        const Type expected{.kind = width_kind};
+        const bool int_literal_for_unsigned =
+            value_t->kind == TypeKind::Int && is_phys_element_kind(width_kind);
+        if (*value_t != expected && !int_literal_for_unsigned)
+        {
+            error_at(span, "port I/O value type mismatch for '" + std::string(op) +
+                               "': expected " + std::string(to_string(expected)) + ", got " +
+                               std::string(to_string(*value_t)));
+            return std::nullopt;
         }
         return Type{.kind = TypeKind::Unit};
     }

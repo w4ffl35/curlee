@@ -1,0 +1,16 @@
+// COM1 serial port I/O (issue #269): mirrors putc_driver.c.
+// port_outb to the line-control register, an opaque port_inb read of the
+// line-status register, then port_outb of the byte to the transmit-hold
+// register. Verifies with zero obligations: port reads are trusted/opaque.
+// The ghost snapshot and the return of a port read force the verifier to
+// lower hex/underscore ports through Z3 (issue #269 regression guard: the
+// verifier must convert 0x-hex ports to decimal numerals, not crash).
+fn main(pm: cap phys.mem) -> U32 {
+  unsafe {
+    port_outb(0x3FB, 0x03);         // LCR: 8N1
+    let lsr: U8 = port_inb(0x3FD);  // LSR (opaque read)
+    ghost let g = port_inb(0x3F_8); // underscore port snapshot
+    port_outb(0x3F8, lsr);          // THR: write the read byte back
+    return port_inl(0xCFC);         // PCI config data (opaque read)
+  }
+}

@@ -1144,6 +1144,27 @@ int main()
         (void)find_expr_at(group_null, 1, nullptr);
         (void)find_call_expr_at(group_null, 1, nullptr);
 
+        // Port I/O builtins (issue #269): value==nullptr (in* read) takes the
+        // skip branch; value!=nullptr (out* write) recurses into the value.
+        Expr port_io_read{
+            .id = 7,
+            .span = span,
+            .node = curlee::parser::PortIOExpr{.op = "port_inb", .port_lexeme = "0x3FD", .value = nullptr}};
+        (void)find_expr_at(port_io_read, 1, nullptr);
+        (void)find_call_expr_at(port_io_read, 1, nullptr);
+
+        Expr port_io_write_val{
+            .id = 8, .span = span, .node = curlee::parser::IntExpr{.lexeme = "0x48"}};
+        Expr port_io_write{
+            .id = 9,
+            .span = span,
+            .node = curlee::parser::PortIOExpr{
+                .op = "port_outb",
+                .port_lexeme = "0x3F8",
+                .value = std::make_unique<curlee::parser::Expr>(std::move(port_io_write_val))}};
+        (void)find_expr_at(port_io_write, 1, nullptr);
+        (void)find_call_expr_at(port_io_write, 1, nullptr);
+
         // Also hit the initial predicate in find_call_expr_at for non-call nodes and
         // out-of-span offsets.
         const Expr leaf = make_leaf(30);

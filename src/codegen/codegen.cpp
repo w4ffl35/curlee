@@ -38,6 +38,7 @@ using curlee::parser::NameExpr;
 using curlee::parser::PhysExpr;
 using curlee::parser::PhysReadExpr;
 using curlee::parser::PhysWriteExpr;
+using curlee::parser::PortIOExpr;
 using curlee::parser::Program;
 using curlee::parser::ReturnStmt;
 using curlee::parser::ScopedNameExpr;
@@ -109,6 +110,186 @@ std::string strip_underscores(std::string_view lexeme)
         }
     }
     return out;
+}
+
+// ---------------------------------------------------------------------------
+// Port I/O usage scan
+// ---------------------------------------------------------------------------
+// The x86 port I/O helpers (curlee_port_inb/...) are emitted into the prologue
+// only when the program actually uses port I/O, keeping unrelated golden output
+// byte-identical. These walkers detect that usage before the prologue is
+// written.
+
+bool expr_uses_port_io(const Expr& e);
+
+bool stmt_uses_port_io(const Stmt& s);
+
+bool block_uses_port_io(const curlee::parser::Block& b)
+{
+    for (const auto& stmt : b.stmts)
+    {
+        if (stmt_uses_port_io(stmt))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool stmt_uses_port_io(const Stmt& s)
+{
+    return std::visit(
+        [](const auto& node) -> bool
+        {
+            using Node = std::decay_t<decltype(node)>;
+            if constexpr (std::is_same_v<Node, LetStmt>)
+            {
+                return expr_uses_port_io(node.value);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::GhostLetStmt>)
+            {
+                return expr_uses_port_io(node.value);
+            }
+            else if constexpr (std::is_same_v<Node, ReturnStmt>)
+            {
+                return node.value.has_value() && expr_uses_port_io(*node.value);
+            }
+            else if constexpr (std::is_same_v<Node, ExprStmt>)
+            {
+                return expr_uses_port_io(node.expr);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::BlockStmt>)
+            {
+                return node.block != nullptr && block_uses_port_io(*node.block);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::UnsafeStmt>)
+            {
+                return node.body != nullptr && block_uses_port_io(*node.body);
+            }
+            else if constexpr (std::is_same_v<Node, IfStmt>)
+            {
+                if (expr_uses_port_io(node.cond))
+                {
+                    return true;
+                }
+                if (node.then_block != nullptr && block_uses_port_io(*node.then_block))
+                {
+                    return true;
+                }
+                return node.else_block != nullptr && block_uses_port_io(*node.else_block);
+            }
+            else if constexpr (std::is_same_v<Node, WhileStmt>)
+            {
+                if (expr_uses_port_io(node.cond))
+                {
+                    return true;
+                }
+                return node.body != nullptr && block_uses_port_io(*node.body);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::MatchStmt>)
+            {
+                if (expr_uses_port_io(node.value))
+                {
+                    return true;
+                }
+                for (const auto& arm : node.arms)
+                {
+                    if (arm.body != nullptr && block_uses_port_io(*arm.body))
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            return false;
+        },
+        s.node);
+}
+
+bool expr_uses_port_io(const Expr& e)
+{
+    return std::visit(
+        [](const auto& node) -> bool
+        {
+            using Node = std::decay_t<decltype(node)>;
+            if constexpr (std::is_same_v<Node, PortIOExpr>)
+            {
+                return true;
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::UnaryExpr>)
+            {
+                return node.rhs != nullptr && expr_uses_port_io(*node.rhs);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::BinaryExpr>)
+            {
+                return (node.lhs != nullptr && expr_uses_port_io(*node.lhs)) ||
+                       (node.rhs != nullptr && expr_uses_port_io(*node.rhs));
+            }
+            else if constexpr (std::is_same_v<Node, CallExpr>)
+            {
+                if (node.callee != nullptr && expr_uses_port_io(*node.callee))
+                {
+                    return true;
+                }
+                for (const auto& arg : node.args)
+                {
+                    if (expr_uses_port_io(arg))
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            else if constexpr (std::is_same_v<Node, MemberExpr>)
+            {
+                return node.base != nullptr && expr_uses_port_io(*node.base);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::GroupExpr>)
+            {
+                return node.inner != nullptr && expr_uses_port_io(*node.inner);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::StructLiteralExpr>)
+            {
+                for (const auto& f : node.fields)
+                {
+                    if (f.value != nullptr && expr_uses_port_io(*f.value))
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PhysReadExpr>)
+            {
+                return node.base != nullptr && expr_uses_port_io(*node.base);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PhysWriteExpr>)
+            {
+                return (node.base != nullptr && expr_uses_port_io(*node.base)) ||
+                       (node.value != nullptr && expr_uses_port_io(*node.value));
+            }
+            return false;
+        },
+        e.node);
+}
+
+bool program_uses_port_io(const curlee::parser::Program& program)
+{
+    for (const auto& f : program.functions)
+    {
+        if (block_uses_port_io(f.body))
+        {
+            return true;
+        }
+        for (const auto& g : f.ghost_lets)
+        {
+            if (expr_uses_port_io(g.value))
+            {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -271,7 +452,10 @@ class CEmitter
             return diags_;
         }
 
-        emit_prologue();
+        // The port I/O helpers are emitted only when the program uses them,
+        // keeping unrelated golden output byte-identical.
+        const bool uses_port_io = program_uses_port_io(program);
+        emit_prologue(uses_port_io);
 
         // Forward declarations for all nominal types so that struct and enum
         // definitions can reference each other in any order (the type checker
@@ -517,12 +701,64 @@ class CEmitter
         }
     }
 
-    void emit_prologue()
+    void emit_prologue(bool uses_port_io)
     {
         writer_.line("/* Generated by curlee build --target freestanding-c. */");
         writer_.line("/* Verified Curlee program compiled to freestanding C. */");
         writer_.newline();
         writer_.line("#include <stdint.h>");
+        writer_.newline();
+        if (uses_port_io)
+        {
+            emit_port_io_helpers();
+        }
+    }
+
+    // Emit the x86 port I/O builtins as `static inline` helpers wrapping the
+    // `in`/`out` instructions. Helpers (rather than raw `__asm__` at each call
+    // site) keep the emitted C valid under -std=c11: a value-returning `in`
+    // cannot be expressed as an inline-asm expression without GNU statement
+    // expressions. The "Nd" constraint uses an 8-bit immediate for ports in
+    // 0..255 and the DX register otherwise, so constant ports stay constant
+    // while the emitted call sites remain plain C function calls.
+    void emit_port_io_helpers()
+    {
+        writer_.line("/* x86 port I/O builtins (constant ports; gated by `unsafe` + `cap phys.mem`). */");
+        writer_.line("static inline uint8_t curlee_port_inb(uint16_t port)");
+        writer_.open_brace();
+        writer_.line("uint8_t v;");
+        writer_.line("__asm__ volatile(\"inb %1, %0\" : \"=a\"(v) : \"Nd\"(port));");
+        writer_.line("return v;");
+        writer_.close_brace();
+        writer_.newline();
+        writer_.line("static inline uint16_t curlee_port_inw(uint16_t port)");
+        writer_.open_brace();
+        writer_.line("uint16_t v;");
+        writer_.line("__asm__ volatile(\"inw %1, %0\" : \"=a\"(v) : \"Nd\"(port));");
+        writer_.line("return v;");
+        writer_.close_brace();
+        writer_.newline();
+        writer_.line("static inline uint32_t curlee_port_inl(uint16_t port)");
+        writer_.open_brace();
+        writer_.line("uint32_t v;");
+        writer_.line("__asm__ volatile(\"inl %1, %0\" : \"=a\"(v) : \"Nd\"(port));");
+        writer_.line("return v;");
+        writer_.close_brace();
+        writer_.newline();
+        writer_.line("static inline void curlee_port_outb(uint16_t port, uint8_t value)");
+        writer_.open_brace();
+        writer_.line("__asm__ volatile(\"outb %0, %1\" ::\"a\"(value), \"Nd\"(port));");
+        writer_.close_brace();
+        writer_.newline();
+        writer_.line("static inline void curlee_port_outw(uint16_t port, uint16_t value)");
+        writer_.open_brace();
+        writer_.line("__asm__ volatile(\"outw %0, %1\" ::\"a\"(value), \"Nd\"(port));");
+        writer_.close_brace();
+        writer_.newline();
+        writer_.line("static inline void curlee_port_outl(uint16_t port, uint32_t value)");
+        writer_.open_brace();
+        writer_.line("__asm__ volatile(\"outl %0, %1\" ::\"a\"(value), \"Nd\"(port));");
+        writer_.close_brace();
         writer_.newline();
     }
 
@@ -1942,6 +2178,34 @@ class CEmitter
             return "(" + deref_text + ") = (" + value + ")";
         }
         return "(*(volatile " + c_type + "*)" + deref_text + ")) = (" + value + ")";
+    }
+
+    // x86 port I/O builtins lower to calls of the prologue helpers with the
+    // constant port embedded: `curlee_port_inb((uint16_t)(0x3FD))` /
+    // `curlee_port_outb((uint16_t)(0x3F8), (v))`. The front-end guarantees the
+    // port is a constant literal, so the emitted call passes a compile-time
+    // constant.
+    std::string emit_expr_node(const PortIOExpr& expr, Span span)
+    {
+        const std::string port = strip_underscores(expr.port_lexeme);
+        const std::string helper = "curlee_" + std::string(expr.op);
+
+        if (expr.op.rfind("port_in", 0) == 0)
+        {
+            return helper + "((uint16_t)(" + port + "))";
+        }
+
+        if (expr.value == nullptr)
+        {
+            push_error(span, "missing port I/O write value");
+            return "0";
+        }
+        const std::string value = emit_expr_as_text(*expr.value);
+        if (!diags_.empty())
+        {
+            return "0";
+        }
+        return helper + "((uint16_t)(" + port + "), (" + value + "))";
     }
 };
 
