@@ -44,6 +44,7 @@ using curlee::parser::PhysWriteExpr;
 using curlee::parser::PortIOExpr;
 using curlee::parser::Program;
 using curlee::parser::RuntimePhysReadExpr;
+using curlee::parser::RuntimePhysWriteExpr;
 using curlee::parser::ReturnStmt;
 using curlee::parser::ScopedNameExpr;
 using curlee::parser::Stmt;
@@ -290,6 +291,14 @@ bool expr_uses_port_io(const Expr& e)
                 // expression is general (issue #279) and could nest port I/O;
                 // scan it so the prologue helpers are still emitted.
                 return node.addr != nullptr && expr_uses_port_io(*node.addr);
+            }
+            else if constexpr (std::is_same_v<Node, RuntimePhysWriteExpr>)
+            {
+                // A runtime phys write is not itself port I/O, but its address
+                // and value expressions are general (issue #285) and could nest
+                // port I/O; scan them so the prologue helpers are still emitted.
+                return (node.addr != nullptr && expr_uses_port_io(*node.addr)) ||
+                       (node.value != nullptr && expr_uses_port_io(*node.value));
             }
             return false;
         },
@@ -2537,6 +2546,54 @@ class CEmitter
         }
         const std::string c_type = std::string(c_type_for_phys_element(element_kind));
         return "(*(volatile " + c_type + "*)(uintptr_t)(" + addr + "))";
+    }
+
+    // Runtime-address physical memory write (issue #285):
+    // `phys_write_u8(addr, v)` -> `(*(volatile uint8_t*)(uintptr_t)(addr)) = (v);`,
+    // `phys_write_u16(addr, v)` -> `(*(volatile uint16_t*)(uintptr_t)(addr)) = (v);`,
+    // `phys_write_u32(addr, v)` -> `(*(volatile uint32_t*)(uintptr_t)(addr)) = (v);`,
+    // `phys_write_u64(addr, v)` -> `(*(volatile uint64_t*)(uintptr_t)(addr)) = (v);`.
+    // The address is a general Int/U64 expression and the value is the matching
+    // unsigned width, mirroring the phys_read_* codegen (issue #279) with the
+    // load mirrored to a store.
+    std::string emit_expr_node(const RuntimePhysWriteExpr& expr, Span span)
+    {
+        if (expr.addr == nullptr || expr.value == nullptr)
+        {
+            push_error(span, "missing runtime phys write address or value");
+            return "0";
+        }
+        std::string_view element_kind;
+        if (expr.op == "phys_write_u8")
+        {
+            element_kind = "U8";
+        }
+        else if (expr.op == "phys_write_u16")
+        {
+            element_kind = "U16";
+        }
+        else if (expr.op == "phys_write_u32")
+        {
+            element_kind = "U32";
+        }
+        else if (expr.op == "phys_write_u64")
+        {
+            element_kind = "U64";
+        }
+        else
+        {
+            push_error(span, "unknown runtime phys write builtin '" + std::string(expr.op) + "'");
+            return "0";
+        }
+
+        const std::string addr = emit_expr_as_text(*expr.addr);
+        const std::string value = emit_expr_as_text(*expr.value);
+        if (!diags_.empty())
+        {
+            return "0";
+        }
+        const std::string c_type = std::string(c_type_for_phys_element(element_kind));
+        return "(*(volatile " + c_type + "*)(uintptr_t)(" + addr + ")) = (" + value + ")";
     }
 };
 

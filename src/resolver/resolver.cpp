@@ -733,6 +733,21 @@ class Resolver
         }
     }
 
+    void resolve_expr_node(const curlee::parser::RuntimePhysWriteExpr& e, Span)
+    {
+        // The address and value are general expressions (issue #285) and may
+        // reference variables (the runtime framebuffer base, a mutable pixel
+        // cursor advanced by assignment, a color value).
+        if (e.addr != nullptr)
+        {
+            resolve_expr(*e.addr);
+        }
+        if (e.value != nullptr)
+        {
+            resolve_expr(*e.value);
+        }
+    }
+
     void resolve_expr_node(const ScopedNameExpr&, Span)
     {
         // `Enum::Variant` is not a variable reference; do not call use_name().
@@ -834,7 +849,8 @@ bool is_builtin_call_name(std::string_view name)
         "port_inb",        "port_outb",       "port_inw",
         "port_outw",       "port_inl",        "port_outl",
         "phys_read_u8",    "phys_read_u16",   "phys_read_u32",
-        "phys_read_u64",
+        "phys_read_u64",   "phys_write_u8",   "phys_write_u16",
+        "phys_write_u32",  "phys_write_u64",
     };
     return builtins.contains(name);
 }

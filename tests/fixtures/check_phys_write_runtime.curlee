@@ -1,0 +1,44 @@
+// Runtime-address physical memory writes (issue #285): the fb.c pixel-write
+// pattern verifies cleanly. The base is a RUNTIME Int value (the framebuffer
+// address fb_addr is discovered at boot via a multiboot2 tag or a VBE probe —
+// genuinely not known at compile time), the cursor is a mutable Int advanced
+// by assignment (#268), and writes are trusted/opaque side effects to the
+// verifier — nothing to prove, same as Phys<T>.write() today. The color value
+// adapts from an Int literal in the write value position (mirroring
+// Phys<U32>.write(0xFF8800)).
+fn fb_pixel(pm: cap phys.mem, fb_addr: Int, x: Int, y: Int, pitch: Int) -> Unit
+  [ requires x >= 0 && x < pitch && y >= 0; ]
+{
+  unsafe {
+    let offset: Int = y * pitch + x;
+    phys_write_u32(fb_addr + offset * 4, 0x00FF00);
+  }
+  return;
+}
+
+fn fb_clear(pm: cap phys.mem, fb_addr: Int, pixels: Int) -> Unit
+  [ requires pixels >= 0; ]
+{
+  unsafe {
+    let i: Int = 0;
+    while (i < pixels)
+      [ invariant 0 <= i && i <= pixels;
+        decreases pixels - i; ]
+    {
+      phys_write_u32(fb_addr + i * 4, 0xFF8800);   // fb.c: p[i] = c
+      i = i + 1;
+    }
+  }
+  return;
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  fb_pixel(pm, 1048576, 10, 5, 1024);
+  fb_clear(pm, 1048576, 64);
+  unsafe {
+    phys_write_u8(1048576, 0x01);
+    phys_write_u16(1048576, 0x1234);
+    phys_write_u64(1048576, 0);
+  }
+  return 0;
+}

@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 11 (issue #285): runtime-address
+// physical memory WRITES. Mirrors fb.c's pixel-write half: the framebuffer
+// base (fb_addr) is a RUNTIME Int value — discovered at boot via a multiboot2
+// tag or a VBE probe, genuinely not known at compile time — and the pixel
+// cursor is a mutable Int advanced by assignment (#268). A run of pixels is
+// written through phys_write_u32(base + i*4, color), then read back through
+// phys_read_u32 (issue #279) and confirmed over the COM1 serial port — the
+// net_rx_byte-style readback of the #285 verification plan.
+//
+// Target: the VGA text buffer at 0xB8000 (753664) — a real display buffer
+// that QEMU maps under -kernel and reads back exactly (audit item 8a bonus
+// probe already validated 0xB8000 as accessible). Writes are trusted/opaque
+// and no axioms relate phys_write_* to phys_read_*, so the readback is a
+// runtime branch, never a proof obligation.
+//
+// Build: ./build/linux-debug/curlee build --link -o build/audit/11.elf \
+//          tests/audit/joeos_11_phys_write_runtime.curlee
+// Boot:  qemu-system-x86_64 -display none \
+//          -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+//          -serial file:qemu-serial.log -no-reboot \
+//          -kernel build/audit/11.elf
+//        (expect qemu rc=3 and "OK" in qemu-serial.log)
+
+extern fn curlee_halt() -> Unit;
+
+fn serial_putc(pm: cap phys.mem, c: Int) -> Unit {
+  unsafe {
+    let lsr: U8 = port_inb(0x3FD);        // COM1 LSR (opaque read)
+    while ((lsr & 32) == 0) { }           // wait for THR empty (legacy single-pass loop)
+    port_outb(0x3F8, c);                  // COM1 THR
+  }
+  return;
+}
+
+fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let base: Int = 753664;               // 0xB8000: VGA text buffer (runtime base)
+    let i: Int = 0;
+    while (i < 4)
+      [ invariant 0 <= i && i <= 4;
+        decreases 4 - i; ]
+    {
+      phys_write_u32(base + i * 4, 16744576);   // fb.c: p[i] = 0xFF8800 (one pixel)
+      i = i + 1;
+    }
+
+    // Read the last written slot back and confirm the write actually landed.
+    let v: U32 = phys_read_u32(base + 12);
+    if (v == 16744576) {
+      serial_putc(pm, 79);                // 'O'
+      serial_putc(pm, 75);                // 'K'
+    } else {
+      serial_putc(pm, 66);                // 'B' (write did not land)
+    }
+  }
+  curlee_halt();
+  return;
+}

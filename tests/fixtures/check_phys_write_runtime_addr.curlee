@@ -1,0 +1,9 @@
+// Runtime phys write addresses must be Int or U64 expressions (issue #285); a
+// Bool address is rejected (mirrors phys_read_*'s rule, issue #279).
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let b: Bool = true;
+    phys_write_u32(b, 0xFF8800);
+  }
+  return 0;
+}

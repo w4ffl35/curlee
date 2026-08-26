@@ -44,6 +44,7 @@ using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
 using curlee::parser::PortIOExpr;
 using curlee::parser::RuntimePhysReadExpr;
+using curlee::parser::RuntimePhysWriteExpr;
 using curlee::parser::Stmt;
 using curlee::parser::UnsafeStmt;
 using curlee::parser::WhileStmt;
@@ -1067,6 +1068,53 @@ class Verifier
         const std::string name = "phys_read_at_" + std::string(element_kind);
         auto [inserted_it, _] = phys_read_at_fns_.emplace(
             element_kind, ctx.function(name.c_str(), ctx.int_sort(), ctx.int_sort()));
+        return inserted_it->second;
+    }
+
+    // Element kind ("U8"/"U16"/"U32"/"U64") for a runtime-address physical
+    // memory write builtin name (issue #285); empty for other names. The write
+    // counterpart of runtime_phys_read_element_kind (issue #279).
+    static std::string_view runtime_phys_write_element_kind(std::string_view op)
+    {
+        if (op == "phys_write_u8")
+        {
+            return "U8";
+        }
+        if (op == "phys_write_u16")
+        {
+            return "U16";
+        }
+        if (op == "phys_write_u32")
+        {
+            return "U32";
+        }
+        if (op == "phys_write_u64")
+        {
+            return "U64";
+        }
+        return {};
+    }
+
+    // Uninterpreted write function per element kind for RUNTIME addresses:
+    // phys_write_at_<kind> : Int x Int -> Unit. The address is a general
+    // Int/U64 expression and the value is an unsigned width (or an Int value,
+    // adapted by the type checker); a write is a trusted/opaque side effect
+    // with no verifier axioms — nothing to prove, same as Phys<T>.write() and
+    // port_out_* today. No axioms relate writes to reads.
+    std::unordered_map<std::string_view, z3::func_decl> phys_write_at_fns_;
+
+    const z3::func_decl& phys_write_at_fn(std::string_view element_kind)
+    {
+        auto it = phys_write_at_fns_.find(element_kind);
+        if (it != phys_write_at_fns_.end())
+        {
+            return it->second;
+        }
+        auto& ctx = solver_.context();
+        const std::string name = "phys_write_at_" + std::string(element_kind);
+        auto [inserted_it, _] = phys_write_at_fns_.emplace(
+            element_kind, ctx.function(name.c_str(), ctx.int_sort(), ctx.int_sort(),
+                                       ctx.int_sort()));
         return inserted_it->second;
     }
 
@@ -2108,6 +2156,54 @@ class Verifier
                     }
                     return ExprValue{phys_read_at_fn(elem)(addr.expr), TypeKind::Int, false};
                 }
+                else if constexpr (std::is_same_v<Node, RuntimePhysWriteExpr>)
+                {
+                    // A runtime-address write lowers to the uninterpreted
+                    // function phys_write_at_<kind> : Int x Int -> Unit (issue
+                    // #285). The address is a general Int/U64 expression and
+                    // the value is the unsigned width named by the builtin (an
+                    // Int value is adapted by the type checker), both lowered
+                    // like any other expression. A write is a side effect with
+                    // no verifier axioms — nothing to prove, same as
+                    // Phys<T>.write() and port_out_* — so the application is
+                    // discarded and the expression is Unit.
+                    const std::string_view elem = runtime_phys_write_element_kind(node.op);
+                    if (elem.empty())
+                    {
+                        return error_at(e.span, "unknown runtime phys write builtin '" +
+                                                    std::string(node.op) + "'");
+                    }
+                    if (node.addr == nullptr || node.value == nullptr) // GCOVR_EXCL_LINE
+                    {
+                        return error_at(e.span,
+                                        "missing runtime phys write address or value"); // GCOVR_EXCL_LINE
+                    }
+                    auto addr_res = lower_expr(*node.addr);
+                    if (std::holds_alternative<Diagnostic>(addr_res))
+                    {
+                        return std::get<Diagnostic>(std::move(addr_res));
+                    }
+                    auto addr = std::get<ExprValue>(std::move(addr_res));
+                    if (addr.kind != TypeKind::Int && !is_phys_element_kind(addr.kind))
+                    {
+                        return error_at(e.span,
+                                        "runtime phys write address must be an integer expression");
+                    }
+                    auto value_res = lower_expr(*node.value);
+                    if (std::holds_alternative<Diagnostic>(value_res))
+                    {
+                        return std::get<Diagnostic>(std::move(value_res));
+                    }
+                    auto value = std::get<ExprValue>(std::move(value_res));
+                    if (value.kind != TypeKind::Int && !is_phys_element_kind(value.kind))
+                    {
+                        return error_at(e.span,
+                                        "runtime phys write value must be an integer expression");
+                    }
+                    // Unit result: represent with a dummy Bool true (Unit is not a Z3 sort).
+                    (void)phys_write_at_fn(elem)(addr.expr, value.expr);
+                    return ExprValue{solver_.context().bool_val(true), TypeKind::Unit, false};
+                }
                 else if constexpr (std::is_same_v<Node, CallExpr>)
                 {
                     return error_at(e.span, "calls are not supported in verification expressions");
@@ -2702,6 +2798,19 @@ class Verifier
                     if (node.addr)
                     {
                         check_expr_for_calls(*node.addr, nullptr);
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, RuntimePhysWriteExpr>)
+                {
+                    // A runtime phys write is not a function call; scan the
+                    // address and value expressions (issue #285) for calls.
+                    if (node.addr)
+                    {
+                        check_expr_for_calls(*node.addr, nullptr);
+                    }
+                    if (node.value)
+                    {
+                        check_expr_for_calls(*node.value, nullptr);
                     }
                 }
                 else

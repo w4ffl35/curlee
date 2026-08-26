@@ -1,0 +1,4 @@
+tests/fixtures/check_phys_write_runtime_value.curlee:7:5: error: runtime phys write value type mismatch for 'phys_write_u32': expected U32, got Bool
+  |
+  |     phys_write_u32(1048576, b);
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -943,6 +943,17 @@ int main(int argc, char** argv)
         fs::path("tests/fixtures/check_phys_read_runtime_addr.curlee");
     const fs::path rel_phys_read_runtime_contract =
         fs::path("tests/fixtures/check_phys_read_runtime_contract.curlee");
+    // Runtime-address physical memory writes (issue #285): the fb.c pixel-write
+    // pattern — a general Int/U64 address (runtime framebuffer base + mutable
+    // pixel cursor) with the color value adapting from an Int literal; a
+    // non-integer address and a mismatched value width are rejected by the type
+    // checker.
+    const fs::path rel_phys_write_runtime =
+        fs::path("tests/fixtures/check_phys_write_runtime.curlee");
+    const fs::path rel_phys_write_runtime_addr =
+        fs::path("tests/fixtures/check_phys_write_runtime_addr.curlee");
+    const fs::path rel_phys_write_runtime_value =
+        fs::path("tests/fixtures/check_phys_write_runtime_value.curlee");
     const fs::path rel_unsigned_inspect =
         fs::path("tests/fixtures/check_unsigned_inspect.curlee");
     // U64 construction from Int/literal (issue #277).
@@ -1338,6 +1349,29 @@ int main(int argc, char** argv)
         if (!run_stderr_case("check-phys-read-runtime-contract",
                              {"curlee", "check", rel_phys_read_runtime_contract.string()},
                              dir / "check_phys_read_runtime_contract.golden", false))
+        {
+            return 1;
+        }
+
+        // Runtime-address physical memory writes (issue #285): the fb.c
+        // pixel-write pattern checks cleanly with a runtime base + mutable pixel
+        // cursor (trusted/opaque side effects); a Bool address and a mismatched
+        // value width are rejected by the type checker.
+        if (!run_stderr_case("check-phys-write-runtime",
+                             {"curlee", "check", rel_phys_write_runtime.string()},
+                             dir / "check_phys_write_runtime.golden", true))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-phys-write-runtime-addr",
+                             {"curlee", "check", rel_phys_write_runtime_addr.string()},
+                             dir / "check_phys_write_runtime_addr.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-phys-write-runtime-value",
+                             {"curlee", "check", rel_phys_write_runtime_value.string()},
+                             dir / "check_phys_write_runtime_value.golden", false))
         {
             return 1;
         }

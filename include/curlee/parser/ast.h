@@ -311,6 +311,44 @@ struct RuntimePhysReadExpr
 }
 
 /**
+ * @brief Runtime-address physical memory write builtin: `phys_write_u8(addr,
+ * value)`, `phys_write_u16(addr, value)`, `phys_write_u32(addr, value)`,
+ * `phys_write_u64(addr, value)`.
+ *
+ * The write counterpart of `RuntimePhysReadExpr` (issue #285): the address is
+ * a general Int/U64 expression (a runtime value such as the framebuffer base
+ * `fb_addr` discovered at boot via a multiboot2 tag or a VBE probe, possibly
+ * plus a mutable pixel cursor advanced by assignment (#268)) and the value is
+ * the corresponding unsigned width (mirroring `Phys<T>.write()`'s
+ * literal-adaptation rule for compile-time-literal addresses). The write is a
+ * trusted/opaque side effect to the verifier exactly like `Phys<T>.write()`
+ * and `port_out*`: nothing to prove, no axioms constrain it.
+ */
+struct RuntimePhysWriteExpr
+{
+    // Builtin name as spelled in source (phys_write_u8/.../phys_write_u64).
+    std::string_view op;
+    // The address expression: a general Int/U64 expression (runtime allowed).
+    std::unique_ptr<Expr> addr;
+    // The value expression: the unsigned width named by the builtin (an Int
+    // value is accepted for unsigned widths, mirroring Phys<T>.write()).
+    std::unique_ptr<Expr> value;
+};
+
+/**
+ * @brief True if `name` is a runtime-address physical memory write builtin
+ * (`phys_write_u8`/`phys_write_u16`/`phys_write_u32`/`phys_write_u64`).
+ *
+ * Single source of truth for the runtime phys write builtin surface, shared by
+ * the parser, resolver, type checker, verifier, codegen and VM emitter.
+ */
+[[nodiscard]] inline bool is_runtime_phys_write_builtin_name(std::string_view name)
+{
+    return name == "phys_write_u8" || name == "phys_write_u16" ||
+           name == "phys_write_u32" || name == "phys_write_u64";
+}
+
+/**
  * @brief A general expression node with id, span and variant payload.
  */
 struct Expr
@@ -319,7 +357,8 @@ struct Expr
     curlee::source::Span span;
     std::variant<IntExpr, BoolExpr, StringExpr, NameExpr, UnaryExpr, BinaryExpr, CallExpr,
                  MemberExpr, GroupExpr, ScopedNameExpr, StructLiteralExpr, PhysExpr, PhysReadExpr,
-                 PhysWriteExpr, PortIOExpr, RuntimePhysReadExpr, IndexExpr, ArrayLiteralExpr>
+                 PhysWriteExpr, PortIOExpr, RuntimePhysReadExpr, RuntimePhysWriteExpr, IndexExpr,
+                 ArrayLiteralExpr>
         node;
 };
 

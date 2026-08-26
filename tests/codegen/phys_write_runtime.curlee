@@ -1,0 +1,27 @@
+// Runtime-address physical memory writes (issue #285): the fb.c pixel-write
+// pattern, where the framebuffer base is a RUNTIME Int value (fb_addr,
+// discovered at boot via a multiboot2 tag or a VBE probe — genuinely not known
+// at compile time) and the pixel cursor is a mutable Int advanced by
+// assignment (#268). Unlike `Phys<U32>.write()`, the address is a general
+// Int/U64 expression; each write emits a volatile store of the value at the
+// computed address, mirroring the phys_read_* codegen (#279) with the load
+// mirrored to a store.
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let fb_addr: Int = 1048576;      // runtime-discovered framebuffer base
+    let i: Int = 0;
+    while (i < 64)
+      [ invariant 0 <= i && i <= 64;
+        decreases 64 - i; ]
+    {
+      phys_write_u32(fb_addr + i * 4, 0xFF8800);   // one pixel (fb.c: p[i] = c)
+      i = i + 1;
+    }
+
+    // All four widths emit the matching volatile store type.
+    phys_write_u8(fb_addr, 0x01);
+    phys_write_u16(fb_addr, 0x1234);
+    phys_write_u64(fb_addr, 0);
+  }
+  return 0;
+}
