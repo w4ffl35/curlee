@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-/* x86 port I/O builtins (constant or let-bound-base + constant-offset ports; gated by `unsafe` + `cap phys.mem`). */
+/* x86 port I/O builtins (constant or let-bound-base + constant-offset ports). */
 static inline uint8_t curlee_port_inb(uint16_t port)
 {
     uint8_t v;

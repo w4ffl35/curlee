@@ -723,7 +723,7 @@ class CEmitter
     // while the emitted call sites remain plain C function calls.
     void emit_port_io_helpers()
     {
-        writer_.line("/* x86 port I/O builtins (constant or let-bound-base + constant-offset ports; gated by `unsafe` + `cap phys.mem`). */");
+        writer_.line("/* x86 port I/O builtins (constant or let-bound-base + constant-offset ports). */");
         writer_.line("static inline uint8_t curlee_port_inb(uint16_t port)");
         writer_.open_brace();
         writer_.line("uint8_t v;");
