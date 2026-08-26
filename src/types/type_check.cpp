@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MIT
 #include <cassert>
+#include <charconv>
+#include <cstdint>
 #include <curlee/parser/ast.h>
 #include <curlee/types/type_check.h>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -76,6 +79,108 @@ static bool is_int_literal_expr(const Expr& e)
         return is_int_literal_expr(*group->inner);
     }
     return false;
+}
+
+// The underlying IntExpr of a plain Int literal, unwrapping grouping parens
+// (`32` or `(32)`), or nullptr when the expression is not such a literal.
+// Used by the U64 literal-adaptation rule (issue #277).
+static const curlee::parser::IntExpr* plain_int_literal(const Expr& e)
+{
+    if (const auto* lit = std::get_if<curlee::parser::IntExpr>(&e.node); lit != nullptr)
+    {
+        return lit;
+    }
+    if (const auto* group = std::get_if<curlee::parser::GroupExpr>(&e.node);
+        group != nullptr && group->inner != nullptr)
+    {
+        return plain_int_literal(*group->inner);
+    }
+    return nullptr;
+}
+
+// True if the expression is a negated Int literal (`-32` or `-(32)`). Such an
+// initializer has a compile-time-known NEGATIVE value, which is never
+// value-preserving when widening Int -> U64 (issue #277).
+static bool is_negated_int_literal_expr(const Expr& e)
+{
+    const auto* un = std::get_if<curlee::parser::UnaryExpr>(&e.node);
+    if (un == nullptr || un->op != curlee::lexer::TokenKind::Minus || un->rhs == nullptr)
+    {
+        return false;
+    }
+    return plain_int_literal(*un->rhs) != nullptr;
+}
+
+// Issue #277: parse a plain Int literal lexeme (decimal or 0x-hex, with
+// optional '_' separators) into its numeric magnitude. Returns std::nullopt
+// when the lexeme is not a valid literal or overflows uint64_t.
+static std::optional<std::uint64_t> parse_int_literal_value(std::string_view lexeme)
+{
+    std::string cleaned;
+    cleaned.reserve(lexeme.size());
+    for (const char ch : lexeme)
+    {
+        if (ch != '_')
+        {
+            cleaned.push_back(ch);
+        }
+    }
+    std::uint64_t value = 0;
+    const char* begin = cleaned.data();
+    const char* end = cleaned.data() + cleaned.size();
+    int base = 10;
+    if (cleaned.size() > 2 && cleaned[0] == '0' && (cleaned[1] == 'x' || cleaned[1] == 'X'))
+    {
+        base = 16;
+        begin += 2;
+    }
+    const auto res = std::from_chars(begin, end, value, base);
+    if (res.ec != std::errc{} || res.ptr != end)
+    {
+        return std::nullopt;
+    }
+    return value;
+}
+
+// Result of the Int -> U64 widening gate (issue #277) for a binding position
+// (`let` initializer or struct-literal field).
+struct U64WidenCheck
+{
+    // Whether the Int -> U64 widening is accepted for this initializer.
+    bool ok = false;
+    // True when the initializer is a compile-time-known literal (plain or
+    // negated) whose VALUE is what rejected the widening — distinguishes the
+    // out-of-range diagnostic from a plain type mismatch.
+    bool is_literal = false;
+};
+
+// Issue #277: can an Int-typed initializer construct a U64 value? Int -> U64
+// widening is allowed when the value is (or can be) value-preserving: a
+// compile-time-known literal must satisfy 0 <= v < 2^32 — all joeos physical
+// addresses are 32-bit, and the MVP models U64 as its Int value with no
+// wraparound, so a larger literal is a hard error rather than a silent
+// truncation. Non-literal Int initializers widen unconditionally (their value
+// is not known at compile time; the program is responsible for staying in the
+// supported range).
+static U64WidenCheck u64_widening_from_int(const Type& declared, const Type& init,
+                                           const Expr& value)
+{
+    if (declared.kind != TypeKind::U64 || init.kind != TypeKind::Int)
+    {
+        return {};
+    }
+    constexpr std::uint64_t kMaxU64Widen = (std::uint64_t{1} << 32); // 2^32
+    if (const auto* lit = plain_int_literal(value); lit != nullptr)
+    {
+        const auto magnitude = parse_int_literal_value(lit->lexeme);
+        return U64WidenCheck{.ok = magnitude.has_value() && *magnitude < kMaxU64Widen,
+                             .is_literal = true};
+    }
+    if (is_negated_int_literal_expr(value))
+    {
+        return U64WidenCheck{.ok = false, .is_literal = true};
+    }
+    return U64WidenCheck{.ok = true};
 }
 
 // True if a lexeme is a plain compile-time integer literal: decimal digits,
@@ -546,9 +651,24 @@ class Checker
 
         if (*init != *declared)
         {
-            error_at(stmt_span, "type mismatch in let: expected " +
-                                    std::string(to_string(*declared)) + ", got " +
-                                    std::string(to_string(*init)));
+            const auto widen = u64_widening_from_int(*declared, *init, s.value);
+            if (widen.ok)
+            {
+                // Int -> U64 widening (issue #277): value-preserving
+                // construction of a U64 (e.g. a 32-bit physical address) from
+                // an Int, or U64 literal adaptation.
+            }
+            else if (widen.is_literal)
+            {
+                error_at(stmt_span, "U64 out of range: Int -> U64 widening requires "
+                                    "0 <= value < 2^32 (4294967296)");
+            }
+            else
+            {
+                error_at(stmt_span, "type mismatch in let: expected " +
+                                        std::string(to_string(*declared)) + ", got " +
+                                        std::string(to_string(*init)));
+            }
         }
     }
 
@@ -574,9 +694,22 @@ class Checker
             }
             if (*init != *declared)
             {
-                error_at(stmt_span, "type mismatch in ghost let: expected " +
-                                        std::string(to_string(*declared)) + ", got " +
-                                        std::string(to_string(*init)));
+                const auto widen = u64_widening_from_int(*declared, *init, s.value);
+                if (widen.ok)
+                {
+                    // Int -> U64 widening (issue #277): mirrors the `let` rule.
+                }
+                else if (widen.is_literal)
+                {
+                    error_at(stmt_span, "U64 out of range: Int -> U64 widening requires "
+                                        "0 <= value < 2^32 (4294967296)");
+                }
+                else
+                {
+                    error_at(stmt_span, "type mismatch in ghost let: expected " +
+                                            std::string(to_string(*declared)) + ", got " +
+                                            std::string(to_string(*init)));
+                }
             }
             // Ghost snapshots freeze a pre-state value; they are read-only.
             declare_var(s.name, *declared, /*read_only=*/true);
@@ -1951,10 +2084,25 @@ class Checker
 
             if (*init_t != f_it->second)
             {
-                error_at(field.span, "field '" + std::string(field.name) +
-                                         "' type mismatch: expected " +
-                                         std::string(to_string(f_it->second)) + ", got " +
-                                         std::string(to_string(*init_t)));
+                const auto widen = u64_widening_from_int(f_it->second, *init_t, *field.value);
+                if (widen.ok)
+                {
+                    // Int -> U64 widening (issue #277): a struct U64 field can
+                    // be initialized from an Int-typed value or an Int literal
+                    // (the vring descriptor `addr` shape).
+                }
+                else if (widen.is_literal)
+                {
+                    error_at(field.span, "U64 out of range: Int -> U64 widening requires "
+                                         "0 <= value < 2^32 (4294967296)");
+                }
+                else
+                {
+                    error_at(field.span, "field '" + std::string(field.name) +
+                                             "' type mismatch: expected " +
+                                             std::string(to_string(f_it->second)) + ", got " +
+                                             std::string(to_string(*init_t)));
+                }
             }
         }
 

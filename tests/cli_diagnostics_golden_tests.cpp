@@ -917,6 +917,10 @@ int main(int argc, char** argv)
         fs::path("tests/fixtures/check_io_port_value_type.curlee");
     const fs::path rel_unsigned_inspect =
         fs::path("tests/fixtures/check_unsigned_inspect.curlee");
+    // U64 construction from Int/literal (issue #277).
+    const fs::path rel_u64_widen = fs::path("tests/fixtures/check_u64_widen.curlee");
+    const fs::path rel_u64_widen_oob =
+        fs::path("tests/fixtures/check_u64_widen_oob.curlee");
     const fs::path rel_run_missing_stdout_cap = fs::path("tests/fixtures/r.curlee");
     const fs::path rel_run_missing_tty_cap = fs::path("tests/fixtures/run_missing_tty_cap.curlee");
     const fs::path rel_run_read_line = fs::path("tests/fixtures/run_read_line.curlee");
@@ -1185,6 +1189,23 @@ int main(int argc, char** argv)
         if (!run_stderr_case("check-unsigned-inspect",
                              {"curlee", "check", rel_unsigned_inspect.string()},
                              dir / "check_unsigned_inspect.golden", true))
+        {
+            return 1;
+        }
+
+        // U64 construction from Int/literal (issue #277): Int -> U64 widening
+        // in `let` and struct fields, U64 literal adaptation, and U64 == U64
+        // comparisons all check cleanly; a literal at or above 2^32 is
+        // rejected as out of range rather than silently truncated.
+        if (!run_stderr_case("check-u64-widen",
+                             {"curlee", "check", rel_u64_widen.string()},
+                             dir / "check_u64_widen.golden", true))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-u64-widen-oob",
+                             {"curlee", "check", rel_u64_widen_oob.string()},
+                             dir / "check_u64_widen_oob.golden", false))
         {
             return 1;
         }

@@ -1,0 +1,104 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #277: construct a U64 from an Int or a literal.
+//
+// Mirrors the virtio_net.c vring descriptor fill:
+//   rx_desc[s].addr = (uint64_t)(unsigned long)rx_buf[s];
+//   tx_desc[desc_id].addr = (uint64_t)(unsigned long)tx_buf[tx_stage];
+// where net_vring_desc.addr is a uint64_t and the physical addresses are
+// 32-bit Int values. The MVP now supports:
+//   - implicit Int -> U64 widening in `let` and struct-literal field
+//     positions, value-preserving only (a compile-time-known literal must
+//     satisfy 0 <= value < 2^32; out-of-range and negative literals are
+//     rejected — see check_u64_widen_oob);
+//   - U64 literal adaptation in `let` initializers and struct fields;
+//   - U64 == U64 comparisons (same-kind rule, unchanged from issue #274);
+//   - a U64 binding is a normal Int-valued binding to the verifier.
+// U64 arithmetic and mixed U64/Int comparisons remain out of scope.
+
+struct net_vring_desc {
+  addr: U64;
+  len: U32;
+  flags: U16;
+}
+
+// Acceptance #1/#3: an Int holding a 32-bit physical address widens to U64 in
+// a `let` and flows into a struct's U64 field — the vring descriptor shape.
+fn vring_rx_fill(pm: cap phys.mem) -> Int {
+  unsafe {
+    let rx_buf: Int = 1048576;         // 0x100000: a physical address
+    let addr: U64 = rx_buf;            // (uint64_t)(unsigned long)rx_buf[s]
+    let len: U32 = port_inl(0xCFC);    // vring buffer length (opaque read)
+    let flags: U16 = port_inw(0x1CF);  // vring flags (opaque read)
+    let desc: net_vring_desc = net_vring_desc{ addr: addr, len: len, flags: flags };
+    return desc.flags + 0;
+  }
+}
+
+// Acceptance #2: a U64 from a plain Int literal.
+fn literal_addr() -> U64 {
+  let addr: U64 = 1048576;             // 0x100000
+  return addr;
+}
+
+// Acceptance #3: a struct U64 field initialized from an Int-typed binding and
+// directly from an Int literal.
+struct add64 {
+  addr: U64;
+}
+
+fn struct_u64_field() -> Int {
+  let base: Int = 2097152;             // 0x200000
+  let from_int: add64 = add64{ addr: base };
+  let from_literal: add64 = add64{ addr: 1048576 };
+  if (from_int.addr == from_literal.addr) {
+    return 0;
+  }
+  return 1;
+}
+
+// Probe 3 (control, preserved from issue #274): U64 exists via the Phys<U64>
+// read path; U64-to-U64 binding and same-kind comparison stay legal, and the
+// U64 binding is now a normal Int-valued solver binding.
+fn u64_read(pm: cap phys.mem) -> Int {
+  unsafe {
+    let x: U64 = phys<U64>(0x4000).read();
+    let y: U64 = x;
+    let same: Bool = (y == x);
+    if (same) {
+      return 0;
+    }
+    return 1;
+  }
+}
+
+// A U64 ghost snapshot built from an Int is a normal binding visible to
+// contracts (the verifier models U64 as its Int value).
+fn widen_contract(base: Int) -> Int [
+  ghost let snap: U64 = base;
+  ensures snap == base;
+] {
+  return base;
+}
+
+// A U64-typed return constructed by widening.
+fn widen_return(base: Int) -> U64 [
+  requires 0 <= base && base <= 1048576;
+] {
+  let addr: U64 = base;
+  return addr;
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let base: Int = 1048576;
+    let addr: U64 = base;              // acceptance #1
+    let lit: U64 = 1048576;            // acceptance #2
+    let from_fn: U64 = literal_addr(); // U64 call-result binding
+    if (addr == lit && from_fn == addr) {
+      return vring_rx_fill(pm) + struct_u64_field() + u64_read(pm) +
+             widen_contract(base);
+    }
+    return 1;
+  }
+}

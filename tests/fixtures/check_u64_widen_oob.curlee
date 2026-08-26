@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #277 expected-fail: an Int literal at or above 2^32 cannot widen to
+// U64 (negative literals are rejected the same way). The MVP models U64 as its
+// Int value (no wraparound), so an out-of-range value would silently truncate.
+// Expected error:
+//   "U64 out of range: Int -> U64 widening requires 0 <= value < 2^32 (4294967296)"
+
+fn main() -> Int {
+  let addr: U64 = 4294967296;          // 2^32
+  return 0;
+}

@@ -1,0 +1,4 @@
+tests/fixtures/check_u64_widen_oob.curlee:10:3: error: U64 out of range: Int -> U64 widening requires 0 <= value < 2^32 (4294967296)
+  |
+  |   let addr: U64 = 4294967296;          // 2^32
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^

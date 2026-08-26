@@ -176,7 +176,13 @@ bootable **x86-64 multiboot2 kernel ELF**:
   directly (with `Int` literals auto-adapting); bitwise operators accept an `Int` *literal* on
   the other side (which adapts to the unsigned width), or widen the unsigned operand to `Int`
   for a non-literal `Int`. Reads stay **opaque** to the verifier — a contract can never see
-  through a port/MMIO read value. `U64` widening is not yet supported.
+  through a port/MMIO read value.
+- A `U64` can be **constructed from an `Int` or a literal** (issue #277): an `Int` value in a
+  `let` initializer or struct-literal field widens to `U64` when it is value-preserving — a
+  compile-time-known literal must satisfy `0 <= value < 2^32` (all joeos physical addresses
+  are 32-bit; an out-of-range or negative literal is a hard error, never a silent truncation).
+  `U64 == U64` comparisons are legal; `U64` arithmetic and mixed `U64`/`Int` comparisons
+  remain out of scope.
 - The VM never runs freestanding programs (`curlee run` rejects `Phys`/`extern`/port I/O
   bodies); `curlee build` is the freestanding execution path.
 
