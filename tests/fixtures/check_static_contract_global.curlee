@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #287: module-level mutable state is opaque to the verifier — each
+// function sees a FRESH uninterpreted symbol per global, so a contract that
+// mentions a global cannot be proved and must be rejected with a hard
+// diagnostic (the honest MVP story for state that persists across separate
+// entry points; the verifier cannot track state across calls the way it
+// tracks a single function's loop invariants). Expected error:
+//   "cannot prove ensures on module-level mutable state (opaque to the
+//    verifier)"
+//
+// See probe_global_contract.curlee during development (scratch).
+
+static counter: Int = 0;
+
+fn bump() -> Int [
+  ensures result == counter + 1;
+] {
+  counter = counter + 1;
+  return counter;
+}
+
+fn main() -> Int {
+  return bump();
+}

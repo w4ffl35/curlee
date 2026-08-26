@@ -217,6 +217,13 @@ void assign_expr_ids(curlee::parser::Expr& expr, std::size_t& next_id)
 void assign_expr_ids_program(curlee::parser::Program& program)
 {
     std::size_t next_id = 1;
+    // Module-level static initializers are ordinary expressions from the
+    // front-end's perspective: give them ids so the type checker can record
+    // their inferred types (issue #287).
+    for (auto& stat : program.statics)
+    {
+        assign_expr_ids(stat.value, next_id);
+    }
     for (auto& function : program.functions)
     {
         assign_expr_ids_block(function.body, next_id);
@@ -299,6 +306,28 @@ class Parser
                 continue;
             }
 
+            // Module-level mutable state (issue #287): `static name: Type = expr;`.
+            // A `static` at the top level declares a file-scope mutable binding
+            // (scalar or [T; N] array) initialized once, persisting across calls.
+            if (check(TokenKind::KwStatic))
+            {
+                if (!seen_non_import)
+                {
+                    first_non_import_span = peek().span;
+                }
+                seen_non_import = true;
+
+                auto s = parse_static_decl();
+                if (std::holds_alternative<curlee::diag::Diagnostic>(s))
+                {
+                    diagnostics_.push_back(std::get<curlee::diag::Diagnostic>(std::move(s)));
+                    synchronize_top_level();
+                    continue;
+                }
+                program.statics.push_back(std::get<StaticVarDecl>(std::move(s)));
+                continue;
+            }
+
             if (check(TokenKind::KwFn) || check(TokenKind::KwExtern) || check(TokenKind::KwGhost))
             {
                 if (!seen_non_import)
@@ -332,8 +361,8 @@ class Parser
                 continue;
             }
 
-            diagnostics_.push_back(
-                error_at(peek(), "expected 'import', 'struct', 'enum', 'fn', or 'extern fn'"));
+            diagnostics_.push_back(error_at(
+                peek(), "expected 'import', 'struct', 'enum', 'static', 'fn', or 'extern fn'"));
             advance();
         }
 
@@ -757,6 +786,65 @@ class Parser
         return EnumDecl{.span = span_cover(kw.span, rbrace.span),
                         .name = name.lexeme,
                         .variants = std::move(variants)};
+    }
+
+    // Module-level mutable state declaration (issue #287):
+    //   static name: Type = expr;
+    // Type is a storable scalar (Int/Bool/U8/U16/U32/U64) or a fixed-size
+    // array `[T; N]`; expr must be a compile-time literal (Int/Bool literal for
+    // scalars, `[v; N]` repeat literal for arrays). The literal restriction is
+    // enforced by the type checker, which has the type information.
+    [[nodiscard]] std::variant<StaticVarDecl, curlee::diag::Diagnostic> parse_static_decl()
+    {
+        if (auto err = consume(TokenKind::KwStatic, "expected 'static'"); err.has_value())
+        {
+            return *err;
+        }
+        const Token kw = previous();
+
+        if (!check(TokenKind::Identifier))
+        {
+            return error_at(peek(), "expected variable name after 'static'");
+        }
+        const Token name = advance();
+
+        if (auto err = consume(TokenKind::Colon, "expected ':' after static variable name");
+            err.has_value())
+        {
+            return *err;
+        }
+
+        auto type_res = parse_type();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(type_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(type_res));
+        }
+        TypeName type = std::get<TypeName>(std::move(type_res));
+
+        if (auto err = consume(TokenKind::Equal, "expected '=' in static declaration");
+            err.has_value())
+        {
+            return *err;
+        }
+
+        auto value_res = parse_expr();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(value_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(value_res));
+        }
+        Expr value = std::get<Expr>(std::move(value_res));
+
+        if (auto err = consume(TokenKind::Semicolon, "expected ';' after static declaration");
+            err.has_value())
+        {
+            return *err;
+        }
+        const Token semi = previous();
+
+        return StaticVarDecl{.span = span_cover(kw.span, semi.span),
+                             .name = name.lexeme,
+                             .type = std::move(type),
+                             .value = std::move(value)};
     }
 
     [[nodiscard]] std::variant<Function::Param, curlee::diag::Diagnostic> parse_param()
@@ -2935,7 +3023,8 @@ class Dumper
         }
 
         const bool has_types = !p.structs.empty() || !p.enums.empty();
-        if (!p.imports.empty() && (has_types || !p.functions.empty()))
+        const bool has_decls = has_types || !p.statics.empty();
+        if (!p.imports.empty() && (has_decls || !p.functions.empty()))
         {
             out_ << "\n";
         }
@@ -2963,7 +3052,21 @@ class Dumper
             }
         }
 
-        if (has_types && !p.functions.empty())
+        if (has_types && !p.statics.empty())
+        {
+            out_ << "\n";
+        }
+
+        for (std::size_t i = 0; i < p.statics.size(); ++i)
+        {
+            dump_static_decl(p.statics[i]);
+            if (i + 1 < p.statics.size())
+            {
+                out_ << "\n";
+            }
+        }
+
+        if ((has_types || !p.statics.empty()) && !p.functions.empty())
         {
             out_ << "\n";
         }
@@ -3027,6 +3130,15 @@ class Dumper
             out_ << ";";
         }
         out_ << " }\n";
+    }
+
+    void dump_static_decl(const StaticVarDecl& s)
+    {
+        out_ << "static " << s.name << ": ";
+        dump_type(s.type);
+        out_ << " = ";
+        dump_expr(s.value);
+        out_ << ";\n";
     }
 
     void dump_function(const Function& f)

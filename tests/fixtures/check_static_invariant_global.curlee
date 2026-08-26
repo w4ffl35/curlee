@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #287: loop invariants get the same treatment as requires/ensures —
+// an invariant mentioning module-level mutable state is unprovable (the
+// global is opaque to the solver) and is rejected with the module-state
+// diagnostic rather than silently modeled. Expected error:
+//   "cannot prove invariant on module-level mutable state (opaque to the
+//    verifier)"
+
+static counter: Int = 0;
+static rx: [U8; 4] = [0; 4];
+static on: Bool = true;
+
+fn main() -> Int {
+  let i: Int = 0;
+  while (i < 4)
+    [ invariant counter >= 0;
+      decreases 4 - i; ]
+  {
+    i = i + 1;
+  }
+  return i;
+}

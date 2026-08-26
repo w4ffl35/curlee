@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #287: module-level mutable state persists across SEPARATE function
+// calls in the VM. The scalar statics live in the low region of the VM's
+// locals array, initialized once at program start; each function body reads
+// and writes the same persistent slot, so `peek()` observes what `bump()`
+// stored — the VM-side half of acceptance criterion 1 ("a codegen/VM test
+// calling the module's entry point twice and observing the second call sees
+// the first call's mutation" — here the module's functions are invoked
+// repeatedly across the run; the freestanding host-driven counterpart,
+// codegen/static_state.curlee, calls curlee_main() twice from a host harness
+// and observes the second call sees the first call's writes).
+//
+// Expected result: 1223
+//   bump() -> 1, bump() -> 2, peek() -> 2, bump() -> 3
+//   => a*1000 + b*100 + c*10 + d = 1000 + 200 + 20 + 3 = 1223.
+// If the statics were re-initialized per call (a local instead of a
+// persistent slot), peek() would see 0 and the result would be different.
+
+static counter: Int = 0;
+static latch: Int = 0;
+
+fn bump() -> Int {
+  counter = counter + 1;
+  latch = counter;
+  return counter;
+}
+
+fn peek() -> Int {
+  return counter;
+}
+
+fn peek_latch() -> Int {
+  return latch;
+}
+
+fn main() -> Int {
+  let a: Int = bump();
+  let b: Int = bump();
+  let c: Int = peek();
+  let d: Int = bump();
+  let l: Int = peek_latch();
+  // a=1, b=2, c=2, d=3, l=3
+  return a * 1000 + b * 100 + c * 10 + d + l * 0;
+}

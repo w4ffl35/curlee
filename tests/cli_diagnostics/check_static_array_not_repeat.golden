@@ -1,0 +1,8 @@
+tests/fixtures/check_static_array_not_repeat.curlee:9:22: error: static array 'a': initializer must be an array repeat literal [v; N]
+  |
+  | static a: [Int; 4] = n;
+  |                      ^
+tests/fixtures/check_static_array_not_repeat.curlee:12:10: error: unknown name 'a'
+  |
+  |   return a[0];
+  |          ^^^^

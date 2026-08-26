@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #287: two statics with the same name are a duplicate in the root
+// scope, like two functions with the same name. Expected error:
+//   "duplicate static variable 'x'"
+
+static x: Int = 1;
+static x: Int = 2;
+
+fn main() -> Int {
+  return x;
+}

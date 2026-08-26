@@ -299,6 +299,10 @@ class Checker
 
         collect_structs_and_enums(program);
 
+        // Module-level mutable state (issue #287): validate each `static`
+        // declaration and record its type so function bodies can read/assign it.
+        collect_globals(program);
+
         // Builtins (compiler/runtime-provided).
         {
             FunctionType print_sig;
@@ -342,6 +346,10 @@ class Checker
 
   private:
     std::unordered_map<std::string_view, FunctionType> functions_;
+    // Module-level mutable state (issue #287): name -> declared type. Populated
+    // before function bodies are checked so reads/assignments resolve; the
+    // resolver already reports duplicate names in the root scope.
+    std::unordered_map<std::string_view, Type> globals_;
     std::unordered_set<std::string> imported_module_keys_;
     std::unordered_map<std::string_view, std::string> imported_module_aliases_;
     std::vector<Scope> scopes_;
@@ -453,6 +461,167 @@ class Checker
         }
     }
 
+    // True if the initializer expression is a compile-time constant suitable
+    // for a C file-scope `static` initializer: a plain Int literal (decimal or
+    // hex, parentheses unwrapped), a negated Int literal (`-1`), or a Bool
+    // literal. Arrays additionally require the `[v; N]` repeat form with a
+    // constant repeat value (checked by the caller).
+    static bool is_constant_static_initializer(const Expr& e)
+    {
+        if (plain_int_literal(e) != nullptr || is_negated_int_literal_expr(e))
+        {
+            return true;
+        }
+        if (std::get_if<curlee::parser::BoolExpr>(&e.node) != nullptr)
+        {
+            return true;
+        }
+        return false;
+    }
+
+    // Collect and validate module-level `static` declarations (issue #287).
+    // MVP types are the storable scalars (Int/Bool/U8/U16/U32/U64) and
+    // fixed-size arrays `[T; N]`; the initializer must be a compile-time
+    // literal (C `static` initializers are constant expressions). Reads and
+    // assignments from function bodies resolve through lookup_var/
+    // lookup_assignable_var, which consult globals_ after the lexical scopes.
+    void collect_globals(const curlee::parser::Program& program)
+    {
+        // Function names for collision defense (functions_ is not populated
+        // until after collect_globals runs, so scan the AST directly).
+        std::unordered_set<std::string_view> fn_names;
+        for (const auto& f : program.functions)
+        {
+            fn_names.insert(f.name);
+        }
+
+        for (const auto& g : program.statics)
+        {
+            if (globals_.contains(g.name))
+            {
+                error_at(g.span, "duplicate static variable '" + std::string(g.name) + "'");
+                continue;
+            }
+            if (fn_names.contains(g.name))
+            {
+                // Defense in depth: the resolver reports the root-scope
+                // collision; keep the type checker self-contained too.
+                error_at(g.span,
+                         "static variable '" + std::string(g.name) +
+                             "' conflicts with a function of the same name");
+                continue;
+            }
+            if (is_reserved_builtin_name(g.name))
+            {
+                error_at(g.span, "cannot declare static variable with builtin name '" +
+                                     std::string(g.name) + "'");
+                continue;
+            }
+
+            auto declared = type_from_ast(g.type);
+            if (!declared.has_value())
+            {
+                continue;
+            }
+
+            // Gate the supported kinds: storable scalars + fixed-size arrays.
+            const TypeKind kind = declared->kind;
+            const bool scalar = kind == TypeKind::Int || kind == TypeKind::Bool ||
+                                is_phys_element_kind(kind);
+            if (kind != TypeKind::Array && !scalar)
+            {
+                error_at(g.span,
+                         "module-level static variables support only scalar (Int/Bool/U8/U16/"
+                         "U32/U64) and fixed-size array ([T; N]) types in the MVP");
+                continue;
+            }
+
+            if (kind == TypeKind::Array)
+            {
+                // The initializer must be a repeat literal whose count matches
+                // the declared length (type matching below).
+                const auto* arr = std::get_if<ArrayLiteralExpr>(&g.value.node);
+                if (arr == nullptr || arr->value == nullptr)
+                {
+                    error_at(g.value.span, "static array '" + std::string(g.name) +
+                                               "': initializer must be an array repeat "
+                                               "literal [v; N]");
+                    continue;
+                }
+            }
+            else if (!is_constant_static_initializer(g.value))
+            {
+                error_at(g.value.span, "static '" + std::string(g.name) +
+                                           "': initializer must be a compile-time "
+                                           "literal (Int, Bool, or [v; N] repeat)");
+                continue;
+            }
+
+            auto init = check_expr(g.value);
+            if (!init.has_value())
+            {
+                continue;
+            }
+
+            // Match the initializer against the declared type with the same
+            // adaptation rules as `let` bindings: array length/element matching
+            // with the Int-literal -> unsigned element adaptation, and
+            // Int -> U64 widening for U64 statics. An unsigned SCALAR static
+            // (U8/U16/U32) rejects an Int-literal initializer exactly like an
+            // unsigned `let` does (`let x: U8 = 0;` is rejected; unsigned
+            // values come from unsigned sources, and static initializers must
+            // be literals — so only U64 (widening) and unsigned arrays
+            // (repeat-literal adaptation) are initializable from literals).
+            if (*init != *declared)
+            {
+                if (declared->kind == TypeKind::Array || init->kind == TypeKind::Array)
+                {
+                    const bool len_ok = init->kind == TypeKind::Array &&
+                                        declared->array_len == init->array_len;
+                    const bool elem_ok = init->kind == TypeKind::Array &&
+                                         *declared->element_kind == *init->element_kind;
+                    const bool literal_adapt =
+                        init->kind == TypeKind::Array && init->element_kind == TypeKind::Int &&
+                        is_phys_element_kind(*declared->element_kind) &&
+                        is_array_repeat_int_literal(g.value);
+                    if (!len_ok || (!elem_ok && !literal_adapt))
+                    {
+                        error_at(g.span, "array type mismatch in static: expected " +
+                                             to_display_string(*declared) + ", got " +
+                                             to_display_string(*init));
+                        continue;
+                    }
+                    // Exact match or the repeat-literal adaptation: register the
+                    // global below (no `continue` — the binding is valid).
+                }
+                else
+                {
+                    const auto widen = u64_widening_from_int(*declared, *init, g.value);
+                    if (widen.ok)
+                    {
+                        // Int -> U64 widening: value-preserving construction
+                        // (issue #277), mirrors the `let` rule.
+                    }
+                    else if (widen.is_literal)
+                    {
+                        error_at(g.span, "U64 out of range: Int -> U64 widening requires "
+                                         "0 <= value < 2^32 (4294967296)");
+                        continue;
+                    }
+                    else
+                    {
+                        error_at(g.span, "type mismatch in static: expected " +
+                                             std::string(to_string(*declared)) + ", got " +
+                                             std::string(to_string(*init)));
+                        continue;
+                    }
+                }
+            }
+
+            globals_.emplace(g.name, *declared);
+        }
+    }
+
     static bool is_python_ffi_call(const Expr& callee)
     {
         const auto* member = std::get_if<MemberExpr>(&callee.node);
@@ -479,6 +648,13 @@ class Checker
             {
                 return found->second;
             }
+        }
+        // Module-level mutable state is visible from every function body
+        // (issue #287): consult globals after the lexical scopes so a local
+        // `let` can shadow a static.
+        if (auto it = globals_.find(name); it != globals_.end())
+        {
+            return it->second;
         }
         return std::nullopt;
     }
@@ -508,6 +684,12 @@ class Checker
             {
                 return std::make_pair(found->second, !it->read_only.contains(name));
             }
+        }
+        // Module-level mutable state is assignable from any function body
+        // (issue #287); a local `let` shadowing a static takes precedence.
+        if (auto it = globals_.find(name); it != globals_.end())
+        {
+            return std::make_pair(it->second, /*assignable=*/true);
         }
         return std::nullopt;
     }

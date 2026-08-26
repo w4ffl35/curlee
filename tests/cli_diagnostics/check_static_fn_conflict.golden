@@ -1,0 +1,5 @@
+tests/fixtures/check_static_fn_conflict.curlee:11:4: error: duplicate function: 'f'
+  |
+  | fn f() -> Int {
+  |    ^
+note: previous definition is here

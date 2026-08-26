@@ -1,0 +1,20 @@
+tests/fixtures/check_static_invariant_global.curlee:17:17: error: cannot prove contract on module-level mutable state (opaque to the verifier)
+  |
+  |     [ invariant counter >= 0;
+  |                 ^^^^^^^^^^^^
+note: module-level mutable state is opaque to the verifier; cannot prove this contract
+tests/fixtures/check_static_invariant_global.curlee:17:17: error: cannot prove contract on module-level mutable state (opaque to the verifier)
+  |
+  |     [ invariant counter >= 0;
+  |                 ^^^^^^^^^^^^
+note: module-level mutable state is opaque to the verifier; cannot prove this contract
+tests/fixtures/check_static_invariant_global.curlee:17:17: error: cannot prove contract on module-level mutable state (opaque to the verifier)
+  |
+  |     [ invariant counter >= 0;
+  |                 ^^^^^^^^^^^^
+note: module-level mutable state is opaque to the verifier; cannot prove this contract
+tests/fixtures/check_static_invariant_global.curlee:17:17: error: cannot prove contract on module-level mutable state (opaque to the verifier)
+  |
+  |     [ invariant counter >= 0;
+  |                 ^^^^^^^^^^^^
+note: module-level mutable state is opaque to the verifier; cannot prove this contract

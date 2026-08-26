@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #287: the MVP supports storable scalars (Int/Bool/U8/U16/U32/U64)
+// and fixed-size arrays `[T; N]` at module scope. Non-storable types (String
+// here) are rejected with a precise diagnostic. Expected error:
+//   "module-level static variables support only scalar (Int/Bool/U8/U16/
+//    U32/U64) and fixed-size array ([T; N]) types in the MVP"
+
+static greeting: String = "hello";
+
+fn main() -> Int {
+  return 0;
+}

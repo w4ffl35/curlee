@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #287: a fixed-size array static's repeat-literal count must match the
+// declared length (same rule as array `let`s). Expected error:
+//   "array type mismatch in static: expected [Int; 4], got [Int; 2]"
+
+static a: [Int; 4] = [0; 2];
+
+fn main() -> Int {
+  return a[0];
+}

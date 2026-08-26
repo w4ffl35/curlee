@@ -1,0 +1,5 @@
+tests/fixtures/check_static_duplicate.curlee:8:1: error: duplicate static variable: 'x'
+  |
+  | static x: Int = 2;
+  | ^^^^^^^^^^^^^^^^^^
+note: previous definition is here

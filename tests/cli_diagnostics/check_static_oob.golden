@@ -1,0 +1,4 @@
+tests/fixtures/check_static_oob.curlee:12:5: error: array index out of bounds: constant index 9 is not in 0..3 (array length 4)
+  |
+  |   a[9] = 1;
+  |     ^

@@ -1,0 +1,8 @@
+tests/fixtures/check_static_u8_scalar.curlee:10:1: error: type mismatch in static: expected U8, got Int
+  |
+  | static phase: U8 = 0;
+  | ^^^^^^^^^^^^^^^^^^^^^
+tests/fixtures/check_static_u8_scalar.curlee:13:10: error: unknown name 'phase'
+  |
+  |   return phase;
+  |          ^^^^^

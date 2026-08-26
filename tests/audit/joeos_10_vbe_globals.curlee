@@ -1,0 +1,56 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 10: the vbe_state.c shim's exact shape
+// in pure Curlee (issue #287). kernel/vbe_state.c (gh issue #11) holds the
+// four framebuffer globals — fb_addr/fb_pitch/fb_width/fb_height — because
+// "Curlee has no global variables and no way to address C globals". This
+// probe expresses the shape: a probe function (vbe_probe, the VBE info walk
+// that fills the globals) writes 4 scalar statics, read later by a SEPARATE
+// function (fb_draw_target, the framebuffer blitter's target computation) in
+// a different call.
+//
+// Cross-call persistence is the whole point: fb_draw_target() only sees the
+// probe's values because the statics are file-scope storage that survives
+// across the separate vbe_probe -> fb_draw_target calls from the kernel
+// event loop (issue #287 notes the fb.c/vbe.c interaction may collapse into
+// one module once both are pure Curlee; this probe keeps the two-function
+// shape to prove the cross-call read works).
+//
+// Build + boot:
+//   ./build/linux-debug/curlee build --link -o build/audit/10.elf \
+//     tests/audit/joeos_10_vbe_globals.curlee
+//   (then bash scripts/audit_qemu_boot.sh <generated.c> 10, expect rc=3)
+
+extern fn curlee_halt() -> Unit;
+
+// vbe_state.c shim: the four framebuffer globals.
+static fb_addr: Int = 0;
+static fb_pitch: Int = 0;
+static fb_width: Int = 0;
+static fb_height: Int = 0;
+
+fn vbe_probe() -> Int {
+  // kernel/vbe.curlee probe: fills the globals from the VBE info block
+  // (vbe_state.c's probe; the four stores move into Curlee).
+  fb_addr = 0xFD00_0000;
+  fb_pitch = 128;
+  fb_width = 1024;
+  fb_height = 768;
+  return fb_addr;
+}
+
+fn fb_draw_target() -> Int {
+  // kernel/fb.c reads the globals in a separate call (cross-call
+  // persistence; vbe_state.c's "read later by fb.c" role).
+  return fb_addr + fb_pitch + fb_width + fb_height;
+}
+
+fn main() -> Int {
+  let addr: Int = vbe_probe();
+  let target: Int = fb_draw_target();
+  // target == 0xFD00_0000 + 128 + 1024 + 768. If fb_draw_target() ran before
+  // the probe's writes (or the statics were per-call locals), target would
+  // be 0 — the shape only works because the writes persist across calls.
+  curlee_halt();
+  return target - addr;
+}

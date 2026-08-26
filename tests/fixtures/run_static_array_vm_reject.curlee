@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #287: `run` (VM bytecode) must reject module-level arrays exactly
+// like local arrays — they are freestanding-only in the MVP (the VM has no
+// array storage or lowering for IndexExpr / ArrayLiteralExpr). The scalar
+// static half of the feature DOES run in the VM (see run_global_state.curlee);
+// the array half is freestanding-only. Expected error:
+//   "arrays are freestanding-only and not supported in the VM"
+
+static a: [Int; 4] = [0; 4];
+
+fn main() -> Int {
+  return 0;
+}

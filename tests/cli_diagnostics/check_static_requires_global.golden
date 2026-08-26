@@ -1,0 +1,10 @@
+tests/fixtures/check_static_requires_global.curlee:12:12: error: cannot prove contract on module-level mutable state (opaque to the verifier)
+  |
+  |   requires counter > 0;
+  |            ^^^^^^^^^^^
+note: module-level mutable state is opaque to the verifier; cannot prove this contract
+tests/fixtures/check_static_requires_global.curlee:12:12: error: cannot prove requires on module-level mutable state (opaque to the verifier)
+  |
+  |   requires counter > 0;
+  |            ^^^^^^^^^^^
+note: module-level mutable state is opaque to the verifier; cannot prove this contract

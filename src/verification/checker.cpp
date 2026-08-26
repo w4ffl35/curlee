@@ -484,6 +484,23 @@ struct ArrayMeta
     std::uint64_t len = 0;
 };
 
+// Static metadata for a module-level mutable binding (issue #287): the scalar
+// kind, or the array element kind + length for `[T; N]` statics. The verifier
+// treats every global as OPAQUE per function (see check_function): a fresh,
+// unconstrained solver symbol per function means reads are uninterpreted and
+// contracts mentioning a global fail with a hard diagnostic — the honest MVP
+// answer for state that persists across separate entry points (the verifier
+// cannot track state across calls the way it tracks a single function's loop
+// invariants).
+struct GlobalMeta
+{
+    // TypeKind::Array for array statics; Int/Bool/U8/U16/U32/U64 for scalars.
+    TypeKind kind = TypeKind::Int;
+    // For array statics: the element kind (always set when kind == Array).
+    std::optional<TypeKind> elem_kind = std::nullopt;
+    std::uint64_t array_len = 0;
+};
+
 struct ScopeState
 {
     std::unordered_map<std::string_view, z3::expr> int_vars;
@@ -499,6 +516,9 @@ struct ScopeState
     // Names bound from a port_in* read result (opaque; distinct provenance for
     // the port-specific opaque diagnostic).
     std::unordered_set<std::string_view> opaque_port_read_vars;
+    // Module-level mutable state names (issue #287): opaque to the solver;
+    // contracts mentioning them get the module-state diagnostic.
+    std::unordered_set<std::string_view> opaque_global_vars;
     std::size_t facts_size = 0;
 };
 
@@ -533,6 +553,7 @@ class Verifier
 
     VerificationResult run(const curlee::parser::Program& program)
     {
+        collect_globals(program);
         collect_signatures(program);
 
         for (const auto& f : program.functions)
@@ -596,6 +617,13 @@ class Verifier
     // Names bound from a port_in* read result; contracts referencing these get the
     // port-specific opaque diagnostic.
     std::unordered_set<std::string_view> opaque_port_read_vars_;
+    // Module-level mutable state (issue #287): name -> kind/meta, populated in
+    // run() before function checking.
+    std::unordered_map<std::string_view, GlobalMeta> globals_;
+    // Names that are module-level mutable state in the current function.
+    // Reads are opaque (uninterpreted) like Phys/port reads and contracts
+    // mentioning them get the module-state diagnostic.
+    std::unordered_set<std::string_view> opaque_global_vars_;
 
     // Per-function counter for fresh solver symbol names (see fresh_symbol).
     // Reset in check_function so symbol names are short and stable in model
@@ -632,6 +660,7 @@ class Verifier
         state.array_meta = array_meta_;
         state.opaque_read_vars = opaque_read_vars_;
         state.opaque_port_read_vars = opaque_port_read_vars_;
+        state.opaque_global_vars = opaque_global_vars_;
         state.facts_size = facts_.size();
     }
 
@@ -650,6 +679,7 @@ class Verifier
         array_meta_ = state.array_meta;
         opaque_read_vars_ = state.opaque_read_vars;
         opaque_port_read_vars_ = state.opaque_port_read_vars;
+        opaque_global_vars_ = state.opaque_global_vars;
         if (facts_.size() > state.facts_size)
         {
             facts_.erase(facts_.begin() + static_cast<std::ptrdiff_t>(state.facts_size),
@@ -779,6 +809,48 @@ class Verifier
                     ghost_fns_.emplace(f.name, std::move(ghost_sig));
                 }
             }
+        }
+    }
+
+    // Collect module-level mutable state (issue #287) into globals_: name ->
+    // scalar kind or array element-kind/length. The type checker validates the
+    // declarations (supported kinds, literal initializers, duplicate names);
+    // this re-checks the kinds as defense in depth and records the metadata
+    // used to seed each function's solver context.
+    void collect_globals(const curlee::parser::Program& program)
+    {
+        globals_.clear();
+        for (const auto& g : program.statics)
+        {
+            if (g.type.is_array())
+            {
+                const auto elem = curlee::types::core_type_from_name(g.type.name);
+                const auto len = g.type.array_len.has_value()
+                                     ? parse_array_length_lexeme(*g.type.array_len)
+                                     : std::optional<std::uint64_t>{};
+                if (!elem.has_value() || !is_array_element_kind(elem->kind) || !len.has_value() ||
+                    *len == 0)
+                {
+                    continue;
+                }
+                globals_.emplace(g.name,
+                                 GlobalMeta{.kind = TypeKind::Array,
+                                            .elem_kind = elem->kind,
+                                            .array_len = *len});
+                continue;
+            }
+
+            const auto t = curlee::types::core_type_from_name(g.type.name);
+            if (!t.has_value())
+            {
+                continue;
+            }
+            if (t->kind != TypeKind::Int && t->kind != TypeKind::Bool &&
+                !is_phys_element_kind(t->kind))
+            {
+                continue;
+            }
+            globals_.emplace(g.name, GlobalMeta{.kind = t->kind});
         }
     }
 
@@ -1167,6 +1239,63 @@ class Verifier
         return found;
     }
 
+    // Like pred_mentions_opaque_read, but only for module-level mutable state
+    // provenance (issue #287), so the opaque diagnostic can name the right
+    // kind of value.
+    bool pred_mentions_global(const curlee::parser::Pred& pred) const
+    {
+        bool found = false;
+        std::visit(
+            [&](const auto& node)
+            {
+                using Node = std::decay_t<decltype(node)>;
+                if constexpr (std::is_same_v<Node, curlee::parser::PredName>)
+                {
+                    if (opaque_global_vars_.count(node.name) != 0)
+                    {
+                        found = true;
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PredCall>)
+                {
+                    for (const auto& arg : node.args)
+                    {
+                        if (pred_mentions_global(arg))
+                        {
+                            found = true;
+                        }
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PredUnary>)
+                {
+                    if (node.rhs != nullptr && pred_mentions_global(*node.rhs))
+                    {
+                        found = true;
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PredBinary>)
+                {
+                    if (node.lhs != nullptr && pred_mentions_global(*node.lhs))
+                    {
+                        found = true;
+                    }
+                    if (node.rhs != nullptr && pred_mentions_global(*node.rhs))
+                    {
+                        found = true;
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::PredGroup>)
+                {
+                    if (node.inner != nullptr && pred_mentions_global(*node.inner))
+                    {
+                        found = true;
+                    }
+                }
+            },
+            pred.node);
+        return found;
+    }
+
     // Like pred_mentions_opaque_read, but only for port_in* provenance, so the
     // opaque diagnostic can name the right access kind.
     bool pred_mentions_port_opaque_read(const curlee::parser::Pred& pred) const
@@ -1401,22 +1530,95 @@ class Verifier
             e.node);
     }
 
-    void add_opaque_read_note(Diagnostic& d, bool is_port)
+    // True if an expression reads module-level mutable state (issue #287),
+    // transitively like expr_is_opaque_read. A global's value is opaque to the
+    // solver, so passing it (or an expression built from it) into a call whose
+    // parameter carries a contract is unprovable.
+    bool expr_is_global_read(const Expr& e) const
+    {
+        return std::visit(
+            [&](const auto& node) -> bool
+            {
+                using Node = std::decay_t<decltype(node)>;
+                if constexpr (std::is_same_v<Node, NameExpr>)
+                {
+                    return opaque_global_vars_.count(node.name) != 0;
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::GroupExpr>)
+                {
+                    return node.inner != nullptr && expr_is_global_read(*node.inner);
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::UnaryExpr>)
+                {
+                    return node.rhs != nullptr && expr_is_global_read(*node.rhs);
+                }
+                else if constexpr (std::is_same_v<Node, curlee::parser::BinaryExpr>)
+                {
+                    if (node.lhs != nullptr && expr_is_global_read(*node.lhs))
+                    {
+                        return true;
+                    }
+                    return node.rhs != nullptr && expr_is_global_read(*node.rhs);
+                }
+                else if constexpr (std::is_same_v<Node, IndexExpr>)
+                {
+                    return node.index != nullptr && expr_is_global_read(*node.index);
+                }
+                else if constexpr (std::is_same_v<Node, ArrayLiteralExpr>)
+                {
+                    return node.value != nullptr && expr_is_global_read(*node.value);
+                }
+                return false;
+            },
+            e.node);
+    }
+
+    void add_opaque_read_note(Diagnostic& d, bool is_port, bool is_global)
     {
         Related note;
-        note.message = is_port ? "port I/O read is opaque; cannot prove this contract"
-                               : "MMIO read is opaque; cannot prove this contract";
+        if (is_global)
+        {
+            note.message = "module-level mutable state is opaque to the verifier; "
+                           "cannot prove this contract";
+        }
+        else
+        {
+            note.message = is_port ? "port I/O read is opaque; cannot prove this contract"
+                                   : "MMIO read is opaque; cannot prove this contract";
+        }
         note.span = std::nullopt;
         d.notes.push_back(std::move(note));
     }
 
+    // Pick the opaque-contract message for a clause kind ("refinement",
+    // "ensures", "contract", "call contract") and the value's provenance.
+    // Module-level mutable state (issue #287) gets its own message so the
+    // diagnostic says WHY the contract is unprovable, not "MMIO read". The
+    // noun preserves the wording the opaque-read diagnostics used before
+    // #287: "argument" for call-contract checks (the value crossed a call
+    // boundary as an argument), "result" for ensures-on-return checks, and
+    // "value" elsewhere.
+    static std::string opaque_contract_message(std::string_view clause, bool is_port,
+                                               bool is_global, const char* noun = "value")
+    {
+        if (is_global)
+        {
+            return "cannot prove " + std::string(clause) +
+                   " on module-level mutable state (opaque to the verifier)";
+        }
+        return is_port
+                   ? "cannot prove " + std::string(clause) + " on opaque port I/O read " + noun
+                   : "cannot prove " + std::string(clause) + " on opaque MMIO read " + noun;
+    }
+
     // Hard diagnostic for a contract that mentions an opaque read value
-    // (MMIO or port I/O). The build must fail rather than silently accept an
-    // unprovable contract.
-    void reject_opaque_read_contract(Span span, std::string_view message, bool is_port = false)
+    // (MMIO, port I/O, or module-level mutable state). The build must fail
+    // rather than silently accept an unprovable contract.
+    void reject_opaque_read_contract(Span span, std::string_view message, bool is_port = false,
+                                     bool is_global = false)
     {
         auto d = error_at(span, std::string(message));
-        add_opaque_read_note(d, is_port);
+        add_opaque_read_note(d, is_port, is_global);
         diags_.push_back(std::move(d));
     }
 
@@ -1427,10 +1629,10 @@ class Verifier
         if (pred_mentions_opaque_read(pred))
         {
             const bool is_port = pred_mentions_port_opaque_read(pred);
+            const bool is_global = pred_mentions_global(pred);
             reject_opaque_read_contract(pred.span,
-                                        is_port ? "cannot prove contract on opaque port I/O read value"
-                                                : "cannot prove contract on opaque MMIO read value",
-                                        is_port);
+                                        opaque_contract_message("contract", is_port, is_global),
+                                        is_port, is_global);
             return;
         }
         auto lowered = lower_predicate(pred, lower_ctx_);
@@ -2170,6 +2372,7 @@ class Verifier
         // with a requires-guarded unsigned parameter is a hard error, not a silent skip.
         bool arg_is_opaque = false;
         bool arg_is_port_opaque = false;
+        bool arg_is_global = false;
         for (const auto& arg : call.args)
         {
             if (expr_is_opaque_read(arg))
@@ -2179,6 +2382,10 @@ class Verifier
             if (expr_is_port_opaque_read(arg))
             {
                 arg_is_port_opaque = true;
+            }
+            if (expr_is_global_read(arg))
+            {
+                arg_is_global = true;
             }
         }
 
@@ -2196,10 +2403,9 @@ class Verifier
                     // guaranteed non-empty here (the ternary fallback was dead code).
                     reject_opaque_read_contract(
                         call.args[0].span,
-                        arg_is_port_opaque
-                            ? "cannot prove call contract on opaque port I/O read argument"
-                            : "cannot prove call contract on opaque MMIO read argument",
-                        arg_is_port_opaque);
+                        opaque_contract_message("call contract", arg_is_port_opaque, arg_is_global,
+                                                /*noun=*/"argument"),
+                        arg_is_port_opaque, arg_is_global);
                 }
                 return;
             }
@@ -2262,11 +2468,10 @@ class Verifier
             if (pred_mentions_opaque_read(req))
             {
                 const bool is_port = pred_mentions_port_opaque_read(req);
+                const bool is_global = pred_mentions_global(req);
                 reject_opaque_read_contract(
-                    req.span,
-                    is_port ? "cannot prove requires on opaque port I/O read value"
-                            : "cannot prove requires on opaque MMIO read value",
-                    is_port);
+                    req.span, opaque_contract_message("requires", is_port, is_global), is_port,
+                    is_global);
                 continue;
             }
             auto lowered = lower_predicate(req, call_ctx);
@@ -2351,11 +2556,10 @@ class Verifier
                 if (pred_mentions_opaque_read(ens))
                 {
                     const bool is_port = pred_mentions_port_opaque_read(ens);
+                    const bool is_global = pred_mentions_global(ens);
                     reject_opaque_read_contract(
-                        ens.span,
-                        is_port ? "cannot prove ensures on opaque port I/O read value"
-                                : "cannot prove ensures on opaque MMIO read value",
-                        is_port);
+                        ens.span, opaque_contract_message("ensures", is_port, is_global), is_port,
+                        is_global);
                     continue;
                 }
                 auto lowered_ens = lower_predicate(ens, post_ctx);
@@ -2551,15 +2755,16 @@ class Verifier
         if (result_is_opaque)
         {
             const bool result_is_port = expr_is_port_opaque_read(*s.value);
+            const bool result_is_global = expr_is_global_read(*s.value);
             for (const auto& ens : func->ensures)
             {
                 if (pred_mentions_result(ens))
                 {
                     reject_opaque_read_contract(
                         ens.span,
-                        result_is_port ? "cannot prove ensures on opaque port I/O read result"
-                                       : "cannot prove ensures on opaque MMIO read result",
-                        result_is_port);
+                        opaque_contract_message("ensures", result_is_port, result_is_global,
+                                                /*noun=*/"result"),
+                        result_is_port, result_is_global);
                 }
             }
             return;
@@ -2718,6 +2923,14 @@ class Verifier
         // Non-scalar bindings (e.g. structs/enums) are allowed as long as we don't
         // attach refinements to them, since we can't lower them into the solver.
 
+        // A local `let` that shadows a module-level static (issue #287) is an
+        // ordinary local binding: drop the global's opaque marking so
+        // contracts on the local resolve like any other local. If the local's
+        // own initializer derives from an opaque read, the let paths below
+        // re-mark it.
+        opaque_global_vars_.erase(s.name);
+        opaque_read_vars_.erase(s.name);
+
         // Fixed-size arrays (issue #278): model as Z3 arrays with select/store.
         if (s.type.is_array())
         {
@@ -2792,11 +3005,11 @@ class Verifier
             if (s.refinement.has_value() && pred_mentions_opaque_read(*s.refinement))
             {
                 const bool is_port = pred_mentions_port_opaque_read(*s.refinement);
+                const bool is_global = pred_mentions_global(*s.refinement);
                 reject_opaque_read_contract(
                     s.refinement->span,
-                    is_port ? "cannot prove refinement on opaque port I/O read value"
-                            : "cannot prove refinement on opaque MMIO read value",
-                    is_port);
+                    opaque_contract_message("refinement", is_port, is_global), is_port,
+                    is_global);
             }
 
             // U8/U16/U32/U64 values lower to their Int value in the solver
@@ -3411,10 +3624,10 @@ class Verifier
         if (pred_mentions_opaque_read(pred))
         {
             const bool is_port = pred_mentions_port_opaque_read(pred);
+            const bool is_global = pred_mentions_global(pred);
             reject_opaque_read_contract(pred.span,
-                                        is_port ? "cannot prove contract on opaque port I/O read value"
-                                                : "cannot prove contract on opaque MMIO read value",
-                                        is_port);
+                                        opaque_contract_message("contract", is_port, is_global),
+                                        is_port, is_global);
             return std::nullopt;
         }
         auto lowered =
@@ -3865,16 +4078,49 @@ class Verifier
         phys_vars_.clear();
         array_meta_.clear();
         opaque_read_vars_.clear();
+        opaque_port_read_vars_.clear();
+        opaque_global_vars_.clear();
         facts_.clear();
         scopes_.clear();
         loop_entry_ctxs_.clear();
         fresh_counter_ = 0;
 
         push_scope();
+
+        // Seed module-level mutable state (issue #287): every function sees a
+        // FRESH opaque solver symbol per global, so reads are uninterpreted
+        // (like a Phys/port read) and no fact links this function's view to any
+        // other call's — the verifier cannot reason across separate entry
+        // points, and the honest MVP story is "opaque once written". Writes
+        // rebind the name to a fresh symbol constrained to the RHS (exactly the
+        // local-assignment path), giving within-function read-over-write
+        // coherence without claiming anything about other calls. The names are
+        // marked opaque so a requires/ensures/refinement/invariant mentioning a
+        // global fails with the module-state diagnostic instead of a solver
+        // model.
+        for (const auto& [name, meta] : globals_)
+        {
+            if (meta.kind == TypeKind::Array)
+            {
+                declare_array_var(name, *meta.elem_kind, meta.array_len);
+                continue;
+            }
+            opaque_read_vars_.insert(name);
+            opaque_global_vars_.insert(name);
+            declare_var(name, meta.kind);
+        }
+
         for (std::size_t i = 0; i < f.params.size(); ++i)
         {
             const auto& param = f.params[i];
             const auto param_kind = sig_it->second.params[i];
+
+            // A parameter that shadows a module-level static is an ordinary
+            // local binding (the type checker resolves the param first): drop
+            // the global's opaque marking so contracts on the parameter are
+            // provable like any other parameter.
+            opaque_global_vars_.erase(param.name);
+            opaque_read_vars_.erase(param.name);
 
             // Phys<T> parameters are opaque pointers; record their element kind so that
             // read()/write() on the parameter can be lowered.

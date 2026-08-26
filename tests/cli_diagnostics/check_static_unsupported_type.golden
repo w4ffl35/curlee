@@ -1,0 +1,4 @@
+tests/fixtures/check_static_unsupported_type.curlee:9:1: error: module-level static variables support only scalar (Int/Bool/U8/U16/U32/U64) and fixed-size array ([T; N]) types in the MVP
+  |
+  | static greeting: String = "hello";
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

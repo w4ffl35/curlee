@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #287: an array static's initializer must be a `[v; N]` repeat literal
+// (there is no per-element list form, matching array `let`s). A name
+// expression is rejected. Expected error:
+//   "static array 'a': initializer must be an array repeat literal [v; N]"
+
+static n: Int = 5;
+static a: [Int; 4] = n;
+
+fn main() -> Int {
+  return a[0];
+}
