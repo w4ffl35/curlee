@@ -2125,6 +2125,62 @@ fn main() -> Int {
         }
     }
 
+    // Runtime-address physical writes are priced like any other volatile
+    // store: address expression + value expression + the store instruction
+    // (review regression, issue #285). Before the fix RuntimePhysWriteExpr
+    // fell through to the leaf default priced at 0 instructions, so a
+    // `[ fuel 1; ]` bound on one write VERIFIED — unsound for the M3
+    // fuel/WCET guarantee on the fb.c pixel-write code this builtin unblocks.
+    // The write costs addr (1) + value (1) + store (1), plus the `return` (1):
+    // fuel 1 must fail and fuel 4 must verify.
+    {
+        const std::string source = R"(
+fn poke(pm: cap phys.mem) -> Unit
+  [ fuel 1; ]
+{
+  unsafe {
+    phys_write_u32(1048576, 0xFF8800);
+  }
+  return;
+}
+
+fn main() -> Int {
+  return 0;
+}
+)";
+        const auto verified = verify_program(source, "fuel phys write low");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected too-low fuel bound on runtime phys write to fail verification");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "fuel bound may be exceeded"))
+        {
+            fail("expected fuel bound diagnostic for runtime phys write");
+        }
+    }
+    {
+        const std::string source = R"(
+fn poke(pm: cap phys.mem) -> Unit
+  [ fuel 4; ]
+{
+  unsafe {
+    phys_write_u32(1048576, 0xFF8800);
+  }
+  return;
+}
+
+fn main() -> Int {
+  return 0;
+}
+)";
+        const auto verified = verify_program(source, "fuel phys write ok");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected sufficient fuel bound on runtime phys write to verify");
+        }
+    }
+
     // A function without a `fuel` clause is unaffected (no fuel obligation).
     {
         const std::string source = R"(

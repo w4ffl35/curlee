@@ -1,0 +1,11 @@
+// Positive companion (issue #285): a sufficient fuel bound verifies. The
+// write costs address (1) + value (1) + store (1); with the `return` (1) the
+// true cost is 4, so `[ fuel 4; ]` must pass.
+fn poke(pm: cap phys.mem) -> Unit
+  [ fuel 4; ]
+{
+  unsafe {
+    phys_write_u32(1048576, 0xFF8800);
+  }
+  return;
+}

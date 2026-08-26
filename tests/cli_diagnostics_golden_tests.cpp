@@ -986,6 +986,14 @@ int main(int argc, char** argv)
         fs::path("tests/fixtures/check_fuel_nested_call_low.curlee");
     const fs::path rel_fuel_recursive =
         fs::path("tests/fixtures/check_fuel_recursive.curlee");
+    // Runtime-address physical writes (issue #285, review round 1): the fuel
+    // cost model must charge the volatile store (addr + value + 1), so a
+    // `[ fuel 1; ]` bound on one write must FAIL, and a sufficient bound (4)
+    // must pass.
+    const fs::path rel_fuel_phys_write_low =
+        fs::path("tests/fixtures/check_fuel_phys_write_low.curlee");
+    const fs::path rel_fuel_phys_write_ok =
+        fs::path("tests/fixtures/check_fuel_phys_write_ok.curlee");
     // Assignment statements (issue #268) diagnostics.
     const fs::path rel_assign_bounded_sum =
         fs::path("tests/fixtures/check_assign_bounded_sum.curlee");
@@ -1638,6 +1646,22 @@ int main(int argc, char** argv)
         if (!run_stderr_case("check-fuel-recursive",
                              {"curlee", "check", rel_fuel_recursive.string()},
                              dir / "check_fuel_recursive.golden", false))
+        {
+            return 1;
+        }
+        // Runtime-address physical writes (issue #285): regression for the
+        // review finding that RuntimePhysWriteExpr fell through to the leaf
+        // default (0 instructions). The write is now priced addr + value + 1,
+        // so fuel 1 must fail and fuel 4 must pass.
+        if (!run_stderr_case("check-fuel-phys-write-low",
+                             {"curlee", "check", rel_fuel_phys_write_low.string()},
+                             dir / "check_fuel_phys_write_low.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-fuel-phys-write-ok",
+                             {"curlee", "check", rel_fuel_phys_write_ok.string()},
+                             dir / "check_fuel_phys_write_ok.golden", true))
         {
             return 1;
         }
