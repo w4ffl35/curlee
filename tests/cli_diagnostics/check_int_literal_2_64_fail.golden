@@ -1,0 +1,8 @@
+tests/fixtures/check_int_literal_2_64_fail.curlee:8:13: error: ensures clause not satisfied
+  |
+  |   [ ensures result < 0; ]
+  |             ^^^^^^^^^^
+note: goal: (result < 0)
+note: model:
+result = 18446744073709551616
+note: hint: add or strengthen preconditions/refinements to satisfy this contract

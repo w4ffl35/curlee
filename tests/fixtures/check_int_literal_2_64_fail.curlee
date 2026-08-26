@@ -1,0 +1,11 @@
+// Negative regression guard (issue #276 review round 2): with the verifier's
+// arbitrary-precision hex/underscore lowering in place, `return
+// 0x1_0000_0000_0000_0000;` is a POSITIVE value (2^64), so `ensures result < 0`
+// must be rejected with a model showing the correct positive numeral.
+// Previously this input aborted the process (z3::exception, rc=134, core
+// dumped) instead of emitting a diagnostic.
+fn wrong_sign() -> Int
+  [ ensures result < 0; ]
+{
+  return 0x1_0000_0000_0000_0000; // 2^64
+}
