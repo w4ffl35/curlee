@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 7a: a fixed-size mutable array used as a
+// ring buffer (push at a head index, pop at a tail index, modulo wraparound).
+//
+// Mirrors fb.c's tool_queue (struct tool_slot tool_queue[TOOL_QUEUE_SLOTS]
+// with tool_head / tool_count) and virtio_net.c's rx_buf_state[] bookkeeping.
+//
+// EXPECTED FAILURE: Curlee has NO array type — the MVP grammar (wiki
+// Language-Syntax §6) has no array form, only scalar core types, structs,
+// enums, Phys<T>, and the hosted-only Vec (which the freestanding target
+// rejects). This probe uses the syntax a C/Curlee reader would expect and
+// should fail at parse time.
+//
+// NOTE: per the joeos C-boundary policy, the ring PAYLOAD storage (a static
+// array) is allowed to stay in C as a "raw ring/state owner"; the ring
+// bookkeeping arithmetic is what Curlee must express (see
+// joeos_07b_ring_bookkeeping.curlee, which passes).
+
+fn main() -> Int {
+  let q: [Int; 8] = [0; 8];   // fixed-size array (no such syntax)
+  let head: Int = 0;
+  let count: Int = 0;
+  q[head] = 42;               // indexed element write (no such syntax)
+  head = (head + 1) % 8;
+  count = count + 1;
+  return q[0] + head + count;
+}

@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 6c: does U64 exist as a type at all
+// outside Phys<T>/port I/O contexts? (Probe: the only construction path the
+// language offers is a Phys<U64> read; U64 == U64 comparison is legal.)
+//
+// Mirrors the existing tests/fixtures/check_unsigned_inspect.curlee::u64_read
+// (issue #274 "out of scope" note: a U64 read type-checks and verifies as an
+// uninterpreted value, but cannot be mixed with Int in operators).
+//
+// RESULT: compiles + verifies + links + boots (curlee_halt reached, qemu
+// rc=3). U64 exists as a core type and as a Phys<U64> read result, but ONLY
+// via the Phys<U64> read path (no Int->U64 widening, no U64 literals — see
+// items 6a/6b).
+//
+// BOOT NOTE: halting behind an `if (y == x)` branch does not fire under
+// QEMU's PVH loader at -O0 (reproduced with a hand-written C kernel of the
+// identical shape, both branch polarities; an unconditional halt works). This
+// is a QEMU/TGC -O0 quirk, NOT a Curlee issue — the same comparison verifies
+// (tests/fixtures/check_unsigned_inspect.curlee::u64_read) and codegens to
+// `if ((y == x))`. This probe therefore computes the comparison into a `let`
+// and halts unconditionally, so the boot is observable.
+//
+// Build: ./build/linux-debug/curlee build --link -o build/audit/06c.elf \
+//          tests/audit/joeos_06c_u64_phys_ok.curlee
+
+extern fn curlee_halt() -> Unit;
+
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let x: U64 = phys<U64>(0x4000).read();  // opaque, uninterpreted
+    let y: U64 = x;                         // U64-to-U64 binding stays legal
+    let same: Bool = (y == x);              // same-kind comparison stays legal
+    curlee_halt();
+    if (same) {
+      return 0;
+    }
+    return 1;
+  }
+}

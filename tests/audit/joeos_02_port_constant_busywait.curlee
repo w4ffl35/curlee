@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 2: port I/O read-then-branch on a
+// CONSTANT port (issues #269 + #274).
+//
+// Mirrors putc_driver.c's COM1 busy-wait:
+//   while ((inb(COM1_LSR) & LSR_THR_EMPTY) == 0) { pause; }
+//   outb(COM1_DATA, c);
+// with COM1_LSR = 0x3FD, LSR_THR_EMPTY = 0x20, COM1_DATA = 0x3F8.
+//
+// The busy-wait loop has no contract block: the verifier's legacy single-pass
+// mode checks the body once with the loop condition assumed (the port read is
+// opaque), so it verifies without a `decreases` clause
+// (docs/loop-contracts.md; issue #274 acceptance criterion 3).
+//
+// Build: ./build/linux-debug/curlee build --link -o build/audit/02.elf \
+//          tests/audit/joeos_02_port_constant_busywait.curlee
+
+extern fn curlee_halt() -> Unit;
+
+fn putc(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let lsr: U8 = port_inb(0x3FD);        // COM1 LSR (opaque read)
+    while ((lsr & 32) == 0) {             // LSR bit 5 = THR empty
+      // busy-wait. putc_driver.c also emits a `pause` here; Curlee has no
+      // instruction intrinsic, and the emulated UART drains fast, so the
+      // plain loop is the portable equivalent.
+    }
+    port_outb(0x3F8, lsr);                // COM1 THR: write the byte back
+  }
+  return;
+}
+
+fn main(pm: cap phys.mem) -> Unit {
+  putc(pm);
+  curlee_halt();
+  return;
+}

@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 1: mutable loop-carried state (issue
+// #268, assignment statements).
+//
+// Mirrors fb.c's frame/ring counters (fb_run_loop: `++loop_frame`,
+// `ring_slot = (ring_slot + 1) % FRAME_RING_SLOTS`) and the ring-index
+// bookkeeping in virtio_net.c / net_stack.c: a bounded while-loop that
+// reassigns a counter and an accumulator each iteration, plus a ring slot
+// advancing by modulo.
+//
+// Build: ./build/linux-debug/curlee build --link -o build/audit/01.elf \
+//          tests/audit/joeos_01_mutable_loop_state.curlee
+
+extern fn curlee_halt() -> Unit;
+
+fn sum_to(n: Int) -> Int
+  [ requires n >= 0;
+    ensures result >= 0; ]
+{
+  // Counter + accumulator, both reassigned each iteration (the bounded-sum
+  // shape from docs/loop-contracts.md, provable only because #268 landed).
+  let i: Int = 0;
+  let acc: Int = 0;
+  while (i < n)
+    [ invariant 0 <= i && i <= n && acc >= 0;
+      decreases n - i; ]
+  {
+    i = i + 1;
+    acc = acc + i;
+  }
+  return acc;
+}
+
+fn main() -> Int {
+  // fb.c fb_run_loop: a frame counter advanced once per tick (loop fuel),
+  // and a ring slot advanced by modulo (FRAME_RING_SLOTS = 4).
+  let frame: Int = 0;
+  let slot: Int = 0;
+  let n: Int = 4;
+  while (frame < n)
+    [ invariant 0 <= frame && frame <= n && 0 <= slot && slot < 4;
+      decreases n - frame; ]
+  {
+    frame = frame + 1;
+    slot = (slot + 1) % 4;   // fb.c: ring_slot = (ring_slot + 1) % FRAME_RING_SLOTS
+  }
+  let total: Int = sum_to(5) + slot; // 15 + (4 % 4) = 15
+  curlee_halt();
+  return total;
+}

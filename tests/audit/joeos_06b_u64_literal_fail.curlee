@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 6b: can a U64 be constructed from a
+// literal at all? (The vring descriptor's `addr` field is a uint64_t; the
+// driver needs SOME way to make a U64 value.)
+//
+// EXPECTED FAILURE: an Int literal does not adapt to an unsigned declared type
+// in a `let` (the adaptation rules only exist in operator positions, issue
+// #274). Expected error:
+//   "type mismatch in let: expected U64, got Int"
+
+fn main() -> U64 {
+  let addr: U64 = 1048576;   // 0x100000
+  return addr;
+}

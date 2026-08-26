@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 6a: construct a U64 from a pointer-sized
+// value via a cast/widen.
+//
+// Mirrors virtio_net.c's vring descriptor fill:
+//   rx_desc[s].addr = (uint64_t)(unsigned long)rx_buf[s];
+// where rx_buf[s] is a 32-bit physical address in a static buffer. In Curlee
+// there is no address-of / array type / cast operator, so the closest probe is
+// widening an Int (holding a physical address) to U64.
+//
+// EXPECTED FAILURE: the README says "U64 widening is not yet supported", and
+// the type checker's LetStmt rule requires the initializer type to equal the
+// declared type (no Int -> U64 widening). Expected error:
+//   "type mismatch in let: expected U64, got Int"
+
+fn main() -> U64 {
+  let base: Int = 1048576;    // a physical address as Int (0x100000)
+  let addr: U64 = base;       // (uint64_t)(unsigned long)rx_buf[s] analog
+  return addr;
+}

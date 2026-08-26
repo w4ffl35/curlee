@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 7b: the EXPRESSIBLE half of the ring
+// buffer — the head/count/index bookkeeping arithmetic with modulo wraparound
+// (assignment + % from issues #268/#270). The static payload array stays in C
+// as the "raw ring/state owner" (joeos C-boundary policy §2).
+//
+// Mirrors fb.c fb_tool_enqueue / fb_run_loop:
+//   head = (head + 1) % TOOL_QUEUE_SLOTS;  ++count;
+//   idx  = (head + TOOL_QUEUE_SLOTS - count) % TOOL_QUEUE_SLOTS;  --count;
+// and virtio_net.c's rx_buf_state ring indices.
+//
+// Build: ./build/linux-debug/curlee build --link -o build/audit/07b.elf \
+//          tests/audit/joeos_07b_ring_bookkeeping.curlee
+
+extern fn curlee_halt() -> Unit;
+
+fn main() -> Int {
+  let head: Int = 0;    // producer cursor (fb.c tool_head)
+  let count: Int = 0;   // live intents (fb.c tool_count)
+  let slots: Int = 8;   // TOOL_QUEUE_SLOTS
+
+  // Producer: enqueue 3 intents (fb_tool_enqueue).
+  let i: Int = 0;
+  while (i < 3)
+    [ invariant 0 <= i && i <= 3 && 0 <= head && head < 8 && count == i;
+      decreases 3 - i; ]
+  {
+    head = (head + 1) % slots;   // fb.c: tool_head = (tool_head + 1) % TOOL_QUEUE_SLOTS
+    count = count + 1;
+    i = i + 1;
+  }
+
+  // Consumer: drain all (fb_run_loop). idx = oldest live slot.
+  let drained: Int = 0;
+  while (count > 0)
+    [ invariant 0 <= count && count <= 3 && 0 <= drained && drained <= 3 &&
+               drained + count == 3;
+      decreases count; ]
+  {
+    let idx: Int = (head + slots - count) % slots;  // fb.c: oldest slot
+    let discarded: Int = idx;                       // (payload storage is C)
+    head = (head + slots - 1) % slots;              // consumer side advanced
+    count = count - 1;
+    drained = drained + 1;
+  }
+
+  let total: Int = head + count + drained;
+  curlee_halt();
+  return total;
+}

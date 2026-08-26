@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 8a: MMIO Phys<T> read/write composing
+// with the new assignment feature — a loop that writes a run of pixels to a
+// Phys<U32> framebuffer address using a mutable loop index (mirrors fb.c's
+// fb_clear / fb_fill_rect inner loops).
+//
+// The framebuffer address is a compile-time literal (0xFD000000 = QEMU stdvga
+// LFB with -vga std / default; same address vbe.c documents). The loop index
+// is loop-carried mutation (#268); the Phys write is trusted/opaque (#253).
+//
+// Build: ./build/linux-debug/curlee build --link -o build/audit/08a.elf \
+//          tests/audit/joeos_08a_phys_write_loop.curlee
+
+extern fn curlee_halt() -> Unit;
+
+fn fb_clear(pm: cap phys.mem, pixels: Int) -> Unit
+  [ requires pixels >= 0; ]
+{
+  unsafe {
+    let fb: Phys<U32> = phys<U32>(0xFD00_0000);  // framebuffer base (LFB)
+    let i: Int = 0;
+    while (i < pixels)
+      [ invariant 0 <= i && i <= pixels;
+        decreases pixels - i; ]
+    {
+      fb.write(0xFF8800);      // one pixel (fb.c: p[i] = c)
+      i = i + 1;
+    }
+  }
+  return;
+}
+
+fn main(pm: cap phys.mem) -> U32 {
+  fb_clear(pm, 64);
+  unsafe {
+    let v: U32 = phys<U32>(0xFD00_0000).read();  // read one pixel back
+    curlee_halt();
+    return v;
+  }
+}

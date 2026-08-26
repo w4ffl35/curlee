@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 4b: does a `let`-bound value that is
+// never reassigned count as "constant" to the port-I/O verifier?
+//
+// This is the precise question behind the README's "constant ports only"
+// caveat: is "constant" (a) a compile-time literal token only, or (b) any
+// value the verifier can prove constant (a `let` binding)?
+//
+// EXPECTED FAILURE: the parser accepts only IntLiteral / PhysAddrLiteral
+// tokens for the port argument (src/parser/parser.cpp parse_port_io_call), so
+// a NameExpr (`base`) fails at parse time even though it is never reassigned:
+//   "port_inb() expects a constant integer port"
+// (matches the existing golden tests/fixtures/check_io_port_non_literal_port.curlee).
+
+fn main(pm: cap phys.mem) -> U8 {
+  unsafe {
+    let base: Int = 1021;         // COM1 LSR (0x3FD); never reassigned
+    return port_inb(base);
+  }
+}

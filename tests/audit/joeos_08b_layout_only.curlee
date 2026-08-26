@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 8b-layout: does Curlee struct emission
+// use natural C alignment or packed layout? (No packing attribute exists in
+// the MVP grammar — wiki Language-Syntax §5.2/§6.)
+//
+// Int-field struct (Int lowers to int64_t). Inspect the emitted C:
+//   ./build/linux-debug/curlee build -o - tests/audit/joeos_08b_layout_only.curlee
+// The emitted `typedef struct` uses NATURAL C alignment (int64_t members,
+// 8-byte aligned, sizeof == 32), NOT a packed layout.
+
+struct SmallTag {
+  a: Int;
+  b: Int;
+  c: Int;
+  d: Int;
+}
+
+fn main() -> Int {
+  let t: SmallTag = SmallTag{ a: 1, b: 2, c: 3, d: 4 };
+  return t.a + t.b + t.c + t.d;
+}

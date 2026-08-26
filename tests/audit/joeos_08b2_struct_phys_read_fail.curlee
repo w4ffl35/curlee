@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 8b(ii): can a struct be read directly
+// from a raw physical address (the mb2.c pattern:
+// `const struct mb2_fb_tag* t = (const struct mb2_fb_tag*)(unsigned long)p;`)?
+//
+// EXPECTED FAILURE: Phys<T> element kinds are restricted to U8/U16/U32/U64
+// (type checker: "unsupported Phys element kind"), so a struct element is
+// rejected. There is no packed-struct/pointer-cast feature in the MVP.
+
+struct Mb2FbTag {
+  addr: U64;
+  pitch: U32;
+  width: U32;
+  height: U32;
+  bpp: U8;
+  fb_type: U8;
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let t: Phys<Mb2FbTag> = phys<Mb2FbTag>(0x10000);  // rejected
+    let p: Int = t.pitch;
+    return p;
+  }
+}

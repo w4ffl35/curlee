@@ -1,0 +1,105 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 5: bitwise pack/unpack of a 32-bit value
+// into 4 big-endian bytes and back, plus PCI config address assembly
+// (issue #270: & | ^ ~ << >> and %).
+//
+// Mirrors net_stack.c's ns_wr16/ns_wr32/ns_rd16/ns_rd32 (big-endian header
+// packing) and virtio_net.c's pci_config_read32 address assembly:
+//   addr = 0x80000000 | (bus << 16) | (dev << 11) | (func << 8) | (off & 0xFC)
+//
+// Curlee has no arrays/pointers, so the byte store/load into a buffer is
+// expressed as pure byte extract/assemble functions (the same split the
+// C-boundary policy prescribes: byte storage stays C, the packing logic moves
+// to Curlee).
+//
+// Verification notes (learned empirically):
+//  - A contract-bearing function's RETURN must be a single call-free
+//    expression: user calls are not lowerable in verification predicates
+//    ("calls are not supported in verification expressions").
+//  - The verifier proves bitwise identities over BOUNDED Int ranges. The
+//    full symbolic 32-bit round-trip proof (0 <= v <= 0xFFFFFFFF) does NOT
+//    terminate in the mixed int/bv model (observed >2 min; 16-bit bound also
+//    >30 s), but an 8-bit symbolic bound proves instantly and a CONCRETE
+//    32-bit value (pinned by `requires v == <literal>`) also proves
+//    instantly. Drivers can therefore prove the pack/unpack identity for the
+//    byte ranges they actually handle, or per concrete value.
+//  - Hex literals only parse in phys()/port/write-value positions, so general
+//    expressions use decimal (0xFFFFFFFF = 4294967295, 0x80000000 =
+//    2147483648, 0xFC = 252, 0x1234 = 4660, 0x12345678 = 305419896,
+//    0x80001810 = 2147489808).
+//
+// Build: ./build/linux-debug/curlee build --link -o build/audit/05.elf \
+//          tests/audit/joeos_05_bitwise_pack_pci.curlee
+
+extern fn curlee_halt() -> Unit;
+
+// ns_wr32 byte extraction (net_stack.c: p[0] = v>>24; p[1] = (v>>16)&0xFF; ...).
+fn be_byte0(v: Int) -> Int { return v >> 24; }
+fn be_byte1(v: Int) -> Int { return (v >> 16) & 255; }
+fn be_byte2(v: Int) -> Int { return (v >> 8) & 255; }
+fn be_byte3(v: Int) -> Int { return v & 255; }
+
+// ns_rd32 assembly (net_stack.c: (b0 << 24) | (b1 << 16) | (b2 << 8) | b3).
+fn be_rd32(b0: Int, b1: Int, b2: Int, b3: Int) -> Int {
+  return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
+}
+
+// Symbolic round-trip identity over a bounded byte range: byte-split then
+// reassemble reproduces the input for ANY value in 0..255. Proves in the
+// mixed int/bv model instantly at this bound (see file header notes).
+fn roundtrip8(v: Int) -> Int
+  [ requires 0 <= v && v <= 255;
+    ensures result == v; ]
+{
+  return (((v >> 24) << 24) | (((v >> 16) & 255) << 16) |
+          (((v >> 8) & 255) << 8) | (v & 255));
+}
+
+// Concrete 32-bit round-trip: the exact value a driver would pack (pinned to
+// the literal by requires, so the bit-vector proof reduces to constant
+// folding and terminates instantly).
+fn roundtrip32c(v: Int) -> Int
+  [ requires v == 305419896;   // 0x12345678
+    ensures result == v; ]
+{
+  return (((v >> 24) << 24) | (((v >> 16) & 255) << 16) |
+          (((v >> 8) & 255) << 8) | (v & 255));
+}
+
+// virtio_net.c pci_config_read32 address assembly.
+fn pci_config_addr(bus: Int, dev: Int, func: Int, off: Int) -> Int
+  [ requires 0 <= bus && bus <= 255 && 0 <= dev && dev <= 31 &&
+            0 <= func && func <= 7 && 0 <= off && off <= 4095;
+    ensures result == (2147483648 | (bus << 16) | (dev << 11) |
+                       (func << 8) | (off & 252)); ]
+{
+  return 2147483648 | (bus << 16) | (dev << 11) | (func << 8) | (off & 252);
+}
+
+// ns_wr16-style word split (net_stack.c: p[0] = v>>8; p[1] = v & 0xFF).
+fn be_word_hi(v: Int) -> Int { return v >> 8; }
+fn be_word_lo(v: Int) -> Int { return v & 255; }
+
+// main has no contract: contract-free helper calls are fine in an unverified
+// body (the verifier walks them for requires; codegen emits them; only
+// contract proofs need call-free predicates).
+// main has no contract: contract-free helper calls are fine in an unverified
+// body (the verifier walks them for requires; codegen emits them; only
+// contract proofs need call-free predicates). Nested calls (a call used as
+// another call's argument) are NOT lowerable, so each helper call gets its own
+// `let`.
+fn main() -> Int {
+  let rt8: Int = roundtrip8(165);                       // symbolic-bound proof
+  let rt32: Int = roundtrip32c(305419896);              // concrete 32-bit proof
+  let pci: Int = pci_config_addr(0, 3, 0, 16);          // 0x80001810 = 2147489808
+  let word: Int = (be_word_hi(4660) << 8) | be_word_lo(4660);  // 0x1234
+  let b0: Int = be_byte0(305419896);
+  let b1: Int = be_byte1(305419896);
+  let b2: Int = be_byte2(305419896);
+  let b3: Int = be_byte3(305419896);
+  let via_helpers: Int = be_rd32(b0, b1, b2, b3);
+  let total: Int = rt8 + rt32 + pci + word + via_helpers;
+  curlee_halt();
+  return total;
+}

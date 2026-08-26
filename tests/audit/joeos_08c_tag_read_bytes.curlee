@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 8c: the byte-at-a-time workaround for
+// reading a fixed-layout packed struct from a raw physical address, the way
+// net_stack.c already does with net_rx_byte(i) + ns_rd32_byte().
+//
+// Multiboot2 framebuffer tag (mb2.c) at a FIXED base:
+//   +0  u32 type, +4 u32 size, +8 u64 fb_addr, +16 u32 pitch,
+//   +20 u32 width, +24 u32 height, +28 u8 bpp, +29 u8 fb_type
+//
+// Curlee's Phys<T> addresses must be compile-time literals, so each field's
+// address is its own phys<U8|U16|U32>(literal) binding — no pointer
+// arithmetic. The u64 addr is read as two u32 halves (a U64 read is opaque
+// and cannot be compared/validated; see items 6a/6b). The mb2 gate
+// `bpp == 32 && fb_addr != 0` is fully expressible this way.
+//
+// Build: ./build/linux-debug/curlee build --link -o build/audit/08c.elf \
+//          tests/audit/joeos_08c_tag_read_bytes.curlee
+
+extern fn curlee_halt() -> Unit;
+
+fn mb2_fb_tag_usable(pm: cap phys.mem) -> Int {
+  unsafe {
+    // Tag base (fixed in this probe; mb2.c's base is runtime — see report).
+    let type_lo: Phys<U32> = phys<U32>(0x1_0000);       // tag type (u32)
+    let size: Phys<U32> = phys<U32>(0x1_0004);          // tag size (u32)
+    let addr_hi: Phys<U32> = phys<U32>(0x1_0008);       // u64 fb_addr, high
+    let addr_lo: Phys<U32> = phys<U32>(0x1_000C);       // u64 fb_addr, low
+    let pitch: Phys<U32> = phys<U32>(0x1_0010);         // u32 pitch
+    let width: Phys<U32> = phys<U32>(0x1_0014);         // u32 width
+    let height: Phys<U32> = phys<U32>(0x1_0018);        // u32 height
+    let bpp: Phys<U8> = phys<U8>(0x1_001C);             // u8 bpp
+    let fb_type: Phys<U8> = phys<U8>(0x1_001D);         // u8 fb_type
+
+    if (type_lo.read() != 8) { return 0; }              // tag type == 8
+    let sz: U32 = size.read();
+    if (sz < 32) { return 0; }                          // malformed guard
+
+    // mb2.c gate: t->bpp == 32 && t->fb_addr != 0
+    if (bpp.read() != 32) { return 0; }
+    let ah: U32 = addr_hi.read();
+    let al: U32 = addr_lo.read();
+    if (ah == 0 && al == 0) { return 0; }               // fb_addr != 0
+
+    // Fields are inspectable: widen U32 -> Int for arithmetic.
+    let w: Int = width.read() + 0;
+    let h: Int = height.read() + 0;
+    let p: Int = pitch.read() + 0;
+    if (w == 0 || h == 0) { return 0; }
+    return p + w + h;                                   // usable
+  }
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  let r: Int = mb2_fb_tag_usable(pm);
+  curlee_halt();
+  return r;
+}

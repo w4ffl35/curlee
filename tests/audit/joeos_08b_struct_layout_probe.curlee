@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 8b(i): how would mb2.c's packed
+// `struct mb2_fb_tag` (u64 addr + 3 x u32 + 2 x u8 at fixed byte offsets) be
+// expressed in Curlee?
+//
+// Probe: Curlee DOES have structs and the exact field types are storable
+// (uint64_t/uint32_t/uint8_t), so this compiles — but the emitted C struct
+// uses NATURAL alignment (u64 at offset 0, u32s at 8/12/16, u8s at 20/21,
+// padding to 24), NOT the multiboot2 packed layout (u64 at offset 8, u32s at
+// 16/20/24, u8s at 28/29). There is no packing/layout attribute in the MVP
+// grammar (wiki Language-Syntax §5.2 / §6).
+//
+// Inspect the emitted C layout:
+//   ./build/linux-debug/curlee build -o - tests/audit/joeos_08b_struct_layout_probe.curlee
+
+struct Mb2FbTag {
+  addr: U64;      // u64 framebuffer_addr  (packed offset 8)
+  pitch: U32;     // u32 framebuffer_pitch (packed offset 16)
+  width: U32;     // u32 framebuffer_width (packed offset 20)
+  height: U32;    // u32 framebuffer_height (packed offset 24)
+  bpp: U8;        // u8  (packed offset 28)
+  fb_type: U8;    // u8  (packed offset 29)
+}
+
+fn main() -> Int {
+  // Decimal (hex only parses in phys/port/write-value positions). The U64
+  // `addr` field cannot be initialized from an Int literal (see items 6a/6b)
+  // — expect "type mismatch in let: expected U64, got Int" once the literal
+  // parses.
+  let t: Mb2FbTag = Mb2FbTag{ addr: 4244635648, pitch: 2560, width: 640,
+                              height: 480, bpp: 32, fb_type: 1 };
+  // (addr is U64 -> cannot be built from an Int literal; see items 6a/6b.
+  //  This probe's literal will itself fail to type-check unless U64 literals
+  //  adapt; the struct LAYOUT question is answered by the parser/codegen even
+  //  if the literal initializer is rejected — see the report.)
+  let p: Int = t.pitch + t.width + t.height + t.bpp + t.fb_type;
+  return p;
+}

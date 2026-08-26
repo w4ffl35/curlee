@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 8b-layout (unsigned): a struct with
+// U32/U8 fields, constructed from UNSIGNED values sourced from port reads
+// (the only way to obtain U8/U16/U32/U64 values — literal adaptation exists
+// only in operator positions and Phys.write/port_out*, NOT in struct
+// literals; see the report, item 8b findings).
+//
+// Inspect the emitted C:
+//   ./build/linux-debug/curlee build -o - tests/audit/joeos_08b_layout_unsigned.curlee
+// The emitted `typedef struct` uses NATURAL C alignment (uint32_t at 0/4,
+// uint8_t at 8/9, padding to 12), NOT the packed mb2_fb_tag layout
+// (u64 at +8, u32 at +16/20/24, u8 at +28/29).
+
+struct SmallTag {
+  a: U32;
+  b: U32;
+  c: U8;
+  d: U8;
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  unsafe {
+    let a: U32 = port_inl(0xCFC);   // PCI config data (opaque)
+    let b: U32 = a;
+    let c: U8 = port_inb(0x3FD);    // COM1 LSR (opaque)
+    let d: U8 = c;
+    let t: SmallTag = SmallTag{ a: a, b: b, c: c, d: d };
+    let sum: Int = (t.a + 0) + (t.b + 0) + (t.c + 0) + (t.d + 0);
+    return sum;
+  }
+}

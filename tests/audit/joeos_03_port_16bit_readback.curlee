@@ -1,0 +1,55 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 3: 16-bit port readback validation on a
+// constant port (issues #269 + #274).
+//
+// Mirrors vbe.c's Bochs VBE mode-set readback: outw the index register
+// (0x1CE), inw the data register (0x1CF), and reject the mode when the
+// readback does not match:
+//   if (xres != VBE_PROBE_W || yres != VBE_PROBE_H || bpp != VBE_PROBE_BPP)
+//       return 0;
+//
+// Build: ./build/linux-debug/curlee build --link -o build/audit/03.elf \
+//          tests/audit/joeos_03_port_16bit_readback.curlee
+
+extern fn curlee_halt() -> Unit;
+
+fn vbe_probe(pm: cap phys.mem) -> Int {
+  unsafe {
+    // 1. Presence: Bochs VBE ID register must return a 0xB0Cx family value.
+    // NOTE: hex literals (0x...) only parse in phys()/port/write-value
+    // positions, so general-expression masks must be decimal (0xFFF0 = 65520,
+    // 0xB0C0 = 45248) — see the report, item 3 note.
+    port_outw(0x1CE, 0x0000);             // VBE_DISPI_INDEX_ID
+    let id: U16 = port_inw(0x1CF);
+    if ((id & 65520) != 45248) {          // vbe.c: (id & 0xFFF0) != 0xB0C0
+      return 0;
+    }
+
+    // 2. Program + readback-validate a 640x480x32 mode.
+    port_outw(0x1CE, 0x0001);             // VBE_DISPI_INDEX_XRES
+    port_outw(0x1CF, 640);
+    port_outw(0x1CE, 0x0002);             // VBE_DISPI_INDEX_YRES
+    port_outw(0x1CF, 480);
+    port_outw(0x1CE, 0x0003);             // VBE_DISPI_INDEX_BPP
+    port_outw(0x1CF, 32);
+
+    // 3. Read back and validate (vbe.c step 4).
+    port_outw(0x1CE, 0x0001);
+    let xres: U16 = port_inw(0x1CF);
+    port_outw(0x1CE, 0x0002);
+    let yres: U16 = port_inw(0x1CF);
+    port_outw(0x1CE, 0x0003);
+    let bpp: U16 = port_inw(0x1CF);
+    if (xres != 640 || yres != 480 || bpp != 32) {
+      return 0;                           // mode-set rejected
+    }
+    return 1;                             // validated
+  }
+}
+
+fn main(pm: cap phys.mem) -> Int {
+  let ok: Int = vbe_probe(pm);
+  curlee_halt();
+  return ok;
+}
