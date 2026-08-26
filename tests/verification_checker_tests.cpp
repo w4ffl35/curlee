@@ -1654,6 +1654,146 @@ fn main() -> Int {
         }
     }
 
+    // ---------------------------------------------------------------------
+    // Fixed-size arrays (issue #278)
+    // ---------------------------------------------------------------------
+
+    // Acceptance #1: `let q: [Int; 8] = [0; 8]; q[0] = 42; let v: Int = q[0];`
+    // verifies — the array binding is modeled in the solver (select/store) and
+    // the constant index is trivially in bounds.
+    {
+        const std::string source = R"(
+fn main() -> Int {
+  let q: [Int; 8] = [0; 8];
+  q[0] = 42;
+  let v: Int = q[0];
+  return v;
+}
+)";
+        const auto verified = verify_program(source, "array acceptance #1");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected array let + indexed read/write to verify");
+        }
+    }
+
+    // The per-access bounds obligation is discharged for a SYMBOLIC index when
+    // the loop invariant bounds it: `requires n <= 8` + `invariant 0 <= i &&
+    // i <= n` + the loop condition `i < n` imply `0 <= i < 8` at every `q[i]`
+    // inside the loop (issue MVP: "the loop-invariant machinery can discharge
+    // this for bounded ring indices").
+    {
+        const std::string source = R"(
+fn fill(n: Int) -> Int [
+  requires 0 <= n && n <= 8;
+]
+{
+  let q: [Int; 8] = [0; 8];
+  let i: Int = 0;
+  while (i < n)
+    [ invariant 0 <= i && i <= n;
+      decreases n - i; ]
+  {
+    q[i] = i * 2;
+    i = i + 1;
+  }
+  let v: Int = q[0];
+  return v;
+}
+
+fn main() -> Int {
+  return fill(3);
+}
+)";
+        const auto verified = verify_program(source, "bounded symbolic array index");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected bounded symbolic array index to verify via loop invariant");
+        }
+    }
+
+    // A SYMBOLIC index with no bounding facts fails the per-access bounds
+    // obligation (no silent OOB even for non-constant indices).
+    {
+        const std::string source = R"(
+fn main(i: Int) -> Int {
+  let q: [Int; 8] = [0; 8];
+  let v: Int = q[i];
+  return v;
+}
+)";
+        const auto verified = verify_program(source, "unproven symbolic array index");
+        if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(verified))
+        {
+            fail("expected unproven symbolic array index to fail verification");
+        }
+        const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(verified);
+        if (!has_message_substr(diags, "array index out of bounds for 'q'"))
+        {
+            fail("expected the bounds obligation to report the unproven index");
+        }
+    }
+
+    // Read-over-write coherence: `q[0] = 5; let v = q[0];` models exactly via
+    // Z3 store/select, so `ensures result == 5` is provable.
+    {
+        const std::string source = R"(
+fn coherence() -> Int [
+  ensures result == 5;
+]
+{
+  let q: [Int; 8] = [0; 8];
+  q[0] = 5;
+  let v: Int = q[0];
+  return v;
+}
+
+fn main() -> Int {
+  return coherence();
+}
+)";
+        const auto verified = verify_program(source, "array read-over-write coherence");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected array read-over-write coherence contract to verify");
+        }
+    }
+
+    // A loop that writes array elements and accumulates a scalar: with the
+    // scalar in the invariant, the sum contract is provable (the array is
+    // abstracted at loop entry; only bounds + read-over-write coherence matter).
+    {
+        const std::string source = R"(
+fn sum_fill(n: Int) -> Int [
+  requires 0 <= n && n <= 8;
+  ensures result >= 0;
+]
+{
+  let q: [Int; 8] = [0; 8];
+  let total: Int = 0;
+  let i: Int = 0;
+  while (i < n)
+    [ invariant 0 <= i && i <= n && total >= 0;
+      decreases n - i; ]
+  {
+    q[i] = i;
+    total = total + q[i];
+    i = i + 1;
+  }
+  return total;
+}
+
+fn main() -> Int {
+  return sum_fill(3);
+}
+)";
+        const auto verified = verify_program(source, "loop with array writes and scalar sum");
+        if (!std::holds_alternative<curlee::verification::Verified>(verified))
+        {
+            fail("expected array-writing loop with bounded scalar sum to verify");
+        }
+    }
+
     // The loop POST-STATE carries the loop-carried bindings into the
     // continuation (review rework: the continuation previously saw the PRE-loop
     // binding, so a false postcondition like `result == 0` verified vacuously

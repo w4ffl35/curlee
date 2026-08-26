@@ -19,6 +19,7 @@ namespace
 using curlee::diag::Diagnostic;
 using curlee::diag::Related;
 using curlee::diag::Severity;
+using curlee::parser::ArrayLiteralExpr;
 using curlee::parser::AssignStmt;
 using curlee::parser::BinaryExpr;
 using curlee::parser::BlockStmt;
@@ -29,6 +30,8 @@ using curlee::parser::Function;
 using curlee::parser::GhostLetStmt;
 using curlee::parser::GroupExpr;
 using curlee::parser::IfStmt;
+using curlee::parser::IndexAssignStmt;
+using curlee::parser::IndexExpr;
 using curlee::parser::LetStmt;
 using curlee::parser::MatchStmt;
 using curlee::parser::MemberExpr;
@@ -421,6 +424,16 @@ class Resolver
         resolve_expr(s.value);
     }
 
+    void resolve_stmt_node(const IndexAssignStmt& s, Span span)
+    {
+        // `arr[i] = v;` mutates an element of an existing array binding: the
+        // array name resolves like any other use; the index and value are
+        // ordinary expressions.
+        use_name(s.name, span);
+        resolve_expr(s.index);
+        resolve_expr(s.value);
+    }
+
     void resolve_stmt_node(const ReturnStmt& s, Span)
     {
         if (s.value.has_value())
@@ -632,6 +645,29 @@ class Resolver
     }
 
     void resolve_expr_node(const GroupExpr& e, Span) { resolve_expr(*e.inner); }
+
+    void resolve_expr_node(const IndexExpr& e, Span)
+    {
+        // `arr[i]`: resolve the base (the array binding) and the index.
+        if (e.base != nullptr)
+        {
+            resolve_expr(*e.base);
+        }
+        if (e.index != nullptr)
+        {
+            resolve_expr(*e.index);
+        }
+    }
+
+    void resolve_expr_node(const ArrayLiteralExpr& e, Span)
+    {
+        // `[v; N]`: the repeat value is an ordinary expression; the count is a
+        // compile-time literal with no references.
+        if (e.value != nullptr)
+        {
+            resolve_expr(*e.value);
+        }
+    }
 
     void resolve_expr_node(const curlee::parser::PhysExpr&, Span)
     {

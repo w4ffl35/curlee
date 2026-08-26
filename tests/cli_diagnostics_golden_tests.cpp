@@ -977,6 +977,33 @@ int main(int argc, char** argv)
     const fs::path rel_assign_loop_poststate =
         fs::path("tests/fixtures/check_assign_loop_poststate.curlee");
     const fs::path rel_run_assign = fs::path("tests/fixtures/run_assign.curlee");
+    // Fixed-size arrays (issue #278) diagnostics.
+    const fs::path rel_array_ring = fs::path("tests/fixtures/check_array_ring.curlee");
+    const fs::path rel_array_oob_const =
+        fs::path("tests/fixtures/check_array_oob_const.curlee");
+    const fs::path rel_array_oob_neg = fs::path("tests/fixtures/check_array_oob_neg.curlee");
+    const fs::path rel_array_oob_unproven =
+        fs::path("tests/fixtures/check_array_oob_unproven.curlee");
+    const fs::path rel_array_len_mismatch =
+        fs::path("tests/fixtures/check_array_len_mismatch.curlee");
+    const fs::path rel_array_elem_mismatch =
+        fs::path("tests/fixtures/check_array_elem_mismatch.curlee");
+    const fs::path rel_array_reject_multi =
+        fs::path("tests/fixtures/check_array_reject_multi.curlee");
+    const fs::path rel_array_reject_bare =
+        fs::path("tests/fixtures/check_array_reject_bare.curlee");
+    const fs::path rel_array_reject_field =
+        fs::path("tests/fixtures/check_array_reject_field.curlee");
+    const fs::path rel_array_reject_param =
+        fs::path("tests/fixtures/check_array_reject_param.curlee");
+    const fs::path rel_array_reject_return =
+        fs::path("tests/fixtures/check_array_reject_return.curlee");
+    const fs::path rel_array_reject_ghost =
+        fs::path("tests/fixtures/check_array_reject_ghost.curlee");
+    const fs::path rel_array_reject_unsupported_elem =
+        fs::path("tests/fixtures/check_array_reject_unsupported_elem.curlee");
+    const fs::path rel_run_array_vm_reject =
+        fs::path("tests/fixtures/run_array_vm_reject.curlee");
 
     const fs::path check_requires_divide_golden = dir / "check_requires_divide.golden";
     const fs::path check_refinement_implies_golden = dir / "check_refinement_implies.golden";
@@ -1544,6 +1571,106 @@ int main(int argc, char** argv)
         if (!run_stderr_case("check-assign-loop-poststate",
                              {"curlee", "check", rel_assign_loop_poststate.string()},
                              dir / "check_assign_loop_poststate.golden", false))
+        {
+            return 1;
+        }
+
+        // Fixed-size arrays (issue #278) diagnostics.
+        // Acceptance #1-#4 pass: `[T; N]` + indexed read/write, the fb.c
+        // tool_queue ring pattern, rx_buf_state-style U8 bookkeeping, bounded
+        // symbolic indices via loop invariants, read-over-write coherence.
+        if (!run_stderr_case("check-array-ring",
+                             {"curlee", "check", rel_array_ring.string()},
+                             dir / "check_array_ring.golden", true))
+        {
+            return 1;
+        }
+        // Acceptance #2: a constant out-of-bounds index is rejected (read and
+        // write), never silently compiled to C.
+        if (!run_stderr_case("check-array-oob-const",
+                             {"curlee", "check", rel_array_oob_const.string()},
+                             dir / "check_array_oob_const.golden", false))
+        {
+            return 1;
+        }
+        // A constant negative index is always out of bounds.
+        if (!run_stderr_case("check-array-oob-neg",
+                             {"curlee", "check", rel_array_oob_neg.string()},
+                             dir / "check_array_oob_neg.golden", false))
+        {
+            return 1;
+        }
+        // A symbolic index with no bounding facts cannot be proven in 0..N-1:
+        // the verifier's per-access bounds obligation fails with a model note.
+        if (!run_stderr_case("check-array-oob-unproven",
+                             {"curlee", "check", rel_array_oob_unproven.string()},
+                             dir / "check_array_oob_unproven.golden", false))
+        {
+            return 1;
+        }
+        // MVP rejection diagnostics: length mismatch, element-type mismatch on
+        // write, multi-dimensional indexing, bare-array-as-value, arrays in
+        // struct fields / params / return types / ghost snapshots, and
+        // unsupported element types (Bool).
+        if (!run_stderr_case("check-array-len-mismatch",
+                             {"curlee", "check", rel_array_len_mismatch.string()},
+                             dir / "check_array_len_mismatch.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-array-elem-mismatch",
+                             {"curlee", "check", rel_array_elem_mismatch.string()},
+                             dir / "check_array_elem_mismatch.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-array-reject-multi",
+                             {"curlee", "check", rel_array_reject_multi.string()},
+                             dir / "check_array_reject_multi.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-array-reject-bare",
+                             {"curlee", "check", rel_array_reject_bare.string()},
+                             dir / "check_array_reject_bare.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-array-reject-field",
+                             {"curlee", "check", rel_array_reject_field.string()},
+                             dir / "check_array_reject_field.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-array-reject-param",
+                             {"curlee", "check", rel_array_reject_param.string()},
+                             dir / "check_array_reject_param.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-array-reject-return",
+                             {"curlee", "check", rel_array_reject_return.string()},
+                             dir / "check_array_reject_return.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-array-reject-ghost",
+                             {"curlee", "check", rel_array_reject_ghost.string()},
+                             dir / "check_array_reject_ghost.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-array-reject-unsupported-elem",
+                             {"curlee", "check", rel_array_reject_unsupported_elem.string()},
+                             dir / "check_array_reject_unsupported_elem.golden", false))
+        {
+            return 1;
+        }
+        // `run` (VM bytecode) rejects arrays: they are freestanding-only in
+        // the MVP (no VM storage or lowering for IndexExpr/ArrayLiteralExpr).
+        if (!run_stderr_case("run-array-vm-reject",
+                             {"curlee", "run", rel_run_array_vm_reject.string()},
+                             dir / "run_array_vm_reject.golden", false))
         {
             return 1;
         }

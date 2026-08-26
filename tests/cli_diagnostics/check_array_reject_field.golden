@@ -1,0 +1,4 @@
+tests/fixtures/check_array_reject_field.curlee:10:6: error: array types are only supported as local 'let' bindings in the MVP (not as struct fields)
+  |
+  |   q: [Int; 8];
+  |      ^^^^^^^^

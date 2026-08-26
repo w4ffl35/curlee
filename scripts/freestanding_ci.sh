@@ -57,7 +57,11 @@ step "1. Codegen freestanding C (kernel_hello)"
 test -s "$outdir/kernel_hello.c"
 
 step "2. Compile generated C freestanding (gcc -ffreestanding ... -c)"
-$cc -ffreestanding -fno-builtin -nostdlib -std=c11 -Iruntime -c \
+# -mno-sse -mno-sse2: the boot stub never enables SSE (CR4.OSFXSR), and the
+# emitted C is scalar-only — but gcc would otherwise emit SSE instructions
+# for 16-byte-aligned `{0}` array zero-fills (issue #278), which #UD without
+# OSFXSR. Same flags as `curlee build --link` and the codegen compile smoke.
+$cc -ffreestanding -fno-builtin -nostdlib -std=c11 -mno-sse -mno-sse2 -Iruntime -c \
   "$outdir/kernel_hello.c" -o "$outdir/kernel_hello.o"
 
 step "3. Codegen freestanding C (phys.mem)"
@@ -83,9 +87,9 @@ fi
 # Re-link the kernel with the smoke-only debug-exit driver so the boot is
 # observable: curlee_halt writes to qemu's isa-debug-exit (iobase 0xf4),
 # which exits qemu with status 3.
-$cc -ffreestanding -fno-builtin -nostdlib -std=c11 -Iruntime -c \
+$cc -ffreestanding -fno-builtin -nostdlib -std=c11 -mno-sse -mno-sse2 -Iruntime -c \
   tests/freestanding/debug_exit_driver.c -o "$outdir/debug_exit_driver.o"
-$cc -ffreestanding -fno-builtin -nostdlib -std=c11 -Iruntime -c \
+$cc -ffreestanding -fno-builtin -nostdlib -std=c11 -mno-sse -mno-sse2 -Iruntime -c \
   runtime/rt.c -o "$outdir/rt.o"
 $cc -ffreestanding -fno-builtin -nostdlib -c \
   runtime/crt0.S -o "$outdir/crt0.o"

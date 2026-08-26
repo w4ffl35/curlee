@@ -81,6 +81,11 @@ void assign_expr_ids_stmt(curlee::parser::Stmt& stmt, std::size_t& next_id)
             {
                 assign_expr_ids(node.value, next_id);
             }
+            else if constexpr (std::is_same_v<Node, curlee::parser::IndexAssignStmt>)
+            {
+                assign_expr_ids(node.index, next_id);
+                assign_expr_ids(node.value, next_id);
+            }
             else if constexpr (std::is_same_v<Node, curlee::parser::ReturnStmt>)
             {
                 if (node.value.has_value())
@@ -191,6 +196,15 @@ void assign_expr_ids(curlee::parser::Expr& expr, std::size_t& next_id)
                         assign_expr_ids(*f.value, next_id);
                     }
                 }
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::IndexExpr>)
+            {
+                assign_expr_ids(*node.base, next_id);
+                assign_expr_ids(*node.index, next_id);
+            }
+            else if constexpr (std::is_same_v<Node, curlee::parser::ArrayLiteralExpr>)
+            {
+                assign_expr_ids(*node.value, next_id);
             }
         },
         expr.node);
@@ -421,6 +435,40 @@ class Parser
 
     [[nodiscard]] std::variant<TypeName, curlee::diag::Diagnostic> parse_type()
     {
+        // Fixed-size array type: `[T; N]` (issue #278). T is a storable core
+        // element type (Int/U8/U16/U32/U64) and N is a compile-time literal.
+        if (match(TokenKind::LBracket))
+        {
+            const Token lbracket = previous();
+            if (!check(TokenKind::Identifier))
+            {
+                return error_at(peek(), "expected element type name after '[' in array type");
+            }
+            const Token elem = advance();
+            if (auto err = consume(TokenKind::Semicolon, "expected ';' after array element type");
+                err.has_value())
+            {
+                return *err;
+            }
+            if (!check(TokenKind::IntLiteral))
+            {
+                return error_at(peek(), "array length must be an integer literal");
+            }
+            const Token len = advance();
+            if (auto err = consume(TokenKind::RBracket, "expected ']' after array length");
+                err.has_value())
+            {
+                return *err;
+            }
+            const Token rbracket = previous();
+            return TypeName{
+                .span = curlee::source::Span{.start = lbracket.span.start, .end = rbracket.span.end},
+                .is_capability = false,
+                .name = elem.lexeme,
+                .type_arg = std::nullopt,
+                .array_len = len.lexeme};
+        }
+
         if (match(TokenKind::KwCap))
         {
             const Token kw = previous();
@@ -460,7 +508,8 @@ class Parser
                                 curlee::source::Span{.start = kw.span.start, .end = last.span.end},
                             .is_capability = true,
                             .name = name,
-                            .type_arg = std::nullopt};
+                            .type_arg = std::nullopt,
+                            .array_len = std::nullopt};
         }
 
         if (!check(TokenKind::Identifier))
@@ -484,10 +533,14 @@ class Parser
             return TypeName{.span = curlee::source::Span{.start = t.span.start, .end = gt.span.end},
                             .is_capability = false,
                             .name = t.lexeme,
-                            .type_arg = arg.lexeme};
+                            .type_arg = arg.lexeme,
+                            .array_len = std::nullopt};
         }
-        return TypeName{
-            .span = t.span, .is_capability = false, .name = t.lexeme, .type_arg = std::nullopt};
+        return TypeName{.span = t.span,
+                        .is_capability = false,
+                        .name = t.lexeme,
+                        .type_arg = std::nullopt,
+                        .array_len = std::nullopt};
     }
 
     [[nodiscard]] std::variant<ImportDecl, curlee::diag::Diagnostic> parse_import()
@@ -1872,6 +1925,44 @@ class Parser
         }
         Expr expr = std::get<Expr>(std::move(expr_res));
 
+        // Indexed element assignment: `arr[i] = expr;`. The expression parser
+        // stops before the '=' (it is not an expression operator), leaving an
+        // IndexExpr whose base is the array name. Only a plain NameExpr base
+        // is accepted in the MVP (the target must be a local array binding).
+        if (auto* idx = std::get_if<IndexExpr>(&expr.node);
+            idx != nullptr && idx->base != nullptr)
+        {
+            const auto* base_name = std::get_if<NameExpr>(&idx->base->node);
+            if (base_name != nullptr && check(TokenKind::Equal))
+            {
+                advance(); // consume '='
+
+                auto rhs_res = parse_expr();
+                if (std::holds_alternative<curlee::diag::Diagnostic>(rhs_res))
+                {
+                    return std::get<curlee::diag::Diagnostic>(std::move(rhs_res));
+                }
+                Expr value = std::get<Expr>(std::move(rhs_res));
+
+                if (auto err = consume(TokenKind::Semicolon, "expected ';' after assignment");
+                    err.has_value())
+                {
+                    return *err;
+                }
+                const Token semi = previous();
+
+                // Span: cover from first token of statement to semicolon.
+                const Token first = tokens_[start_pos];
+                Stmt stmt{
+                    .span = span_cover(first.span, semi.span),
+                    .node = IndexAssignStmt{.name = base_name->name,
+                                            .index = std::move(*idx->index),
+                                            .value = std::move(value)},
+                };
+                return stmt;
+            }
+        }
+
         // Assignment statement: a bare name followed by '=' is `name = expr;`.
         // `=` is not an expression operator, so the expression parser stops
         // before it; only a plain NameExpr target is accepted (member/scoped
@@ -2368,6 +2459,33 @@ class Parser
                 continue;
             }
 
+            // Indexed array element read: `arr[i]`. The index is a general
+            // expression; the type checker requires it to be Int and the
+            // verifier discharges the bounds obligation. Chained `[i][j]`
+            // parses here and is rejected as multi-dimensional by the type
+            // checker (MVP scope, issue #278).
+            if (match(TokenKind::LBracket))
+            {
+                auto index_res = parse_expr();
+                if (std::holds_alternative<curlee::diag::Diagnostic>(index_res))
+                {
+                    return std::get<curlee::diag::Diagnostic>(std::move(index_res));
+                }
+                if (auto err = consume(TokenKind::RBracket, "expected ']' after array index");
+                    err.has_value())
+                {
+                    return *err;
+                }
+                const Token rbracket = previous();
+                Expr access;
+                access.span = span_cover(expr.span, rbracket.span);
+                access.node = IndexExpr{
+                    .base = std::make_unique<Expr>(std::move(expr)),
+                    .index = std::make_unique<Expr>(std::get<Expr>(std::move(index_res)))};
+                expr = std::move(access);
+                continue;
+            }
+
             // x86 port I/O builtins: `port_inb(0x3FD)`, `port_outw(0x1CE, v)`.
             // The port must be a compile-time constant literal; the optional
             // value (out* variants) is a general expression of the matching
@@ -2605,6 +2723,41 @@ class Parser
             return expr;
         }
 
+        // Fixed-size array repeat literal: `[v; N]` (issue #278). The value is
+        // a general expression and N is a compile-time integer literal. Only
+        // valid as a `let` initializer for a `[T; N]` binding.
+        if (match(TokenKind::LBracket))
+        {
+            const Token lbracket = previous();
+            auto value_res = parse_expr();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(value_res))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(value_res));
+            }
+            if (auto err = consume(TokenKind::Semicolon, "expected ';' after array literal value");
+                err.has_value())
+            {
+                return *err;
+            }
+            if (!check(TokenKind::IntLiteral))
+            {
+                return error_at(peek(), "array literal count must be an integer literal");
+            }
+            const Token count = advance();
+            if (auto err = consume(TokenKind::RBracket, "expected ']' after array literal count");
+                err.has_value())
+            {
+                return *err;
+            }
+            const Token rbracket = previous();
+            Expr expr;
+            expr.span = span_cover(lbracket.span, rbracket.span);
+            expr.node = ArrayLiteralExpr{
+                .value = std::make_unique<Expr>(std::get<Expr>(std::move(value_res))),
+                .count_lexeme = count.lexeme};
+            return expr;
+        }
+
         if (match(TokenKind::Identifier))
         {
             const Token name = previous();
@@ -2781,6 +2934,11 @@ class Dumper
         if (t.is_capability)
         {
             out_ << "cap " << t.name;
+            return;
+        }
+        if (t.is_array())
+        {
+            out_ << "[" << t.name << "; " << *t.array_len << "]";
             return;
         }
         out_ << t.name;
@@ -2965,6 +3123,15 @@ class Dumper
         out_ << ";";
     }
 
+    void dump_stmt_node(const IndexAssignStmt& s)
+    {
+        out_ << s.name << "[";
+        dump_expr(s.index);
+        out_ << "] = ";
+        dump_expr(s.value);
+        out_ << ";";
+    }
+
     void dump_stmt_node(const ExprStmt& s)
     {
         dump_expr(s.expr);
@@ -3051,6 +3218,21 @@ class Dumper
     {
         dump_expr(*e.base);
         out_ << "." << e.member;
+    }
+
+    void dump_expr_node(const IndexExpr& e)
+    {
+        dump_expr(*e.base);
+        out_ << "[";
+        dump_expr(*e.index);
+        out_ << "]";
+    }
+
+    void dump_expr_node(const ArrayLiteralExpr& e)
+    {
+        out_ << "[";
+        dump_expr(*e.value);
+        out_ << "; " << e.count_lexeme << "]";
     }
 
     void dump_expr_node(const GroupExpr& e)

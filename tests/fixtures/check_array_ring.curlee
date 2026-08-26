@@ -1,0 +1,144 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #278: fixed-size mutable arrays ([T; N] + indexed access) for ring
+// buffers / driver state.
+//
+// Mirrors the JOE OS driver patterns the issue targets:
+//   kernel/fb.c:555-560         static struct tool_slot tool_queue[TOOL_QUEUE_SLOTS];
+//   kernel/virtio_net.c:270-272 static unsigned char rx_buf_state[NET_RX_BUFS];
+//
+// Acceptance criteria covered:
+//   1. `let q: [Int; 8] = [0; 8]; q[0] = 42; let v: Int = q[0];` parses,
+//      type-checks, verifies, and codegens to a C array (see ring_fill /
+//      codegen/array.curlee).
+//   2. Constant out-of-bounds indices are rejected (see check_array_oob_const).
+//   3. The fb.c tool_queue producer/consumer cursor math verifies end-to-end
+//      with a real array (tool_queue below).
+//   4. rx_buf_state-style bookkeeping (slot states 0/1/2 indexed by slot) is
+//      expressible, including the Int-literal -> unsigned element adaptation
+//      (`rx[i] = 2` on a [U8; N] array, mirroring port_outb).
+//
+// MVP scope notes: arrays are freestanding-local `let` bindings only — no
+// slices/borrows, no multi-dimensional indexing, no arrays in structs/enums/
+// params/returns/ghost snapshots (the type checker rejects each with a precise
+// diagnostic), and predicates cannot reference array elements.
+
+// Acceptance #1 plus a bounded SYMBOLIC index: the loop invariant
+// `0 <= i && i <= n` together with the precondition `n <= 8` lets the verifier
+// discharge the per-access bounds obligation `0 <= i < 8` for every `q[i]`
+// inside the loop (issue MVP: "the loop-invariant machinery can discharge this
+// for bounded ring indices").
+fn ring_fill(n: Int) -> Int [
+  requires 0 <= n && n <= 8;
+] {
+  let q: [Int; 8] = [0; 8];
+  let i: Int = 0;
+  while (i < n)
+    [ invariant 0 <= i && i <= n;
+      decreases n - i; ]
+  {
+    q[i] = i * 2;
+    i = i + 1;
+  }
+  let v: Int = q[0];
+  return v;
+}
+
+// Acceptance #3: the fb.c tool_queue ring-buffer cursor pattern — push at
+// `head`, pop at `(head + SLOTS - count) % SLOTS`, both with modulo
+// wraparound — against a real `[Int; 4]` array (the joeos_07b audit probe
+// previously modeled only the arithmetic with the storage stubbed).
+fn tool_queue() -> Int {
+  let slots: Int = 4;
+  let head: Int = 0;
+  let count: Int = 0;
+  let q: [Int; 4] = [0; 4];
+
+  // push tool 10 at slot 0
+  head = (head + 1) % slots;
+  count = count + 1;
+  q[0] = 10;
+
+  // push tool 20 at slot 1
+  head = (head + 1) % slots;
+  count = count + 1;
+  q[1] = 20;
+
+  // pop: consumer index = (head + slots - count) % slots
+  let idx: Int = (head + slots - count) % slots;
+  let v: Int = q[idx];
+  if (v == 20) {
+    return 0;
+  }
+  return 1;
+}
+
+// Acceptance #4: virtio_net.c rx_buf_state-style bookkeeping. Slot states
+// 0/1/2 indexed by slot, stored in a `[U8; 16]` array; the Int literal `2`
+// adapts to the U8 element width on both the repeat initializer and the
+// element write.
+fn rx_buf_state() -> Int {
+  let rx: [U8; 16] = [0; 16];
+  let i: Int = 0;
+  while (i < 4)
+    [ invariant 0 <= i && i <= 4;
+      decreases 4 - i; ]
+  {
+    rx[i] = 2; // slot i: state 2 (in use)
+    i = i + 1;
+  }
+  rx[0] = 1; // slot 0: state 1 (free)
+  let s0: U8 = rx[0];
+  let s1: U8 = rx[1];
+  if (s0 == 1 && s1 == 2) {
+    return 0;
+  }
+  return 1;
+}
+
+// Read-over-write coherence: an element write followed by a read of the same
+// slot is modeled exactly by the verifier (Z3 select/store), so a contract
+// over the read value is provable.
+fn coherence() -> Int [
+  ensures result == 5;
+] {
+  let q: [Int; 8] = [0; 8];
+  q[0] = 5;
+  let v: Int = q[0];
+  return v;
+}
+
+// Arrays written in both branches of an if/else: the branch join carries the
+// array binding like any other loop/branch-carried variable, and the reads
+// after the join see the joined state.
+fn branch_join(flag: Bool) -> Int {
+  let q: [Int; 8] = [0; 8];
+  if (flag) {
+    q[0] = 1;
+    q[1] = 2;
+  } else {
+    q[0] = 3;
+    q[1] = 4;
+  }
+  let v: Int = q[0] + q[1];
+  return v;
+}
+
+// U64 elements: a [U64; N] binding lowers to uint64_t storage; reads and
+// same-kind U64 comparisons behave like scalar U64 bindings (issue #277).
+fn u64_elements() -> Int {
+  let u: [U64; 4] = [0; 4];
+  u[0] = 5;
+  u[1] = 6;
+  let v: U64 = u[0];
+  let five: U64 = 5;
+  if (v == five) {
+    return 0;
+  }
+  return 1;
+}
+
+fn main() -> Int {
+  return ring_fill(3) + tool_queue() + rx_buf_state() + coherence() +
+         branch_join(true) + u64_elements();
+}

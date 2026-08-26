@@ -1,0 +1,7 @@
+tests/fixtures/check_array_oob_unproven.curlee:11:16: error: array index out of bounds for 'q' (array length 8)
+  |
+  |   let v: Int = q[i];   // no facts bound i -> cannot prove 0 <= i < 8
+  |                ^^^^
+note: model:
+i@0 = (- 1)
+note: hint: add or strengthen preconditions/refinements to satisfy this contract

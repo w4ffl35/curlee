@@ -26,11 +26,14 @@ cc="${CC:-cc}"
 log() { printf "%s\n" "$*"; }
 
 log "compile: $(basename "$gen_c") + debug_exit_driver + rt + crt0"
-$cc -ffreestanding -fno-builtin -nostdlib -std=c11 -Iruntime -c \
+# -mno-sse -mno-sse2 mirror `curlee build --link` (see freestanding_ci.sh):
+# the boot stub never enables SSE, and gcc would otherwise emit SSE for
+# 16-byte `{0}` array zero-fills (issue #278), which #UD without OSFXSR.
+$cc -ffreestanding -fno-builtin -nostdlib -std=c11 -mno-sse -mno-sse2 -Iruntime -c \
   "$gen_c" -o "$outdir/${name}.o"
-$cc -ffreestanding -fno-builtin -nostdlib -std=c11 -Iruntime -c \
+$cc -ffreestanding -fno-builtin -nostdlib -std=c11 -mno-sse -mno-sse2 -Iruntime -c \
   tests/freestanding/debug_exit_driver.c -o "$outdir/debug_exit_driver.o"
-$cc -ffreestanding -fno-builtin -nostdlib -std=c11 -Iruntime -c \
+$cc -ffreestanding -fno-builtin -nostdlib -std=c11 -mno-sse -mno-sse2 -Iruntime -c \
   runtime/rt.c -o "$outdir/rt.o"
 $cc -ffreestanding -fno-builtin -nostdlib -c \
   runtime/crt0.S -o "$outdir/crt0.o"

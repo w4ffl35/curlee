@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 7a: a fixed-size mutable array used as a
+// ring buffer (push at a head index, pop at a tail index, modulo wraparound).
+//
+// Mirrors fb.c's tool_queue (struct tool_slot tool_queue[TOOL_QUEUE_SLOTS]
+// with tool_head / tool_count) and virtio_net.c's rx_buf_state[] bookkeeping.
+//
+// PASSES since issue #278 (was joeos_07a_array_ring_fail): the storage half —
+// `let q: [Int; 8] = [0; 8];` with indexed element read/write — is now
+// expressible, so the full ring (storage + bookkeeping arithmetic) verifies
+// and codegens to a real C array. See also joeos_07b_ring_bookkeeping.curlee
+// (the arithmetic-only half, which passed before #278 with the storage in C)
+// and tests/fixtures/check_array_ring.curlee (the same pattern under the
+// ctest/golden harness).
+//
+// Build + boot:
+//   ./build/linux-debug/curlee build --link -o build/audit/07a.elf \
+//     tests/audit/joeos_07a_array_ring.curlee
+//   (then bash scripts/audit_qemu_boot.sh <generated.c> 07a, expect rc=3)
+
+extern fn curlee_halt() -> Unit;
+
+fn main() -> Int {
+  let q: [Int; 8] = [0; 8];   // ring storage (fb.c tool_queue[TOOL_QUEUE_SLOTS])
+  let head: Int = 0;
+  let count: Int = 0;
+
+  // Producer: enqueue two values at head, modulo wraparound.
+  q[head] = 42;
+  head = (head + 1) % 8;
+  count = count + 1;
+  q[head] = 99;
+  head = (head + 1) % 8;
+  count = count + 1;
+
+  // Consumer: pop the oldest value (fb.c: (head + SLOTS - count) % SLOTS).
+  let idx: Int = (head + 8 - count) % 8;
+  let v: Int = q[idx];
+  head = (head + 7) % 8;
+  count = count - 1;
+
+  curlee_halt();
+  return v + head + count;
+}

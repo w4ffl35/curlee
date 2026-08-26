@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #278 expected-fail: ghost snapshots are Int/Bool-only verification
+// bindings; an array snapshot is meaningless because predicates cannot
+// reference array elements. Expected error:
+//   "array types are only supported as local 'let' bindings in the MVP (not as
+//    ghost snapshots)"
+
+fn main() -> Int {
+  let q: [Int; 8] = [0; 8];
+  ghost let snap: [Int; 8] = q;
+  return 0;
+}

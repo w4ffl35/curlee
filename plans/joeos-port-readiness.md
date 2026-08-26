@@ -214,40 +214,37 @@ environment quirk, **not** a Curlee issue (the same comparison verifies in the
 repo's own fixture `tests/fixtures/check_unsigned_inspect.curlee` and codegens
 to `if ((y == x))`).
 
-## 7. Fixed-size mutable array ring buffer — **FAIL** → issue [#278](https://github.com/w4ffl35/curlee/issues/278)
+## 7. Fixed-size mutable array ring buffer — **PASS** (issue #278)
 
 Probes:
-[`tests/audit/joeos_07a_array_ring_fail.curlee`](tests/audit/joeos_07a_array_ring_fail.curlee:1)
-(full ring), [`tests/audit/joeos_07b_ring_bookkeeping.curlee`](tests/audit/joeos_07b_ring_bookkeeping.curlee:1)
+[`tests/audit/joeos_07a_array_ring.curlee`](tests/audit/joeos_07a_array_ring.curlee:1)
+(full ring, renamed from `_fail` — now PASS), [`tests/audit/joeos_07b_ring_bookkeeping.curlee`](tests/audit/joeos_07b_ring_bookkeeping.curlee:1)
 (bookkeeping half).
 
-Curlee has **no array type** — the MVP grammar (wiki Language-Syntax §6) has
-no array form; `Vec` is hosted-only and rejected on the freestanding target.
-Exact errors on `let q: [Int; 8] = [0; 8];`:
-
-```
-error: expected type name
-error: expected ';' after expression
-```
-
-The **bookkeeping half is fully expressible** (probe 7b PASS — compiles,
-verifies, boots qemu rc=3): head/count/idx arithmetic with modulo wraparound,
-exactly the fb.c `fb_tool_enqueue`/`fb_run_loop` cursor math and virtio_net.c
-`rx_buf_state` index logic:
+Issue [#278](https://github.com/w4ffl35/curlee/issues/278) delivered the
+**storage** half: a fixed-size array type for freestanding locals
+(`let q: [T; N] = [v; N];`), indexed element read/write, a verifier
+index-bounds obligation on every access, and plain C-array codegen. Probe 7a
+(full ring — storage + the fb.c `fb_tool_enqueue`/`fb_run_loop` cursor math
+with modulo wraparound) now compiles, verifies, and boots qemu rc=3:
 
 ```curlee
-head = (head + 1) % slots;                 // producer (fb.c tool_head)
+let q: [Int; 8] = [0; 8];   // ring storage (was: no such syntax)
+q[head] = 42;                // indexed element write
+head = (head + 1) % slots;   // producer (fb.c tool_head)
 let idx: Int = (head + slots - count) % slots;  // oldest live slot (fb.c)
-count = count - 1;                         // consumer drain
+let v: Int = q[idx];         // indexed element read
 ```
 
-What's missing is the **storage** array (`tool_queue[]`, `rx_buf_state[]`,
-`rx_desc[]`, `rx_buf[][]`). The joeos C-boundary policy lets a "raw ring/state
-owner" keep its static arrays in C, but the audit item as stated FAILs on the
-array itself. **Issue [#278](https://github.com/w4ffl35/curlee/issues/278)**
-files the MVP scope: a fixed-size array type for freestanding locals
-(`let q: [T; N] = ...;`, indexed read/write, verifier index-bounds
-obligations, C-array codegen).
+`rx_buf_state`-style bookkeeping is expressible too: a `[U8; N]` array with
+slot states 0/1/2 and the Int-literal -> unsigned element adaptation
+(`rx[i] = 2`, mirroring `port_outb`). `rx_buf[NET_RX_BUFS][NET_BUF_BYTES]`
+remains a flat `[U8; NET_RX_BUFS * NET_BUF_BYTES]` (2-D indexing out of scope).
+The qemu boot smoke now exercises the array codegen in a real bootable kernel
+(`tests/codegen/kernel_hello.curlee` pushes/ pops 'H'/'i' through a
+`[Int; 4]` ring and prints them over serial; the boot stub was extended with a
+32->64 long-mode trampoline so the 64-bit kernel runs correctly under QEMU's
+multiboot2 32-bit entry — see `runtime/crt0.S`).
 
 ## 8. MMIO `Phys<T>` write loop + packed-struct read — **PASS** (write loop), **PARTIAL** (packed struct)
 

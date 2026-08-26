@@ -185,6 +185,19 @@ bootable **x86-64 multiboot2 kernel ELF**:
   are 32-bit; an out-of-range or negative literal is a hard error, never a silent truncation).
   `U64 == U64` comparisons are legal; `U64` arithmetic and mixed `U64`/`Int` comparisons
   remain out of scope.
+- **Fixed-size mutable arrays** `[T; N]` with indexed read/write `q[i]` / `q[i] = v` (issue
+  #278): a `let q: [T; N] = [v; N];` binding is a freestanding-local array (ring buffers /
+  driver state — the `fb.c` `tool_queue` and `virtio_net.c` `rx_buf_state` patterns), where
+  `T` is `Int`/`U8`/`U16`/`U32`/`U64`, `N` is a positive integer literal (decimal; hex is
+  reserved for physical-address literals), and `[0; N]` codegens to a zero-filled C array
+  (`{0}`), a non-zero repeat to an explicit brace list. Every element access carries a
+  **verifier bounds obligation** — constant out-of-bounds (including negative) indices are
+  rejected by the type checker, and symbolic indices must be provably in `0..N-1` (the
+  loop-invariant machinery discharges this for bounded ring indices); the verifier models the
+  array with Z3 `select`/`store`, so read-over-write coherence is exact. MVP scope: arrays are
+  `let` bindings only — no struct fields/params/returns/ghost snapshots, no multi-dimensional
+  indexing, and predicates cannot reference array elements. `curlee run` rejects arrays (they
+  are freestanding-only).
 - The VM never runs freestanding programs (`curlee run` rejects `Phys`/`extern`/port I/O
   bodies); `curlee build` is the freestanding execution path.
 
@@ -192,11 +205,15 @@ End-to-end hello-kernel walkthrough:
 
 ```bash
 ./build/linux-debug/curlee build --link -o kernel.elf tests/codegen/kernel_hello.curlee
-qemu-system-x86_64 -kernel kernel.elf   # boots (PVH note), prints 'Hi' via curlee_putc, halts
+qemu-system-x86_64 -kernel kernel.elf   # boots, prints 'Hi' via curlee_putc, halts
 ```
 
-The kernel carries both a multiboot2 header (for GRUB) and a PVH ELF note (required by QEMU's
-`-kernel` loader for uncompressed 64-bit ELF images).
+The kernel carries both a multiboot2 header (for GRUB and QEMU's `-kernel` loader) and a PVH
+ELF note. QEMU's `-kernel` loader prefers the multiboot2 protocol and enters the image in
+**32-bit protected mode**; `runtime/crt0.S` detects the entry mode (`EFER.LMA`) and, when
+entered in 32-bit mode, sets up identity-mapped 2 MiB page tables and switches to 64-bit long
+mode itself before calling `curlee_main`. The PVH note keeps the image bootable on loaders that
+enter directly in long mode.
 
 ---
 

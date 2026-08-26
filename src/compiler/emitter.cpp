@@ -22,8 +22,11 @@ using curlee::parser::CallExpr;
 using curlee::parser::Expr;
 using curlee::parser::ExprStmt;
 using curlee::parser::Function;
+using curlee::parser::ArrayLiteralExpr;
 using curlee::parser::GhostLetStmt;
 using curlee::parser::IfStmt;
+using curlee::parser::IndexAssignStmt;
+using curlee::parser::IndexExpr;
 using curlee::parser::LetStmt;
 using curlee::parser::MatchStmt;
 using curlee::parser::MemberExpr;
@@ -415,6 +418,16 @@ class Emitter
 
     void emit_stmt_node(const LetStmt& stmt, Span span)
     {
+        // Fixed-size arrays are freestanding-only in the MVP (issue #278):
+        // the VM has no array storage, so reject before evaluating the
+        // initializer (whose ArrayLiteralExpr has no VM lowering either).
+        if (stmt.type.is_array())
+        {
+            diags_.push_back(
+                error_at(span, "arrays are freestanding-only and not supported in the VM"));
+            return;
+        }
+
         emit_expr(stmt.value);
         if (!diags_.empty())
         {
@@ -431,6 +444,15 @@ class Emitter
         // Ghost snapshots are verification-only and produce no runtime code:
         // erase the statement from the bytecode (the verifier has already
         // discharged any obligations referencing it).
+    }
+
+    void emit_stmt_node(const IndexAssignStmt& stmt, Span span)
+    {
+        // `arr[i] = v;` mutates an array element: freestanding-only in the MVP
+        // (issue #278); the VM rejects arrays outright.
+        (void)stmt;
+        diags_.push_back(
+            error_at(span, "arrays are freestanding-only and not supported in the VM"));
     }
 
     void emit_stmt_node(const AssignStmt& stmt, Span span)
@@ -1385,6 +1407,16 @@ class Emitter
     {
         diags_.push_back(
             error_at(span, "port I/O is freestanding-only and not supported in the VM"));
+    }
+
+    void emit_expr_node(const curlee::parser::IndexExpr&, Span span)
+    {
+        diags_.push_back(error_at(span, "arrays are freestanding-only and not supported in the VM"));
+    }
+
+    void emit_expr_node(const curlee::parser::ArrayLiteralExpr&, Span span)
+    {
+        diags_.push_back(error_at(span, "arrays are freestanding-only and not supported in the VM"));
     }
 };
 

@@ -1,0 +1,4 @@
+tests/fixtures/run_array_vm_reject.curlee:9:3: error: arrays are freestanding-only and not supported in the VM
+  |
+  |   let q: [Int; 8] = [0; 8];
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^^

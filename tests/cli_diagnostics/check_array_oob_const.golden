@@ -1,0 +1,8 @@
+tests/fixtures/check_array_oob_const.curlee:12:18: error: array index out of bounds: constant index 8 is not in 0..7 (array length 8)
+  |
+  |   let v: Int = q[8];   // read out of bounds
+  |                  ^
+tests/fixtures/check_array_oob_const.curlee:13:5: error: array index out of bounds: constant index 8 is not in 0..7 (array length 8)
+  |
+  |   q[8] = 7;            // write out of bounds
+  |     ^

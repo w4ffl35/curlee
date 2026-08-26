@@ -1,0 +1,4 @@
+tests/fixtures/check_array_len_mismatch.curlee:8:3: error: array type mismatch in let: expected [Int; 8], got [Int; 4]
+  |
+  |   let q: [Int; 8] = [0; 4];
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^^

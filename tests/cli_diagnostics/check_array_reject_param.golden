@@ -1,0 +1,4 @@
+tests/fixtures/check_array_reject_param.curlee:9:9: error: array types are only supported as local 'let' bindings in the MVP (not as parameters)
+  |
+  | fn f(q: [Int; 8]) -> Int {
+  |         ^^^^^^^^

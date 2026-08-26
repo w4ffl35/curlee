@@ -50,6 +50,13 @@ struct LoweringContext
     std::unordered_map<std::string_view, z3::expr> int_vars;
     std::unordered_map<std::string_view, z3::expr> bool_vars;
 
+    // Fixed-size array bindings (`let q: [T; N] = ...`): name -> array-sort
+    // Z3 term (`(Array Int Int)` for the MVP element kinds). Array reads lower
+    // to `select`, writes to `store`, so read-over-write coherence is exact.
+    // Only used by the verifier's expression lowering (predicates are
+    // Int/Bool-only and cannot reference array elements).
+    std::unordered_map<std::string_view, z3::expr> array_vars;
+
     // Ghost function signatures used to lower predicate calls to uninterpreted
     // function applications. Null when the context is not wired to a verifier
     // (predicate calls are then rejected with a diagnostic).

@@ -18,6 +18,7 @@ namespace
 
 using curlee::diag::Diagnostic;
 using curlee::diag::Severity;
+using curlee::parser::ArrayLiteralExpr;
 using curlee::parser::AssignStmt;
 using curlee::parser::BinaryExpr;
 using curlee::parser::BlockStmt;
@@ -30,6 +31,8 @@ using curlee::parser::Function;
 using curlee::parser::GroupExpr;
 using curlee::parser::GhostLetStmt;
 using curlee::parser::IfStmt;
+using curlee::parser::IndexAssignStmt;
+using curlee::parser::IndexExpr;
 using curlee::parser::IntExpr;
 using curlee::parser::LetStmt;
 using curlee::parser::MatchStmt;
@@ -150,6 +153,10 @@ bool stmt_uses_port_io(const Stmt& s)
             {
                 return expr_uses_port_io(node.value);
             }
+            else if constexpr (std::is_same_v<Node, IndexAssignStmt>)
+            {
+                return expr_uses_port_io(node.index) || expr_uses_port_io(node.value);
+            }
             else if constexpr (std::is_same_v<Node, ReturnStmt>)
             {
                 return node.value.has_value() && expr_uses_port_io(*node.value);
@@ -243,6 +250,14 @@ bool expr_uses_port_io(const Expr& e)
             else if constexpr (std::is_same_v<Node, MemberExpr>)
             {
                 return node.base != nullptr && expr_uses_port_io(*node.base);
+            }
+            else if constexpr (std::is_same_v<Node, IndexExpr>)
+            {
+                return node.index != nullptr && expr_uses_port_io(*node.index);
+            }
+            else if constexpr (std::is_same_v<Node, ArrayLiteralExpr>)
+            {
+                return node.value != nullptr && expr_uses_port_io(*node.value);
             }
             else if constexpr (std::is_same_v<Node, curlee::parser::GroupExpr>)
             {
@@ -548,8 +563,17 @@ class CEmitter
     // A type is storable in C if it lowers to a real C type (not `void`).
     // Capabilities, Phys<T>, Unit, String, Vec, Set all lower to `void` and
     // cannot appear in a storage position (struct field / enum payload / let).
+    // Fixed-size arrays (`[T; N]`) are storable ONLY as local `let` bindings
+    // (issue #278): struct fields, enum payloads, parameters and return types
+    // reject them (type_is_storable returns false for arrays so those call
+    // sites emit the standard rejection diagnostic with the array-specific
+    // note below).
     bool type_is_storable(const curlee::parser::TypeName& type_name) const
     {
+        if (type_name.is_array())
+        {
+            return false;
+        }
         if (type_name.is_capability)
         {
             return false;
@@ -579,6 +603,14 @@ class CEmitter
     {
         if (type_is_storable(type_name))
         {
+            return;
+        }
+        if (type_name.is_array())
+        {
+            diags_.push_back(error_at(
+                span, std::string(context) +
+                          ": array types are only supported as freestanding local "
+                          "'let' bindings in the MVP ([T; N]; indexed element access)"));
             return;
         }
         std::string message = std::string(context) + ": type '" +
@@ -809,6 +841,20 @@ class CEmitter
             // gated by the host at the link/run boundary. They are dropped from
             // emitted parameter lists (see params_c_list).
             return "void";
+        }
+
+        if (type_name.is_array())
+        {
+            // Fixed-size arrays lower to `T name[N];`. This returns the ELEMENT
+            // C type; the `[N]` declarator and the initializer are emitted by
+            // the array-let path in emit_stmt_node(const LetStmt&). Struct
+            // fields/params/returns reject arrays before reaching here.
+            return c_type_for_type_name(
+                curlee::parser::TypeName{.span = type_name.span,
+                                         .is_capability = false,
+                                         .name = type_name.name,
+                                         .type_arg = std::nullopt,
+                                         .array_len = std::nullopt});
         }
 
         if (const auto core = c_type_for_core(type_name.name); core.has_value())
@@ -1297,6 +1343,75 @@ class CEmitter
     void emit_stmt_node(const LetStmt& stmt, Span span)
     {
         (void)span;
+
+        // Fixed-size arrays (issue #278): `let q: [T; N] = [v; N];` emits
+        // `T q[N] = { ... };`. The initializer must be an ArrayLiteralExpr
+        // (the type checker enforces this); the repeat value is emitted once
+        // and the brace list repeats it N times (a `{0}` zero-init shortcut is
+        // used for the common `[0; N]` form).
+        if (stmt.type.is_array())
+        {
+            const std::string elem_c = c_type_for_type_name(stmt.type);
+            const std::string len = strip_underscores(*stmt.type.array_len);
+            const auto* arr = std::get_if<ArrayLiteralExpr>(&stmt.value.node);
+            if (arr == nullptr || arr->value == nullptr)
+            {
+                push_error(span, "array '" + std::string(stmt.name) +
+                                     "': initializer must be an array repeat literal [v; N]");
+                return;
+            }
+            // Zero-repeat shortcut: `int64_t q[8] = {0};` zero-fills all slots.
+            const auto* lit = std::get_if<curlee::parser::IntExpr>(&arr->value->node);
+            const bool zero_repeat =
+                lit != nullptr && lit->lexeme.find_first_not_of("0_") == std::string_view::npos;
+            std::string init;
+            if (zero_repeat)
+            {
+                init = "{0}";
+            }
+            else
+            {
+                const std::string elem = emit_expr_as_text(*arr->value);
+                if (!diags_.empty())
+                {
+                    return;
+                }
+                // The length was validated by the type checker (positive
+                // integer literal); this is defense in depth against an
+                // out-of-range or malformed lexeme.
+                std::size_t count = 0;
+                bool count_ok = false;
+                try
+                {
+                    count = std::stoull(len);
+                    count_ok = true;
+                }
+                catch (const std::exception&)
+                {
+                    count_ok = false;
+                }
+                if (!count_ok || count == 0 || count > 4096)
+                {
+                    push_error(span, "array '" + std::string(stmt.name) +
+                                         "': invalid length '" + len + "'");
+                    return;
+                }
+                std::string list = "{";
+                for (std::size_t i = 0; i < count; ++i)
+                {
+                    if (i != 0)
+                    {
+                        list += ", ";
+                    }
+                    list += elem;
+                }
+                list += "}";
+                init = std::move(list);
+            }
+            writer_.line(elem_c + " " + std::string(stmt.name) + "[" + len + "] = " + init + ";");
+            return;
+        }
+
         const std::string c_type = c_type_for_type_name(stmt.type);
 
         // Record Phys<T> bindings so read()/write() on the name can lower to
@@ -1387,6 +1502,20 @@ class CEmitter
             return;
         }
         writer_.line(std::string(stmt.name) + " = " + value + ";");
+    }
+
+    void emit_stmt_node(const IndexAssignStmt& stmt, Span span)
+    {
+        (void)span;
+        // `arr[i] = v;` is a plain C array element write: the array binding
+        // lowered to `T arr[N];` and the index/value are ordinary expressions.
+        const std::string index = emit_expr_as_text(stmt.index);
+        const std::string value = emit_expr_as_text(stmt.value);
+        if (!diags_.empty())
+        {
+            return;
+        }
+        writer_.line(std::string(stmt.name) + "[" + index + "] = " + value + ";");
     }
 
     void emit_stmt_node(const BlockStmt& stmt, Span span)
@@ -2178,6 +2307,36 @@ class CEmitter
             return "(" + deref_text + ") = (" + value + ")";
         }
         return "(*(volatile " + c_type + "*)" + deref_text + ")) = (" + value + ")";
+    }
+
+    // Indexed element read: `q[i]` lowers to `(q)[(i)]`. The array binding
+    // was emitted as a plain C array by the let path (issue #278).
+    std::string emit_expr_node(const IndexExpr& expr, Span span)
+    {
+        (void)span;
+        if (expr.base == nullptr || expr.index == nullptr)
+        {
+            push_error(span, "invalid array index expression");
+            return "0";
+        }
+        const std::string base = emit_expr_as_text(*expr.base);
+        const std::string index = emit_expr_as_text(*expr.index);
+        if (!diags_.empty())
+        {
+            return "0";
+        }
+        return "(" + base + ")[" + index + "]";
+    }
+
+    // Array repeat literal `[v; N]` in a value position. The freestanding
+    // target only supports it as a `let` initializer (handled by the array-let
+    // path in emit_stmt_node(const LetStmt&)); anywhere else the front-end has
+    // rejected it, so this is defense in depth.
+    std::string emit_expr_node(const ArrayLiteralExpr&, Span span)
+    {
+        push_error(span, "array literals are only supported as 'let' initializers in the "
+                         "freestanding target");
+        return "{0}";
     }
 
     // x86 port I/O builtins lower to calls of the prologue helpers with the

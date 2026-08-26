@@ -1,0 +1,61 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #278: fixed-size mutable arrays in the freestanding C target. Codegen
+// asserts the emitted C storage for the JOE OS driver patterns:
+//   kernel/fb.c:555-560         static struct tool_slot tool_queue[TOOL_QUEUE_SLOTS];
+//   kernel/virtio_net.c:270-272 static unsigned char rx_buf_state[NET_RX_BUFS];
+//
+// A `let q: [T; N] = [v; N];` binding lowers to a plain C array `T q[N];`:
+//   - `[0; N]` (the common ring/state zero-init) emits the `{0}` zero-fill
+//     shortcut;
+//   - a non-zero repeat literal emits an explicit brace list;
+//   - element reads/writes lower to ordinary `q[i]` C index accesses.
+// Element widths map like scalar bindings: Int -> int64_t, U8 -> uint8_t,
+// U16 -> uint16_t, U32 -> uint32_t, U64 -> uint64_t.
+
+fn tool_queue() -> Int {
+  let q: [Int; 4] = [0; 4];     // int64_t q[4] = {0};
+  q[0] = 10;                    // q[0] = 10;
+  q[1] = 20;                    // q[1] = 20;
+  let head: Int = 2;
+  let count: Int = 2;
+  let slots: Int = 4;
+  let idx: Int = (head + slots - count) % slots;
+  let v: Int = q[idx];          // q[(...)] index read
+  return v;
+}
+
+fn rx_state() -> Int {
+  let rx: [U8; 16] = [0; 16];   // uint8_t rx[16] = {0};
+  rx[0] = 1;                    // rx[0] = 1;  (Int literal -> uint8_t)
+  rx[1] = 2;
+  let s0: U8 = rx[0];
+  let s1: U8 = rx[1];
+  if (s0 == 1 && s1 == 2) {
+    return 0;
+  }
+  return 1;
+}
+
+fn nonzero_repeat() -> Int {
+  let a: [Int; 4] = [7; 4];     // int64_t a[4] = {7, 7, 7, 7};
+  let b: [U16; 2] = [0x41; 2];  // uint16_t b[2] = {0x41, 0x41};
+  a[1] = a[0] + 1;
+  let v: Int = a[1] + b[1];
+  return v;
+}
+
+fn u64_elements() -> Int {
+  let u: [U64; 2] = [0; 2];     // uint64_t u[2] = {0};
+  u[0] = 5;
+  let v: U64 = u[0];
+  let five: U64 = 5;
+  if (v == five) {
+    return 0;
+  }
+  return 1;
+}
+
+fn main() -> Int {
+  return tool_queue() + rx_state() + nonzero_repeat() + u64_elements();
+}

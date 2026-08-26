@@ -27,6 +27,16 @@ struct TypeName
     bool is_capability = false;
     std::string_view name;
     std::optional<std::string_view> type_arg;
+
+    // For the fixed-size array form `[T; N]`, the compile-time length literal
+    // lexeme (decimal, underscores preserved). When set, `name` holds the
+    // element type name (Int/U8/U16/U32/U64) and `type_arg` is unused. This is
+    // the MVP array form (issue #278): freestanding-local `let` bindings only.
+    // Default-initialized so pre-existing designated initializers that omit
+    // the new member do not trip -Wmissing-field-initializers.
+    std::optional<std::string_view> array_len = std::nullopt;
+
+    [[nodiscard]] bool is_array() const { return array_len.has_value(); }
 };
 
 /** Forward declaration for predicate nodes. */
@@ -132,6 +142,35 @@ struct MemberExpr
 {
     std::unique_ptr<Expr> base;
     std::string_view member;
+};
+
+/**
+ * @brief Indexed array element read: `arr[i]`.
+ *
+ * The base must resolve to a fixed-size array binding (`let q: [T; N] = ...`).
+ * The index is a general Int expression; the verifier discharges a bounds
+ * obligation (`0 <= i && i < N`) on every access. Multi-dimensional indexing
+ * (`q[i][j]`) is out of the MVP scope and rejected by the type checker.
+ */
+struct IndexExpr
+{
+    std::unique_ptr<Expr> base;
+    std::unique_ptr<Expr> index;
+};
+
+/**
+ * @brief Fixed-size array repeat literal: `[v; N]`.
+ *
+ * Builds an array of length `N` (a compile-time literal) whose every element
+ * is `v`. This is the only array literal form in the MVP (element-wise
+ * `[1, 2, 3]` is out of scope). It is only valid as a `let` initializer for a
+ * `[T; N]` binding.
+ */
+struct ArrayLiteralExpr
+{
+    std::unique_ptr<Expr> value;
+    // The count literal lexeme (decimal, underscores preserved).
+    std::string_view count_lexeme;
 };
 
 /** @brief Unary expression (e.g. `-x`). */
@@ -248,7 +287,7 @@ struct Expr
     curlee::source::Span span;
     std::variant<IntExpr, BoolExpr, StringExpr, NameExpr, UnaryExpr, BinaryExpr, CallExpr,
                  MemberExpr, GroupExpr, ScopedNameExpr, StructLiteralExpr, PhysExpr, PhysReadExpr,
-                 PhysWriteExpr, PortIOExpr>
+                 PhysWriteExpr, PortIOExpr, IndexExpr, ArrayLiteralExpr>
         node;
 };
 
@@ -291,6 +330,22 @@ struct GhostLetStmt
 struct AssignStmt
 {
     std::string_view name;
+    Expr value;
+};
+
+/**
+ * @brief Indexed element assignment: `arr[i] = expr;`.
+ *
+ * Mutates one element of a fixed-size array binding. The target name must be
+ * an in-scope array `let` binding; the index is an Int expression with the
+ * same bounds obligation as `IndexExpr`; the value must match the element
+ * type (Int literals adapt to unsigned element widths, mirroring
+ * `port_outb(0x3F8, 0x48)`).
+ */
+struct IndexAssignStmt
+{
+    std::string_view name;
+    Expr index;
     Expr value;
 };
 
@@ -389,7 +444,7 @@ struct Stmt
 {
     curlee::source::Span span;
     std::variant<LetStmt, GhostLetStmt, AssignStmt, ReturnStmt, ExprStmt, BlockStmt, IfStmt,
-                 WhileStmt, MatchStmt, UnsafeStmt>
+                 WhileStmt, MatchStmt, UnsafeStmt, IndexAssignStmt>
         node;
 };
 
