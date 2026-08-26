@@ -439,19 +439,26 @@ CostResult CostModel::cost_expr(const Expr& expr, const LoweringContext& ctx,
             }
             else if constexpr (std::is_same_v<Node, PortIOExpr>)
             {
-                // port_in*: constant port load (1) + the `in` instruction (1).
-                // port_out*: constant port load (1) + the `out` instruction (1)
-                // plus the value expression cost.
+                // port_in*: port expression cost + the `in` instruction (1).
+                // port_out*: port expression cost + the `out` instruction (1)
+                // plus the value expression cost. A constant port is a leaf
+                // load (1), so the MVP constant-port cost stays 2 (issue #276);
+                // a runtime port (`base + offset`) charges its expression.
+                auto port = cost_expr(*node.port, ctx, fuel_table);
+                if (std::holds_alternative<Diagnostic>(port))
+                {
+                    return std::get<Diagnostic>(std::move(port));
+                }
                 if (node.value == nullptr)
                 {
-                    return ctx.ctx.int_val(2);
+                    return ctx.ctx.int_val(1) + std::get<z3::expr>(port);
                 }
                 auto value = cost_expr(*node.value, ctx, fuel_table);
                 if (std::holds_alternative<Diagnostic>(value))
                 {
                     return std::get<Diagnostic>(std::move(value));
                 }
-                return ctx.ctx.int_val(2) + std::get<z3::expr>(value);
+                return ctx.ctx.int_val(1) + std::get<z3::expr>(port) + std::get<z3::expr>(value);
             }
             // Leaf nodes: flat instruction cost.
             return CostResult{ctx.ctx.int_val(static_cast<int>(leaf_instruction_cost(expr)))};

@@ -168,8 +168,10 @@ bootable **x86-64 multiboot2 kernel ELF**:
 - The freestanding target is **Linux/x86-64 only** and has **no hosted builtins** (no `print`,
   no `String`, no `Vec`). Physical memory access uses `Phys<T>` + `read()`/`write()` under
   `unsafe` and requires the `phys.mem` capability. The x86 **port I/O** builtins
-  (`port_inb`/`port_outb`/`port_inw`/`port_outw`/`port_inl`/`port_outl`, constant ports only)
-  are gated the same way and codegen to inline `in`/`out` assembly.
+  (`port_inb`/`port_outb`/`port_inw`/`port_outw`/`port_inl`/`port_outl`) accept either a
+  **constant port** or a **`let`-bound base + constant offset** (issue #276, the virtio_net.c
+  pattern) and are gated the same way; constant ports codegen with an 8-bit immediate where
+  possible, runtime ports through the DX register, both as inline `in`/`out` assembly.
 - Unsigned fixed-width integers (`U8`/`U16`/`U32`) are **usable in expressions** (issue #274):
   a port/`Phys` read can be bit-tested, compared, and arithmetically widened. `U8`/`U16`/`U32`
   operands implicitly widen to `Int` in arithmetic (results are `Int`); comparisons accept them

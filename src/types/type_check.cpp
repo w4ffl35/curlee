@@ -2000,10 +2000,18 @@ class Checker
         }
         require_capability("phys.mem", span);
 
-        // Rule (1): the port must be a compile-time integer literal (decimal or hex).
-        if (!is_constant_int_literal(e.port_lexeme))
+        // Rule (1): the port must be an Int expression (issue #276). A
+        // compile-time constant literal (decimal or hex) is the MVP baseline;
+        // a `let`-bound base plus a constant offset (the virtio_net.c pattern)
+        // is the runtime-port extension. Any other type is rejected.
+        const auto port_t = check_expr(*e.port);
+        if (!port_t.has_value())
         {
-            error_at(span, "port I/O address must be a constant literal");
+            return std::nullopt;
+        }
+        if (port_t->kind != TypeKind::Int)
+        {
+            error_at(span, "port I/O address must be an Int expression");
             return std::nullopt;
         }
 

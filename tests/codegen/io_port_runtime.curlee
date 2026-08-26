@@ -1,0 +1,13 @@
+// x86 port I/O codegen fixture for runtime ports (issue #276): a let-bound
+// base plus a constant offset (the virtio_net.c pattern). The emitted call
+// passes the port *expression* text, so the "Nd" asm constraint falls back to
+// the DX register (a runtime value is never an 8-bit immediate). Constant
+// ports keep emitting the immediate form (see io_port.curlee).
+fn main(pm: cap phys.mem) -> U16 {
+  unsafe {
+    let io_base: Int = 49152;             // runtime-discovered I/O BAR base
+    let qsel: Int = 0;                    // VIRTIO_PCI_QUEUE_SEL = 0x0E
+    port_outw(io_base + 0x0E, qsel);      // outw(io_base + QUEUE_SEL, qsel)
+    return port_inw(io_base + 0x0C);      // inw(io_base + QUEUE_NUM)
+  }
+}

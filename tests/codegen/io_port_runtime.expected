@@ -40,47 +40,13 @@ static inline void curlee_port_outl(uint16_t port, uint32_t value)
     __asm__ volatile("outl %0, %1" ::"a"(value), "Nd"(port));
 }
 
-static uint8_t curlee_putc_ready(void);
-static int64_t curlee_vbe_readback(void);
-int64_t curlee_main(void);
+uint16_t curlee_main(void);
 
-static uint8_t curlee_putc_ready(void)
+uint16_t curlee_main(void)
 {
-    uint8_t lsr = curlee_port_inb((uint16_t)(0x3FD));
-    if ((((lsr & 32)) == 0))
-    {
-        curlee_port_outb((uint16_t)(0x3F8), (0x41));
-    }
-    else
-    {
-        curlee_port_outb((uint16_t)(0x3F8), (0x00));
-    }
-    return lsr;
-}
-
-static int64_t curlee_vbe_readback(void)
-{
-    curlee_port_outw((uint16_t)(0x1CE), (0x0004));
-    uint16_t xres = curlee_port_inw((uint16_t)(0x1CF));
-    curlee_port_outw((uint16_t)(0x1CE), (0x0005));
-    uint16_t yres = curlee_port_inw((uint16_t)(0x1CF));
-    if (((xres != 640) || (yres != 480)))
-    {
-        return 1;
-    }
-    int64_t wide = (xres + 0);
-    return (wide % 2);
-}
-
-int64_t curlee_main(void)
-{
-    uint8_t v = curlee_port_inb((uint16_t)(0x3FD));
-    int64_t wide = (v + 0);
-    uint8_t thr_empty = (v & 32);
-    if ((((v & 32)) != 0))
-    {
-        curlee_port_outb((uint16_t)(0x3F8), (v));
-    }
-    return (((wide + thr_empty) + curlee_putc_ready()) + curlee_vbe_readback());
+    int64_t io_base = 49152;
+    int64_t qsel = 0;
+    curlee_port_outw((uint16_t)((io_base + 0x0E)), (qsel));
+    return curlee_port_inw((uint16_t)((io_base + 0x0C)));
 }
 

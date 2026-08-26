@@ -102,19 +102,17 @@ directly against Int literals (issue #274).
 > This is a real ergonomics gap for porting (joeos is full of hex masks), but
 > not a hard block. **vbe.c is portable today** (with decimal masks).
 
-## 4. Port I/O to a runtime-computed port — **FAIL** → issue [#276](https://github.com/w4ffl35/curlee/issues/276)
+## 4. Port I/O to a runtime-computed port — **PASS** (issue [#276](https://github.com/w4ffl35/curlee/issues/276))
 
-Probes: [`tests/audit/joeos_04_port_runtime_computed_fail.curlee`](tests/audit/joeos_04_port_runtime_computed_fail.curlee:1),
-[`tests/audit/joeos_04b_port_let_bound_fail.curlee`](tests/audit/joeos_04b_port_let_bound_fail.curlee:1)
+Probes: [`tests/audit/joeos_04_port_runtime_computed.curlee`](tests/audit/joeos_04_port_runtime_computed.curlee:1),
+[`tests/audit/joeos_04b_port_let_bound.curlee`](tests/audit/joeos_04b_port_let_bound.curlee:1)
 
-The README's "constant ports only" caveat is a **real, unclosed gap** for
-virtio_net.c, which computes its ports at runtime (`io_base + QUEUE_SEL`, etc.,
-with `io_base` from a PCI BAR probe). The audit confirmed precisely what
-"constant" means: **a single literal token only** — enforced at parse time
-(`parse_port_io_call` requires `IntLiteral`/`PhysAddrLiteral`), then re-checked
-by the type checker and verifier via lexeme inspection.
-
-Exact errors:
+**Initial audit finding (before #276):** the README's "constant ports only"
+caveat was a **real, unclosed gap** for virtio_net.c, which computes its ports
+at runtime (`io_base + QUEUE_SEL`, etc., with `io_base` from a PCI BAR probe).
+"Constant" meant **a single literal token only** — enforced at parse time
+(`parse_port_io_call` required `IntLiteral`/`PhysAddrLiteral`), then re-checked
+by the type checker and verifier via lexeme inspection:
 
 ```
 error: port_outw() expects a constant integer port
@@ -122,13 +120,17 @@ error: port_inw() expects a constant integer port
 error: port_inb() expects a constant integer port
 ```
 
-A `let`-bound value that is never reassigned does **not** count as constant
-(probe 4b fails identically). So virtio_net.c's legacy-virtio register access
-cannot be expressed in Curlee today. **Issue [#276](https://github.com/w4ffl35/curlee/issues/276)**
-files the MVP scope: accept a let-bound base + constant offset, lower the
-runtime port as an opaque extra argument to the existing uninterpreted read
-functions, and emit the DX-register asm form (the existing `Nd` constraint
-already falls back to DX for non-immediates).
+A `let`-bound value that is never reassigned did **not** count as constant
+(probe 4b failed identically), so virtio_net.c's legacy-virtio register access
+could not be expressed in Curlee.
+
+**Resolved by issue #276:** the port argument is now a general Int expression.
+A `let`-bound base plus a constant offset (`io_base + 0x0E`) parses, type-checks
+(Int only), verifies (the runtime port lowers as an opaque extra argument to
+the existing uninterpreted read/write functions — reads stay opaque), and
+codegens with the port in the DX register (the existing `Nd` asm constraint
+falls back to DX for non-immediates). Constant ports keep the immediate form.
+Both probes now build and verify with zero obligations.
 
 ## 5. Bitwise pack/unpack + PCI config address assembly — **PASS** (with caveats)
 

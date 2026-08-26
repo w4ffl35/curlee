@@ -170,6 +170,14 @@ void assign_expr_ids(curlee::parser::Expr& expr, std::size_t& next_id)
                 assign_expr_ids(*node.base, next_id);
                 assign_expr_ids(*node.value, next_id);
             }
+            else if constexpr (std::is_same_v<Node, curlee::parser::PortIOExpr>)
+            {
+                assign_expr_ids(*node.port, next_id);
+                if (node.value != nullptr)
+                {
+                    assign_expr_ids(*node.value, next_id);
+                }
+            }
             else if constexpr (std::is_same_v<Node, curlee::parser::GroupExpr>)
             {
                 assign_expr_ids(*node.inner, next_id);
@@ -2426,14 +2434,18 @@ class Parser
     {
         advance(); // consume '('
 
-        // The port must be a compile-time constant: decimal (IntLiteral) or
-        // hex/underscore form (PhysAddrLiteral), mirroring phys() addresses.
-        if (!check(TokenKind::IntLiteral) && !check(TokenKind::PhysAddrLiteral))
+        // The port is a general Int expression (issue #276): a compile-time
+        // constant literal (IntLiteral / PhysAddrLiteral, mirroring phys()
+        // addresses) or a runtime expression such as a `let`-bound base plus a
+        // constant offset (`io_base + 0x0E`, the virtio_net.c pattern). The
+        // type checker requires the expression to be Int-typed; the verifier
+        // lowers constant ports as before and runtime ports as opaque terms.
+        auto port_res = parse_expr();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(port_res))
         {
-            return error_at(peek(), std::string(name.name) +
-                                        "() expects a constant integer port");
+            return std::get<curlee::diag::Diagnostic>(std::move(port_res));
         }
-        const Token port = advance();
+        auto port = std::make_unique<Expr>(std::get<Expr>(std::move(port_res)));
 
         std::unique_ptr<Expr> value;
         const bool is_out = name.name.rfind("port_out", 0) == 0;
@@ -2445,25 +2457,15 @@ class Parser
             {
                 return *err;
             }
-            if (check(TokenKind::PhysAddrLiteral))
+            // The value is a general expression of the matching width. Hex /
+            // underscore constants (PhysAddrLiteral) parse as constant Int
+            // expressions via parse_primary (mirrors the write() value handling).
+            auto value_res = parse_expr();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(value_res))
             {
-                // Hex/underscore constant: only meaningful as a literal value
-                // here, so consume it and wrap as a constant Int expression
-                // (mirrors the write() value handling).
-                const Token lit = advance();
-                value = std::make_unique<Expr>();
-                value->span = lit.span;
-                value->node = IntExpr{.lexeme = lit.lexeme};
+                return std::get<curlee::diag::Diagnostic>(std::move(value_res));
             }
-            else
-            {
-                auto value_res = parse_expr();
-                if (std::holds_alternative<curlee::diag::Diagnostic>(value_res))
-                {
-                    return std::get<curlee::diag::Diagnostic>(std::move(value_res));
-                }
-                value = std::make_unique<Expr>(std::get<Expr>(std::move(value_res)));
-            }
+            value = std::make_unique<Expr>(std::get<Expr>(std::move(value_res)));
         }
 
         if (auto err = consume(TokenKind::RParen, "expected ')' after port I/O arguments");
@@ -2476,7 +2478,7 @@ class Parser
         Expr expr;
         expr.span = span_cover(start_span, rparen.span);
         expr.node = PortIOExpr{.op = name.name,
-                               .port_lexeme = port.lexeme,
+                               .port = std::move(port),
                                .value = std::move(value)};
         return expr;
     }
@@ -2563,6 +2565,20 @@ class Parser
     [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic> parse_primary()
     {
         if (match(TokenKind::IntLiteral))
+        {
+            const Token lit = previous();
+            Expr expr;
+            expr.span = lit.span;
+            expr.node = IntExpr{.lexeme = lit.lexeme};
+            return expr;
+        }
+
+        // Hex/underscore integer literals (PhysAddrLiteral) are wrapped as
+        // constant Int expressions so they can appear in general expression
+        // positions — e.g. the constant offset of a runtime port
+        // (`io_base + 0x0E`, issue #276) or a write()/port_out* value. This
+        // mirrors how the port I/O value parser historically consumed them.
+        if (match(TokenKind::PhysAddrLiteral))
         {
             const Token lit = previous();
             Expr expr;
@@ -3115,7 +3131,8 @@ class Dumper
 
     void dump_expr_node(const PortIOExpr& e)
     {
-        out_ << e.op << "(" << e.port_lexeme;
+        out_ << e.op << "(";
+        dump_expr(*e.port);
         if (e.value != nullptr)
         {
             out_ << ", ";

@@ -1,9 +1,0 @@
-// Variable/dynamic port addresses are out of scope: the port must be a
-// compile-time constant literal (mirrors phys()).
-fn main(pm: cap phys.mem) -> Unit {
-  unsafe {
-    let base: Int = 1017; // 0x3FD
-    let v: U8 = port_inb(base);
-  }
-  return;
-}

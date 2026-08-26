@@ -1,0 +1,4 @@
+tests/fixtures/check_io_port_non_int_port.curlee:7:17: error: port I/O address must be an Int expression
+  |
+  |     let v: U8 = port_inb(base);
+  |                 ^^^^^^^^^^^^^^

@@ -1909,18 +1909,24 @@ fn main() -> Int {
 
         {
             // port_inb(0x3FD) read.
+            Expr port;
+            port.node = curlee::parser::IntExpr{.lexeme = "0x3FD"};
             Expr root;
-            root.node = PortIOExpr{.op = "port_inb", .port_lexeme = "0x3FD", .value = nullptr};
+            root.node = PortIOExpr{.op = "port_inb",
+                                   .port = std::make_unique<Expr>(std::move(port)),
+                                   .value = nullptr};
             expect_port_io_reject(std::move(root));
         }
 
         {
             // port_outb(0x3F8, v) write.
+            Expr port;
+            port.node = curlee::parser::IntExpr{.lexeme = "0x3F8"};
             Expr value;
             value.node = curlee::parser::IntExpr{.lexeme = "0x48"};
             Expr root;
             root.node = PortIOExpr{.op = "port_outb",
-                                   .port_lexeme = "0x3F8",
+                                   .port = std::make_unique<Expr>(std::move(port)),
                                    .value = std::make_unique<Expr>(std::move(value))};
             expect_port_io_reject(std::move(root));
         }

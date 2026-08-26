@@ -1,0 +1,10 @@
+// The port argument must be an Int expression (issue #276). A U8-typed base
+// is rejected: unsigned fixed-width values do not implicitly widen for the
+// port position (the port type is Int, period).
+fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let base: U8 = port_inb(0x3FD); // U8-typed value (opaque read)
+    let v: U8 = port_inb(base);
+  }
+  return;
+}

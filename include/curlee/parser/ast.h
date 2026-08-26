@@ -202,19 +202,26 @@ struct PhysWriteExpr
 /**
  * @brief x86 port I/O builtin: `port_inb(0x3FD)`, `port_outb(0x3F8, v)`.
  *
- * The port address must be a compile-time constant literal (hex or decimal,
- * underscores preserved). The optional value expression (out* variants only)
- * may be any expression of the matching width, mirroring `PhysWriteExpr`.
- * Reads (`port_in*`) are trusted/opaque to the verifier, exactly like
- * `Phys<T>` reads: no axioms constrain the returned value.
+ * The port argument is a general Int expression (issue #276): a compile-time
+ * constant literal (hex or decimal, underscores preserved), a `let`-bound
+ * base, or a `let`-bound base plus a constant offset (the virtio_net.c
+ * pattern). Constant ports lower/emit exactly as before; runtime ports are
+ * lowered as an opaque extra argument to the uninterpreted read/write
+ * functions and emitted with the port in the DX register (the `Nd` asm
+ * constraint falls back to DX for non-immediates). The optional value
+ * expression (out* variants only) may be any expression of the matching
+ * width, mirroring `PhysWriteExpr`. Reads (`port_in*`) are trusted/opaque to
+ * the verifier, exactly like `Phys<T>` reads: no axioms constrain the
+ * returned value.
  */
 struct PortIOExpr
 {
     // Builtin name as spelled in source (port_inb/port_outb/port_inw/port_outw/
     // port_inl/port_outl).
     std::string_view op;
-    // The port literal lexeme (decimal or hex, underscores preserved).
-    std::string_view port_lexeme;
+    // The port expression: a constant literal IntExpr or a runtime Int
+    // expression (let-bound base, optional constant offset).
+    std::unique_ptr<Expr> port;
     // The value expression for out* variants; null for in* variants.
     std::unique_ptr<Expr> value;
 };
