@@ -49,9 +49,14 @@ failure reports the offending clause with a Z3 model of the violating values.
 
 Loops written without an `[ invariant ...; decreases ...; ]` block keep the
 legacy single-pass behavior: the body is checked exactly once with the loop
-condition assumed as a fact, and everything learned inside is then discarded.
-This preserves backward compatibility (kernel-style infinite loops in `unsafe`
-blocks, existing fixtures) while the invariant/variant machinery is opt-in.
+condition assumed as a fact, and everything learned inside is then discarded —
+with one exception: names the body **assigns** (loop-carried) are rebound to
+fresh *unconstrained* symbols in the continuation, because without an invariant
+their post-loop values are unknown (letting the pre-loop `let` facts leak would
+verify false postconditions vacuously). Loops that do not assign keep the
+pre-loop bindings, preserving backward compatibility (kernel-style infinite
+loops in `unsafe` blocks, existing fixtures) while the invariant/variant
+machinery is opt-in.
 
 The intent is that contracts in scope requiring soundness will eventually
 reject unannotated loops (decide and document when that gate lands; see the
@@ -109,6 +114,28 @@ counterexample model. Because every `let` also binds a fresh symbol, a shadowing
 `let i: Int = -5;` inside the body is a *distinct* constant: the invariant is
 re-proven against the shadowed value, so shadowing can no longer make
 preservation vacuous.
+
+**Post-state carries the loop-carried bindings.** After the loop, the
+continuation sees the loop-carried names rebound to their **post-body** symbols
+(the values after the final iteration), constrained by `invariant && !cond`
+lowered against those same post-loop symbols. The pre-loop `let` facts do *not*
+leak: `let total = 0; while (i < n) [...] { total = total + 1; } return total;`
+proves `ensures result == n` but rejects `ensures result == 0` (the continuation
+no longer sees the entry `total == 0`). Names shadowed by a `let` inside the
+body are excluded — their assignments target the loop-local shadow, and the
+outer binding is unchanged by the loop. Loops without a contract block
+(legacy single-pass mode) rebind names the body assigns to fresh *unconstrained*
+symbols, since there is no invariant to constrain the post-loop value.
+
+**Branch joins.** An `if`/`else` (or `match`) that reassigns a name in a branch
+joins the branch post-states into the continuation: the name is rebound to a
+fresh symbol constrained to be one of the branch-end values (falling back to
+the pre-branch value for a branch that leaves it untouched, or for the if's
+not-taken path). The continuation therefore proves disjunctive facts
+(`ensures result == 0 || result == 1` after `if (c) { x = 1; }`) but cannot
+assume a specific branch value. Branch-local facts that pin the branch-end
+symbols are retained; the branch condition assumption itself is not (the
+continuation must not assume the branch was taken).
 
 **Fuel.** The static cost model lowers a loop's `decreases` variant against the
 PRE-loop bindings (recorded at loop entry), so the fuel formula

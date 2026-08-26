@@ -939,6 +939,8 @@ int main(int argc, char** argv)
     const fs::path rel_assign_param = fs::path("tests/fixtures/check_assign_param.curlee");
     const fs::path rel_assign_shadowed_invariant =
         fs::path("tests/fixtures/check_assign_shadowed_invariant.curlee");
+    const fs::path rel_assign_loop_poststate =
+        fs::path("tests/fixtures/check_assign_loop_poststate.curlee");
     const fs::path rel_run_assign = fs::path("tests/fixtures/run_assign.curlee");
 
     const fs::path check_requires_divide_golden = dir / "check_requires_divide.golden";
@@ -1373,6 +1375,15 @@ int main(int argc, char** argv)
         if (!run_stderr_case("check-assign-shadowed-invariant",
                              {"curlee", "check", rel_assign_shadowed_invariant.string()},
                              dir / "check_assign_shadowed_invariant.golden", false))
+        {
+            return 1;
+        }
+        // Regression for the #268 rework: the loop post-state carries the
+        // loop-carried bindings into the continuation, so a false postcondition
+        // over the final value is rejected (previously verified vacuously).
+        if (!run_stderr_case("check-assign-loop-poststate",
+                             {"curlee", "check", rel_assign_loop_poststate.string()},
+                             dir / "check_assign_loop_poststate.golden", false))
         {
             return 1;
         }
