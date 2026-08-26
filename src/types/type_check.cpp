@@ -37,6 +37,7 @@ using curlee::parser::MemberExpr;
 using curlee::parser::NameExpr;
 using curlee::parser::ReturnStmt;
 using curlee::parser::RuntimePhysReadExpr;
+using curlee::parser::RuntimePhysWriteExpr;
 using curlee::parser::ScopedNameExpr;
 using curlee::parser::Stmt;
 using curlee::parser::StructLiteralExpr;
@@ -236,7 +237,8 @@ static bool is_reserved_builtin_name(std::string_view name)
         "port_inb",        "port_outb",        "port_inw",
         "port_outw",       "port_inl",         "port_outl",
         "phys_read_u8",    "phys_read_u16",    "phys_read_u32",
-        "phys_read_u64",
+        "phys_read_u64",   "phys_write_u8",    "phys_write_u16",
+        "phys_write_u32",  "phys_write_u64",
     }; // GCOVR_EXCL_LINE
     return reserved.contains(name);
 }
@@ -2575,6 +2577,69 @@ class Checker
                                     : (e.op == "phys_read_u32") ? TypeKind::U32
                                                                 : TypeKind::U64;
         return Type{.kind = width_kind};
+    }
+
+    [[nodiscard]] std::optional<Type> check_expr_node(const RuntimePhysWriteExpr& e, Span span)
+    {
+        // Rules (2)+(3): runtime phys writes only inside `unsafe` and require
+        // `cap phys.mem`, mirroring the Phys<T> read()/write() and port I/O
+        // gates. Trusted/opaque to the verifier: a write is a side effect with
+        // no verifier axioms — nothing to prove, same as `Phys<T>.write()`
+        // today, so no address-range obligation is introduced (the caller
+        // asserts the address is mapped via the capability).
+        if (unsafe_depth_ == 0)
+        {
+            error_at(span, "physical memory access requires an unsafe block");
+            return std::nullopt;
+        }
+        require_capability("phys.mem", span);
+
+        // Rule (1): the address is a general Int or U64 expression (issue
+        // #285), mirroring the phys_read_* rule (issue #279) — a runtime value
+        // such as the framebuffer base `fb_addr` discovered at boot, optionally
+        // plus a mutable pixel cursor. U64 is accepted for 64-bit
+        // pointer-shaped addresses. Any other type is rejected.
+        if (e.addr == nullptr || e.value == nullptr) // GCOVR_EXCL_LINE
+        {
+            return std::nullopt; // GCOVR_EXCL_LINE
+        }
+        const auto addr_t = check_expr(*e.addr);
+        if (!addr_t.has_value())
+        {
+            return std::nullopt;
+        }
+        if (addr_t->kind != TypeKind::Int && addr_t->kind != TypeKind::U64)
+        {
+            error_at(span, "runtime phys write address must be an Int or U64 expression");
+            return std::nullopt;
+        }
+
+        // The value must be the unsigned width named by the builtin
+        // (phys_write_u8 -> U8, ..., phys_write_u64 -> U64). An Int value is
+        // accepted for unsigned widths (the literal-adaptation rule mirroring
+        // Phys<T>.write() and port_out*: e.g. `phys_write_u32(fb, 0xFF8800)`).
+        const TypeKind width_kind = (e.op == "phys_write_u8")   ? TypeKind::U8
+                                    : (e.op == "phys_write_u16") ? TypeKind::U16
+                                    : (e.op == "phys_write_u32") ? TypeKind::U32
+                                                                 : TypeKind::U64;
+        const auto value_t = check_expr(*e.value);
+        if (!value_t.has_value())
+        {
+            return std::nullopt;
+        }
+        const Type expected{.kind = width_kind};
+        const bool int_for_unsigned =
+            value_t->kind == TypeKind::Int && is_phys_element_kind(width_kind);
+        if (*value_t != expected && !int_for_unsigned)
+        {
+            error_at(span, "runtime phys write value type mismatch for '" +
+                               std::string(e.op) + "': expected " +
+                               std::string(to_string(expected)) + ", got " +
+                               std::string(to_string(*value_t)));
+            return std::nullopt;
+        }
+        // A write is a side effect: the expression's type is Unit.
+        return Type{.kind = TypeKind::Unit};
     }
 
     [[nodiscard]] std::optional<Type> check_expr_node(const GroupExpr& e, Span)

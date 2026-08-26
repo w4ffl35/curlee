@@ -1,0 +1,4 @@
+tests/fixtures/check_phys_write_runtime_addr.curlee:6:5: error: runtime phys write address must be an Int or U64 expression
+  |
+  |     phys_write_u32(b, 0xFF8800);
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^

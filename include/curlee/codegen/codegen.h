@@ -55,7 +55,11 @@ using CodegenResult = std::variant<std::string, std::vector<curlee::diag::Diagno
  *    addresses, e.g. `(*(volatile uint32_t*)(0xFD000000))`. A `Phys<T>`
  *    function parameter becomes a `uintN_t*` parameter and read()/write() on
  *    it dereference the pointer; forwarding a Phys parameter to another
- *    function passes the pointer as-is.
+ *    function passes the pointer as-is. The runtime-address builtins
+ *    (`phys_read_u8/u16/u32/u64`, issue #279, and `phys_write_u8/u16/u32/u64`,
+ *    issue #285) lower to volatile derefs of a general address expression,
+ *    e.g. `(*(volatile uint32_t*)(uintptr_t)(p))` and
+ *    `(*(volatile uint32_t*)(uintptr_t)(p)) = (v)`.
  *  - Hosted-only builtins (`print`, `__read_line`, `__fs_*`, `__tty_*`,
  *    `__rng_*`, vec/set ops, python_ffi) are rejected with the diagnostic
  *    "builtin X is not supported in freestanding target". The builtin surface

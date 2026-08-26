@@ -999,6 +999,18 @@ const curlee::parser::Expr* find_expr_at(const curlee::parser::Expr& expr, std::
             best = find_expr_at(*phys_read->addr, offset, best);
         }
     }
+    else if (const auto* phys_write =
+                 std::get_if<curlee::parser::RuntimePhysWriteExpr>(&expr.node))
+    {
+        if (phys_write->addr)
+        {
+            best = find_expr_at(*phys_write->addr, offset, best);
+        }
+        if (phys_write->value)
+        {
+            best = find_expr_at(*phys_write->value, offset, best);
+        }
+    }
     else if (const auto* group = std::get_if<curlee::parser::GroupExpr>(&expr.node))
     {
         if (group->inner)
@@ -1111,6 +1123,18 @@ const curlee::parser::Expr* find_call_expr_at(const curlee::parser::Expr& expr, 
         if (phys_read->addr)
         {
             best = find_call_expr_at(*phys_read->addr, offset, best);
+        }
+    }
+    else if (const auto* phys_write =
+                 std::get_if<curlee::parser::RuntimePhysWriteExpr>(&expr.node))
+    {
+        if (phys_write->addr)
+        {
+            best = find_call_expr_at(*phys_write->addr, offset, best);
+        }
+        if (phys_write->value)
+        {
+            best = find_call_expr_at(*phys_write->value, offset, best);
         }
     }
     else if (const auto* group = std::get_if<curlee::parser::GroupExpr>(&expr.node))

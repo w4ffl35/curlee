@@ -36,6 +36,9 @@ the generated C is linked against `runtime/rt.c` + `runtime/crt0.S` +
   fixed-size arrays + ring bookkeeping (issue #278).
 - `joeos_08a_phys_write_loop.curlee` / `joeos_08b*` / `joeos_08c` / `joeos_08d`
   — runtime-address physical reads for the mb2.c tag walk (issue #279).
+- `joeos_11_phys_write_runtime.curlee` — runtime-address physical writes for
+  fb.c's pixel-write half (issue #285): a write loop over a runtime base +
+  mutable cursor, read back through `phys_read_u32` and confirmed over COM1.
 - `joeos_09_net_stack_globals.curlee` — the net_stack.c shim's shape (scalar
   phase/seq/port fields + a 256-byte response body, read/written from several
   functions across separate poll calls) in pure Curlee (issue #287).

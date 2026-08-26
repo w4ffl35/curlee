@@ -187,6 +187,11 @@ void assign_expr_ids(curlee::parser::Expr& expr, std::size_t& next_id)
             {
                 assign_expr_ids(*node.addr, next_id);
             }
+            else if constexpr (std::is_same_v<Node, curlee::parser::RuntimePhysWriteExpr>)
+            {
+                assign_expr_ids(*node.addr, next_id);
+                assign_expr_ids(*node.value, next_id);
+            }
             else if constexpr (std::is_same_v<Node, curlee::parser::GroupExpr>)
             {
                 assign_expr_ids(*node.inner, next_id);
@@ -2594,6 +2599,22 @@ class Parser
                 return parse_runtime_phys_read_call(expr.span, *phys_name);
             }
 
+            // Runtime-address physical memory writes: `phys_write_u8(addr, v)`,
+            // `phys_write_u16(addr, v)`, `phys_write_u32(addr, v)`,
+            // `phys_write_u64(addr, v)`. The address is a general Int/U64
+            // expression (issue #285) and the value is the corresponding
+            // unsigned width — the write counterpart of phys_read_* (#279),
+            // parsed as a dedicated node so the builtin names cannot be
+            // shadowed by user functions (resolver defense) and the address +
+            // value children are carried explicitly.
+            if (const auto* phys_name = std::get_if<NameExpr>(&expr.node);
+                phys_name != nullptr &&
+                curlee::parser::is_runtime_phys_write_builtin_name(phys_name->name) &&
+                check(TokenKind::LParen))
+            {
+                return parse_runtime_phys_write_call(expr.span, *phys_name);
+            }
+
             // x86 port I/O builtins: `port_inb(0x3FD)`, `port_outw(0x1CE, v)`.
             // The port must be a compile-time constant literal; the optional
             // value (out* variants) is a general expression of the matching
@@ -2682,6 +2703,55 @@ class Parser
         Expr expr;
         expr.span = span_cover(start_span, rparen.span);
         expr.node = RuntimePhysReadExpr{.op = name.name, .addr = std::move(addr)};
+        return expr;
+    }
+
+    // Parse a runtime-address physical memory write builtin call:
+    // `phys_write_u8(addr, v)` / `phys_write_u16(addr, v)` /
+    // `phys_write_u32(addr, v)` / `phys_write_u64(addr, v)`. The caller has
+    // verified the next token is `(`. The address is a general Int/U64
+    // expression (issue #285) and the value is the matching unsigned width
+    // (an Int value adapts for unsigned widths, mirroring `Phys<T>.write()`),
+    // mirroring the phys_read_* builtins (issue #279).
+    [[nodiscard]] std::variant<Expr, curlee::diag::Diagnostic>
+    parse_runtime_phys_write_call(const curlee::source::Span& start_span, const NameExpr& name)
+    {
+        advance(); // consume '('
+
+        auto addr_res = parse_expr();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(addr_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(addr_res));
+        }
+        auto addr = std::make_unique<Expr>(std::get<Expr>(std::move(addr_res)));
+
+        if (auto err = consume(TokenKind::Comma,
+                               "expected ',' after runtime phys write address");
+            err.has_value())
+        {
+            return *err;
+        }
+
+        auto value_res = parse_expr();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(value_res))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(value_res));
+        }
+        auto value = std::make_unique<Expr>(std::get<Expr>(std::move(value_res)));
+
+        if (auto err = consume(TokenKind::RParen,
+                               "expected ')' after runtime phys write value");
+            err.has_value())
+        {
+            return *err;
+        }
+        const Token rparen = previous();
+
+        Expr expr;
+        expr.span = span_cover(start_span, rparen.span);
+        expr.node = RuntimePhysWriteExpr{.op = name.name,
+                                         .addr = std::move(addr),
+                                         .value = std::move(value)};
         return expr;
     }
 
@@ -3491,6 +3561,15 @@ class Dumper
     {
         out_ << e.op << "(";
         dump_expr(*e.addr);
+        out_ << ")";
+    }
+
+    void dump_expr_node(const RuntimePhysWriteExpr& e)
+    {
+        out_ << e.op << "(";
+        dump_expr(*e.addr);
+        out_ << ", ";
+        dump_expr(*e.value);
         out_ << ")";
     }
 

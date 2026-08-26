@@ -1961,6 +1961,42 @@ fn main() -> Int {
                                             .addr = std::make_unique<Expr>(std::move(addr))};
             expect_runtime_phys_reject(std::move(root));
         }
+
+        // Runtime-address physical memory writes (issue #285) are freestanding-
+        // only too: the VM emitter must reject phys_write_u32 nodes the same way
+        // it rejects Phys, port I/O and phys_read_* nodes.
+        using curlee::parser::RuntimePhysWriteExpr;
+
+        auto expect_runtime_phys_write_reject = [&](Expr root)
+        {
+            const auto emitted = run_with_expr(std::move(root));
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for RuntimePhysWriteExpr node");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("physical memory writes are freestanding-only") ==
+                    std::string::npos)
+            {
+                fail("expected freestanding-only diagnostic for RuntimePhysWriteExpr node");
+            }
+        };
+
+        {
+            // phys_write_u32(base, v) with a runtime address expression and an
+            // Int literal value.
+            Expr addr;
+            addr.node = curlee::parser::IntExpr{.lexeme = "0x1_0000"};
+            Expr value;
+            value.node = curlee::parser::IntExpr{.lexeme = "0xFF8800"};
+            Expr root;
+            root.node = RuntimePhysWriteExpr{
+                .op = "phys_write_u32",
+                .addr = std::make_unique<Expr>(std::move(addr)),
+                .value = std::make_unique<Expr>(std::move(value))};
+            expect_runtime_phys_write_reject(std::move(root));
+        }
     }
 
     {

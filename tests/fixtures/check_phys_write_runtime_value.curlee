@@ -1,0 +1,10 @@
+// The phys_write_* value must be of the matching unsigned width (or an Int
+// value, the literal-adaptation rule mirroring Phys<T>.write() and port_out*);
+// a Bool value is rejected.
+fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    let b: Bool = true;
+    phys_write_u32(1048576, b);
+  }
+  return;
+}

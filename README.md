@@ -168,11 +168,14 @@ bootable **x86-64 multiboot2 kernel ELF**:
 - The freestanding target is **Linux/x86-64 only** and has **no hosted builtins** (no `print`,
   no `String`, no `Vec`). Physical memory access uses `Phys<T>` + `read()`/`write()` under
   `unsafe` and requires the `phys.mem` capability. The **runtime-address reads**
-  `phys_read_u8`/`phys_read_u16`/`phys_read_u32`/`phys_read_u64` (issue #279) read from a
+  `phys_read_u8`/`phys_read_u16`/`phys_read_u32`/`phys_read_u64` (issue #279) and **writes**
+  `phys_write_u8`/`phys_write_u16`/`phys_write_u32`/`phys_write_u64` (issue #285) access a
   **runtime** physical address — a general `Int`/`U64` expression such as the multiboot2 info
-  base the boot stub captures into a global at boot time (`mb2.c`), plus a mutable byte cursor
-  advanced by assignment — where `Phys<T>` requires a compile-time literal; each emits a
-  `volatile` deref of the address expression and is gated/opaque exactly like `Phys<T>.read()`.
+  base the boot stub captures into a global at boot time (`mb2.c`), or the framebuffer base
+  `fb_addr` discovered at boot (`fb.c`), plus a mutable byte/pixel cursor advanced by
+  assignment — where `Phys<T>` requires a compile-time literal; each emits a `volatile`
+  deref of the address expression (a store for the writes) and is gated/opaque exactly like
+  `Phys<T>.read()`/`write()`.
   The x86 **port I/O** builtins
   (`port_inb`/`port_outb`/`port_inw`/`port_outw`/`port_inl`/`port_outl`) accept either a
   **constant port** or a **`let`-bound base + constant offset** (issue #276, the virtio_net.c

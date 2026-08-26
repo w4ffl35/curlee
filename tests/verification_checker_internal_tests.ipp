@@ -1936,6 +1936,102 @@ int main()
     }
 
     {
+        // Runtime-address physical memory writes (issue #285): the address is a
+        // general Int/U64 expression (not a compile-time literal) and the value
+        // is the unsigned width named by the builtin, so the builtin lowers to
+        // the uninterpreted function phys_write_at_<kind> : Int x Int -> Unit
+        // with the lowered address and value terms as arguments. All four
+        // widths must lower, unknown builtin names and non-integer
+        // addresses/values must error, and the result must be Unit (a write is
+        // a trusted/opaque side effect — nothing to prove).
+        const curlee::source::Span s{.start = 0, .end = 1};
+
+        auto runtime_phys_write_ok = [&](std::string_view op, std::string_view base_name)
+        {
+            // A runtime address: base + 4 (mutable pixel cursor offset over the
+            // runtime framebuffer base), with an Int literal value (the
+            // literal-adaptation rule, mirroring Phys<U32>.write(0xFF8800)).
+            auto addr = make_expr(
+                s, curlee::parser::BinaryExpr{
+                       .op = TokenKind::Plus,
+                       .lhs = make_expr_ptr(
+                           make_expr(s, curlee::parser::NameExpr{.name = base_name})),
+                       .rhs = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "4"}))});
+            auto e = make_expr(
+                s, curlee::parser::RuntimePhysWriteExpr{
+                       .op = op,
+                       .addr = make_expr_ptr(std::move(addr)),
+                       .value = make_expr_ptr(
+                           make_expr(s, curlee::parser::IntExpr{.lexeme = "0xFF8800"}))});
+            auto r = v.lower_expr(e);
+            if (!std::holds_alternative<curlee::verification::ExprValue>(r))
+            {
+                fail("expected lower_expr(runtime phys write) to succeed");
+            }
+            auto val = std::get<curlee::verification::ExprValue>(std::move(r));
+            if (val.kind != curlee::types::TypeKind::Unit)
+            {
+                fail("expected runtime phys write to lower to Unit");
+            }
+        };
+
+        // All four widths (covers runtime_phys_write_element_kind).
+        v.declare_var("fb_addr", curlee::types::TypeKind::Int);
+        runtime_phys_write_ok("phys_write_u8", "fb_addr");
+        runtime_phys_write_ok("phys_write_u16", "fb_addr");
+        runtime_phys_write_ok("phys_write_u32", "fb_addr");
+        runtime_phys_write_ok("phys_write_u64", "fb_addr");
+
+        // Repeated same-kind calls exercise the cached func_decl branch in
+        // phys_write_at_fn.
+        runtime_phys_write_ok("phys_write_u32", "fb_addr");
+
+        // Unknown builtin name (element kind empty) -> hard error.
+        auto bad_op = make_expr(
+            s, curlee::parser::RuntimePhysWriteExpr{
+                   .op = "phys_write_u128",
+                   .addr = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "0"})),
+                   .value = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "1"}))});
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(v.lower_expr(bad_op)))
+        {
+            fail("expected lower_expr(unknown runtime phys write builtin) to error");
+        }
+
+        // Non-integer address -> hard error (defense in depth; the type
+        // checker reports the primary diagnostic).
+        auto bool_addr = make_expr(
+            s, curlee::parser::RuntimePhysWriteExpr{
+                   .op = "phys_write_u32",
+                   .addr = make_expr_ptr(make_expr(s, curlee::parser::BoolExpr{.value = true})),
+                   .value = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "1"}))});
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(v.lower_expr(bool_addr)))
+        {
+            fail("expected lower_expr(runtime phys write, Bool address) to error");
+        }
+
+        // Non-integer value -> hard error (defense in depth).
+        auto bool_value = make_expr(
+            s, curlee::parser::RuntimePhysWriteExpr{
+                   .op = "phys_write_u32",
+                   .addr = make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = "0"})),
+                   .value = make_expr_ptr(make_expr(s, curlee::parser::BoolExpr{.value = true}))});
+        if (!std::holds_alternative<curlee::diag::Diagnostic>(v.lower_expr(bool_value)))
+        {
+            fail("expected lower_expr(runtime phys write, Bool value) to error");
+        }
+
+        // phys_write_at_fn cache-hit path: calling twice returns the cached decl.
+        v.phys_write_at_fns_.clear();
+        const auto& pw1 = v.phys_write_at_fn("U32");
+        const auto& pw2 = v.phys_write_at_fn("U32");
+        if (pw1.id() != pw2.id())
+        {
+            fail("expected phys_write_at_fn to return the same cached decl");
+        }
+        v.phys_write_at_fns_.clear();
+    }
+
+    {
         // is_phys_address_literal: empty lexeme -> false (line 208).
         if (curlee::verification::is_phys_address_literal(""))
         {

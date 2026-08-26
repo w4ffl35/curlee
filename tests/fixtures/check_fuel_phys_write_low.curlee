@@ -1,0 +1,16 @@
+// Negative (review regression, issue #285): the fuel/WCET cost model must
+// charge a runtime-address physical write like the volatile store it compiles
+// to: address expression (1 for a literal) + value expression (1) + the store
+// instruction (1) = 3, plus the `return` (1). A `[ fuel 1; ]` bound must
+// therefore FAIL. Before the fix, RuntimePhysWriteExpr fell through to the
+// leaf default priced at 0 instructions, so this function verified at 1 —
+// unsound for the M3 fuel/WCET guarantee (issue #262) on exactly the fb.c
+// pixel-write code this builtin unblocks.
+fn poke(pm: cap phys.mem) -> Unit
+  [ fuel 1; ]
+{
+  unsafe {
+    phys_write_u32(1048576, 0xFF8800);
+  }
+  return;
+}

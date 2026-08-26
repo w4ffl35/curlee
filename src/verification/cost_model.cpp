@@ -39,6 +39,7 @@ using curlee::parser::PhysReadExpr;
 using curlee::parser::PhysWriteExpr;
 using curlee::parser::PortIOExpr;
 using curlee::parser::RuntimePhysReadExpr;
+using curlee::parser::RuntimePhysWriteExpr;
 using curlee::parser::ReturnStmt;
 using curlee::parser::ScopedNameExpr;
 using curlee::parser::Stmt;
@@ -473,6 +474,27 @@ CostResult CostModel::cost_expr(const Expr& expr, const LoweringContext& ctx,
                     return std::get<Diagnostic>(std::move(addr));
                 }
                 return ctx.ctx.int_val(1) + std::get<z3::expr>(addr);
+            }
+            else if constexpr (std::is_same_v<Node, RuntimePhysWriteExpr>)
+            {
+                // Runtime phys write: the address expression cost + the value
+                // expression cost + the volatile store instruction (1). The
+                // codegen emits the store at the computed address with the
+                // value as its source operand, so BOTH operands are charged,
+                // mirroring the RuntimePhysReadExpr and PhysWriteExpr costing
+                // (issue #285). A write priced at 0 would let a `[ fuel N; ]`
+                // WCET bound verify below the real instruction count.
+                auto addr = cost_expr(*node.addr, ctx, fuel_table);
+                if (std::holds_alternative<Diagnostic>(addr))
+                {
+                    return std::get<Diagnostic>(std::move(addr));
+                }
+                auto value = cost_expr(*node.value, ctx, fuel_table);
+                if (std::holds_alternative<Diagnostic>(value))
+                {
+                    return std::get<Diagnostic>(std::move(value));
+                }
+                return ctx.ctx.int_val(1) + std::get<z3::expr>(addr) + std::get<z3::expr>(value);
             }
             // Leaf nodes: flat instruction cost.
             return CostResult{ctx.ctx.int_val(static_cast<int>(leaf_instruction_cost(expr)))};

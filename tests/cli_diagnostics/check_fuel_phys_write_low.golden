@@ -1,0 +1,6 @@
+tests/fixtures/check_fuel_phys_write_low.curlee:9:4: error: fuel bound may be exceeded: worst-case cost exceeds the declared fuel '1'
+  |
+  | fn poke(pm: cap phys.mem) -> Unit
+  |    ^
+note: goal: total_cost <= 1
+note: hint: raise the fuel bound or reduce the worst-case cost (e.g. add a 'decreases' variant to loops, or a lower declared bound on callees)
