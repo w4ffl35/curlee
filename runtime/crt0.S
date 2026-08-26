@@ -14,12 +14,18 @@
 //   5. On return, disable interrupts and halt forever (deterministic exit).
 //
 // Entry modes (the SAME 64-bit kernel must boot through either):
-//   - QEMU PVH loader: 64-bit long mode with identity-mapped paging already
-//     active (EFER.LMA=1). The stub skips the mode switch.
-//   - multiboot2 (QEMU/SeaBIOS's `-kernel` path, GRUB): 32-bit protected
-//     mode with paging off (EFER.LMA=0). The stub builds identity-mapped
-//     2 MiB page tables for the first 4 GiB, enables PAE + EFER.LME +
-//     paging, and far-jumps to the 64-bit code segment.
+//   - QEMU PVH loader: the PVH boot protocol permits entering directly in
+//     64-bit long mode with identity-mapped paging already active
+//     (EFER.LMA=1); the stub detects this and skips the mode switch. NOTE:
+//     empirically, on QEMU 10.0.11 the `-kernel` loader enters in 32-bit
+//     protected mode for BOTH the multiboot2 path and the headerless
+//     PVH-note-only path (verified by boot tracing) — so this branch is
+//     defensive/spec-compliant but not exercised by this QEMU version.
+//   - multiboot2 (QEMU/SeaBIOS's `-kernel` path, GRUB) and PVH-note-only on
+//     QEMU 10.0.11: 32-bit protected mode with paging off (EFER.LMA=0). The
+//     stub builds identity-mapped 2 MiB page tables for the first 4 GiB,
+//     enables PAE + EFER.LME + paging, and far-jumps to the 64-bit code
+//     segment.
 //
 // Why the mode switch is required: QEMU's `-kernel` loader detects the
 // multiboot2 header at the start of the image and boots via the multiboot2
@@ -67,7 +73,9 @@ multiboot2_header_end:
 .type _start, @function
 _start:
     // Detect entry mode: EFER.LMA (MSR 0xC0000080, bit 10).
-    // 1 = long mode active (PVH loader); 0 = 32-bit protected mode (multiboot2).
+    // 1 = long mode already active (spec-compliant PVH loader; not observed
+    //     on QEMU 10.0.11, which enters 32-bit here too — see header comment).
+    // 0 = 32-bit protected mode (multiboot2, and PVH-note-only on this QEMU).
     mov $0xC0000080, %ecx
     rdmsr
     test $0x400, %eax
