@@ -25,6 +25,7 @@ namespace
 using curlee::diag::Diagnostic;
 using curlee::diag::Related;
 using curlee::diag::Severity;
+using curlee::parser::ArrayLiteralExpr;
 using curlee::parser::AssignStmt;
 using curlee::parser::Block;
 using curlee::parser::BlockStmt;
@@ -34,6 +35,8 @@ using curlee::parser::ExprStmt;
 using curlee::parser::Function;
 using curlee::parser::GhostLetStmt;
 using curlee::parser::IfStmt;
+using curlee::parser::IndexAssignStmt;
+using curlee::parser::IndexExpr;
 using curlee::parser::LetStmt;
 using curlee::parser::MatchStmt;
 using curlee::parser::MemberExpr;
@@ -308,6 +311,42 @@ bool is_plain_decimal_literal(std::string_view lexeme)
     return true;
 }
 
+// Parse the compile-time array-length lexeme (`[T; N]`, issue #278) into its
+// numeric value. Accepts plain decimal and hex (0x) forms with optional
+// underscores; a length must fit uint64 and be >= 1 (the type checker enforces
+// positivity; the verifier re-checks as defense in depth).
+std::optional<std::uint64_t> parse_array_length_lexeme(std::string_view lexeme)
+{
+    std::string cleaned;
+    cleaned.reserve(lexeme.size());
+    for (const char c : lexeme)
+    {
+        if (c != '_')
+        {
+            cleaned.push_back(c);
+        }
+    }
+    if (cleaned.empty())
+    {
+        return std::nullopt;
+    }
+    std::uint64_t value = 0;
+    const char* begin = cleaned.data();
+    const char* end = cleaned.data() + cleaned.size();
+    int base = 10;
+    if (cleaned.size() > 2 && cleaned[0] == '0' && (cleaned[1] == 'x' || cleaned[1] == 'X'))
+    {
+        base = 16;
+        begin += 2;
+    }
+    const auto res = std::from_chars(begin, end, value, base);
+    if (res.ec != std::errc{} || res.ptr != end || value == 0)
+    {
+        return std::nullopt;
+    }
+    return value;
+}
+
 // Multiply a decimal numeral string by a small factor (2..16) at arbitrary
 // precision: the result grows as needed, so values at or above 2^64 stay
 // exact. Used by int_literal_to_decimal to convert hex/underscore lexemes to
@@ -435,12 +474,25 @@ struct FunctionSig
     std::vector<const curlee::parser::GhostLetStmt*> ghost_lets;
 };
 
+// Static metadata for a fixed-size array binding (issue #278): the element
+// kind (determines the Z3 array sort and the type of element reads) and the
+// compile-time length (determines the bounds obligation).
+struct ArrayMeta
+{
+    TypeKind elem_kind = TypeKind::Int;
+    std::uint64_t len = 0;
+};
+
 struct ScopeState
 {
     std::unordered_map<std::string_view, z3::expr> int_vars;
     std::unordered_map<std::string_view, z3::expr> bool_vars;
     // Phys<T> pointer variables, mapped to their element kind name (e.g. "U32").
     std::unordered_map<std::string_view, std::string_view> phys_vars;
+    // Fixed-size array bindings: name -> array-sort Z3 term.
+    std::unordered_map<std::string_view, z3::expr> array_vars;
+    // Array element-kind/length metadata (shadowing-safe, restored with scope).
+    std::unordered_map<std::string_view, ArrayMeta> array_meta;
     // Names bound from a Phys read() result (opaque values that cannot be contracted).
     std::unordered_set<std::string_view> opaque_read_vars;
     // Names bound from a port_in* read result (opaque; distinct provenance for
@@ -457,7 +509,14 @@ class Verifier
           cost_model_(solver_.context(),
                       [this](const curlee::parser::Expr& e, const LoweringContext&)
                       {
+                          // The fuel model only prices expressions; suppress
+                          // the array index-bounds obligation so cost
+                          // estimation never re-emits bounds diagnostics (the
+                          // body checking already discharged them).
+                          const bool saved = bounds_check_enabled_;
+                          bounds_check_enabled_ = false;
                           auto lowered = lower_expr(e);
+                          bounds_check_enabled_ = saved;
                           if (std::holds_alternative<ExprValue>(lowered))
                           {
                               return std::optional<z3::expr>{
@@ -528,6 +587,9 @@ class Verifier
 
     // Phys<T> pointer variables (name -> element kind name), scoped like int/bool vars.
     std::unordered_map<std::string_view, std::string_view> phys_vars_;
+    // Fixed-size array metadata (name -> element kind + length), scoped like
+    // the other variable tables (restored by push/pop for shadowing).
+    std::unordered_map<std::string_view, ArrayMeta> array_meta_;
     // Names bound from a Phys read() result; contracts referencing these cannot be proven.
     std::unordered_set<std::string_view> opaque_read_vars_;
     // Names bound from a port_in* read result; contracts referencing these get the
@@ -539,6 +601,12 @@ class Verifier
     // output; uniqueness within a function is all that is required because
     // facts and bindings are scoped per function.
     std::size_t fresh_counter_ = 0;
+
+    // Array index-bounds obligations are discharged during expression lowering
+    // (`lower_expr` on an IndexExpr). The static fuel cost model re-lowers
+    // expressions purely to price them; it must not re-emit bounds
+    // diagnostics, so the cost-model lambda disables this flag while it runs.
+    bool bounds_check_enabled_ = true;
 
     // Loop-entry lowering contexts recorded at each `while` with a contract, so
     // the static fuel cost model can lower the `decreases` variant against the
@@ -559,6 +627,8 @@ class Verifier
         state.int_vars = lower_ctx_.int_vars;
         state.bool_vars = lower_ctx_.bool_vars;
         state.phys_vars = phys_vars_;
+        state.array_vars = lower_ctx_.array_vars;
+        state.array_meta = array_meta_;
         state.opaque_read_vars = opaque_read_vars_;
         state.opaque_port_read_vars = opaque_port_read_vars_;
         state.facts_size = facts_.size();
@@ -575,6 +645,8 @@ class Verifier
         lower_ctx_.int_vars = state.int_vars;
         lower_ctx_.bool_vars = state.bool_vars;
         phys_vars_ = state.phys_vars;
+        lower_ctx_.array_vars = state.array_vars;
+        array_meta_ = state.array_meta;
         opaque_read_vars_ = state.opaque_read_vars;
         opaque_port_read_vars_ = state.opaque_port_read_vars;
         if (facts_.size() > state.facts_size)
@@ -586,6 +658,16 @@ class Verifier
 
     std::optional<TypeKind> supported_type(const curlee::parser::TypeName& name)
     {
+        // Fixed-size arrays are local bindings only: they cannot appear in
+        // function signatures, so they never reach the signature collector.
+        // Defense in depth: reject them here rather than mis-model them.
+        if (name.is_array())
+        {
+            diags_.push_back(error_at(name.span, "array types are only supported as local 'let' "
+                                                 "bindings in the MVP"));
+            return std::nullopt;
+        }
+
         // Capability types (e.g. `cap io.stdout`) are not part of the verification logic
         // fragment. They are treated as uninterpreted values and must not block verification
         // unless used inside predicates (which are Int/Bool-only in the MVP scope).
@@ -736,6 +818,38 @@ class Verifier
             std::string(name) + "@" + std::to_string(fresh_counter_++);
         return kind == TypeKind::Int ? solver_.context().int_const(sym_name.c_str())
                                      : solver_.context().bool_const(sym_name.c_str());
+    }
+
+    // A FRESH array-sort Z3 symbol per source-level array binding (issue #278).
+    // The MVP element kinds (Int/U8/U16/U32/U64) all lower to Int-sort values,
+    // so every array is `(Array Int Int)`; `select` gives the element value and
+    // `store` the updated array. Naming follows fresh_symbol (`name@<counter>`)
+    // so reassignments/shadowing never conflate solver constants.
+    z3::expr fresh_array_symbol(std::string_view name)
+    {
+        const std::string sym_name =
+            std::string(name) + "@" + std::to_string(fresh_counter_++);
+        auto& ctx = solver_.context();
+        return ctx.constant(sym_name.c_str(), ctx.array_sort(ctx.int_sort(), ctx.int_sort()));
+    }
+
+    // Declare a fixed-size array binding in the solver. `elem_kind` must be a
+    // supported array element kind (the type checker enforces this; the
+    // verifier re-checks as defense in depth).
+    void declare_array_var(std::string_view name, TypeKind elem_kind, std::uint64_t len)
+    {
+        lower_ctx_.array_vars.insert_or_assign(name, fresh_array_symbol(name));
+        array_meta_.insert_or_assign(name, ArrayMeta{.elem_kind = elem_kind, .len = len});
+    }
+
+    // Look up an array binding's current array-sort Z3 term.
+    std::optional<z3::expr> lookup_array(std::string_view name) const
+    {
+        if (auto it = lower_ctx_.array_vars.find(name); it != lower_ctx_.array_vars.end())
+        {
+            return it->second;
+        }
+        return std::nullopt;
     }
 
     void declare_var(std::string_view name, TypeKind kind)
@@ -1176,6 +1290,16 @@ class Verifier
                     }
                     return node.rhs != nullptr && expr_is_opaque_read(*node.rhs);
                 }
+                else if constexpr (std::is_same_v<Node, IndexExpr>)
+                {
+                    // An element READ of an array is a plain value; only the
+                    // index expression can carry opaque provenance.
+                    return node.index != nullptr && expr_is_opaque_read(*node.index);
+                }
+                else if constexpr (std::is_same_v<Node, ArrayLiteralExpr>)
+                {
+                    return node.value != nullptr && expr_is_opaque_read(*node.value);
+                }
                 return false;
             },
             e.node);
@@ -1212,6 +1336,14 @@ class Verifier
                         return true;
                     }
                     return node.rhs != nullptr && expr_is_port_opaque_read(*node.rhs);
+                }
+                else if constexpr (std::is_same_v<Node, IndexExpr>)
+                {
+                    return node.index != nullptr && expr_is_port_opaque_read(*node.index);
+                }
+                else if constexpr (std::is_same_v<Node, ArrayLiteralExpr>)
+                {
+                    return node.value != nullptr && expr_is_port_opaque_read(*node.value);
                 }
                 return false;
             },
@@ -1698,6 +1830,67 @@ class Verifier
                 {
                     return lower_expr(*node.inner);
                 }
+                else if constexpr (std::is_same_v<Node, IndexExpr>)
+                {
+                    // `arr[i]` lowers to select(arr, i). The base must be a
+                    // plain array binding (the type checker rejects anything
+                    // else); the index is an Int expression whose bounds
+                    // obligation is discharged here (suppressed only inside
+                    // the static fuel cost model).
+                    if (node.base == nullptr || node.index == nullptr)
+                    {
+                        return error_at(e.span, "invalid array index expression");
+                    }
+                    const auto* base_name = std::get_if<NameExpr>(&node.base->node);
+                    if (base_name == nullptr)
+                    {
+                        return error_at(e.span, "only array bindings can be indexed in "
+                                                "verification expressions");
+                    }
+                    const auto meta_it = array_meta_.find(base_name->name);
+                    if (meta_it == array_meta_.end())
+                    {
+                        return error_at(e.span,
+                                        "unknown array '" + std::string(base_name->name) + "'");
+                    }
+                    auto arr = lookup_array(base_name->name);
+                    if (!arr.has_value())
+                    {
+                        return error_at(e.span, "unknown array '" +
+                                                    std::string(base_name->name) + "'");
+                    }
+                    auto idx_res = lower_expr(*node.index);
+                    if (std::holds_alternative<Diagnostic>(idx_res))
+                    {
+                        return std::get<Diagnostic>(std::move(idx_res));
+                    }
+                    auto idx = std::get<ExprValue>(std::move(idx_res));
+                    if (idx.kind != TypeKind::Int)
+                    {
+                        return error_at(e.span, "array index must be an Int expression");
+                    }
+                    if (bounds_check_enabled_)
+                    {
+                        check_array_index_bounds(e.span, base_name->name, idx.expr,
+                                                 meta_it->second.len);
+                    }
+                    // Unsigned element arrays lower to Int values (the same
+                    // widening the scalar U* lets use), so the element kind
+                    // surfaces as Int or Bool in the solver fragment.
+                    const TypeKind elem_kind = meta_it->second.elem_kind;
+                    const TypeKind lowered_kind =
+                        is_widening_unsigned(elem_kind) ? TypeKind::Int : elem_kind;
+                    return ExprValue{z3::select(*arr, idx.expr), lowered_kind, false};
+                }
+                else if constexpr (std::is_same_v<Node, ArrayLiteralExpr>)
+                {
+                    // `[v; N]` is only valid as a `let` initializer; the
+                    // array-let handler (check_array_let) models it. Anywhere
+                    // else the type checker has already rejected it; this is
+                    // defense in depth.
+                    return error_at(e.span, "array literals are only supported as 'let' "
+                                            "initializers in verification expressions");
+                }
 
                 return error_at(e.span, "unsupported expression in verification");
             },
@@ -1731,6 +1924,49 @@ class Verifier
         note.message = "model:\n" + Solver::format_model(*model);
         note.span = std::nullopt;
         d.notes.push_back(std::move(note));
+    }
+
+    // Per-access array index bounds obligation (issue #278): every element
+    // read/write must be provably in `0..len-1` under the current facts. The
+    // solver is checked for a model of `!(0 <= idx && idx < len)`; a model
+    // (or an Unknown answer) fails the obligation with the index model.
+    // Constant indices out of range are rejected earlier by the type checker;
+    // this gate covers symbolic (loop-carried) indices and is the verifier's
+    // defense-in-depth for constants too.
+    void check_array_index_bounds(Span span, std::string_view array_name, const z3::expr& idx,
+                                  std::uint64_t len)
+    {
+        solver_.push();
+        for (const auto& fact : facts_)
+        {
+            solver_.add(fact);
+        }
+        const z3::expr len_term = solver_.context().int_val(std::to_string(len).c_str());
+        const z3::expr obligation = (idx >= 0) && (idx < len_term);
+        solver_.add(!obligation);
+        const auto res = solver_.check();
+
+        if (res == CheckResult::Sat)
+        {
+            Diagnostic d = error_at(span, "array index out of bounds for '" +
+                                              std::string(array_name) + "' (array length " +
+                                              std::to_string(len) + ")");
+            add_model_note(d, {idx});
+            add_hint_note(d);
+            diags_.push_back(std::move(d));
+        }
+        else if (res == CheckResult::Unknown)
+        {
+            Diagnostic d = error_at(span, "array index out of bounds for '" +
+                                              std::string(array_name) +
+                                              "' (solver returned unknown; cannot prove index in "
+                                              "0.." +
+                                              std::to_string(len - 1) + ")");
+            add_hint_note(d);
+            diags_.push_back(std::move(d));
+        }
+
+        solver_.pop();
     }
 
     void check_obligation(const curlee::parser::Pred& pred, const LoweringContext& ctx,
@@ -2129,6 +2365,22 @@ class Verifier
                         check_expr_for_calls(*node.base, nullptr);
                     }
                 }
+                else if constexpr (std::is_same_v<Node, IndexExpr>)
+                {
+                    // The base is a plain array binding (no calls); the index
+                    // may contain calls.
+                    if (node.index)
+                    {
+                        check_expr_for_calls(*node.index, nullptr);
+                    }
+                }
+                else if constexpr (std::is_same_v<Node, ArrayLiteralExpr>)
+                {
+                    if (node.value)
+                    {
+                        check_expr_for_calls(*node.value, nullptr);
+                    }
+                }
                 else if constexpr (std::is_same_v<Node, curlee::parser::PhysWriteExpr>)
                 {
                     if (node.base)
@@ -2308,11 +2560,76 @@ class Verifier
         check_expr_for_calls(s.value);
     }
 
+    // Lower a fixed-size array `let` into an array-sort solver binding
+    // (issue #278). The initializer `[v; N]` is modeled by per-slot facts
+    // `select(a, k) == v` when the repeat value is a compile-time literal and
+    // N is small (quantifier-free and exact for constant-index accesses);
+    // otherwise the initial content stays opaque (the ring-buffer patterns
+    // write slots before reading them, so bounds + read-over-write coherence
+    // via select/store is all the solver needs).
+    void check_array_let(const LetStmt& s)
+    {
+        const auto elem = curlee::types::core_type_from_name(s.type.name);
+        if (!elem.has_value() || !is_array_element_kind(elem->kind))
+        {
+            // Defense in depth: the type checker rejects unsupported element
+            // types first; just scan the initializer for call obligations.
+            check_expr_for_calls(s.value);
+            return;
+        }
+        const auto len = parse_array_length_lexeme(*s.type.array_len);
+        if (!len.has_value() || *len == 0)
+        {
+            diags_.push_back(error_at(s.type.span, "array length must be a positive integer "
+                                                   "literal"));
+            check_expr_for_calls(s.value);
+            return;
+        }
+
+        declare_array_var(s.name, elem->kind, *len);
+        check_expr_for_calls(s.value);
+
+        // Per-slot initialization facts for literal repeat values.
+        const auto* arr = std::get_if<ArrayLiteralExpr>(&s.value.node);
+        if (arr == nullptr || arr->value == nullptr || *len > 64)
+        {
+            return;
+        }
+        auto lowered_value = lower_expr(*arr->value);
+        if (!std::holds_alternative<ExprValue>(lowered_value))
+        {
+            return;
+        }
+        auto value = std::get<ExprValue>(std::move(lowered_value));
+        if (!value.is_literal || value.kind != TypeKind::Int)
+        {
+            return;
+        }
+        auto arr_term = lookup_array(s.name);
+        if (!arr_term.has_value())
+        {
+            return;
+        }
+        auto& ctx = solver_.context();
+        for (std::uint64_t k = 0; k < *len; ++k)
+        {
+            const z3::expr idx = ctx.int_val(std::to_string(k).c_str());
+            facts_.push_back(z3::select(*arr_term, idx) == value.expr);
+        }
+    }
+
     void check_stmt_node(const LetStmt& s, Span, TypeKind)
     {
         // Verification scope only reasons about Int/Bool values.
         // Non-scalar bindings (e.g. structs/enums) are allowed as long as we don't
         // attach refinements to them, since we can't lower them into the solver.
+
+        // Fixed-size arrays (issue #278): model as Z3 arrays with select/store.
+        if (s.type.is_array())
+        {
+            check_array_let(s);
+            return;
+        }
 
         // A Phys<T> binding names an opaque pointer value. Record its element kind so that
         // read()/write() can be lowered as uninterpreted functions.
@@ -2560,6 +2877,64 @@ class Verifier
         (void)span;
     }
 
+    void check_stmt_node(const IndexAssignStmt& s, Span span, TypeKind)
+    {
+        // `arr[i] = v;` mutates one element of an array binding. The type
+        // checker gates the target to an assignable array `let` binding, so
+        // here we model the mutation soundly with Z3's array theory: discharge
+        // the index bounds obligation, then rebind the array to
+        // `store(arr, i, v)`. The old array term stays in the solver's history
+        // (facts referencing it stay valid), and select/store axioms give the
+        // continuation exact read-over-write coherence.
+        std::optional<z3::expr> call_result;
+        check_expr_for_calls(s.value, &call_result);
+
+        const auto meta_it = array_meta_.find(s.name);
+        if (meta_it == array_meta_.end())
+        {
+            // Not an array binding (defense in depth: the type checker
+            // rejected non-array targets already); nothing to model.
+            (void)span;
+            return;
+        }
+
+        auto arr = lookup_array(s.name);
+        if (!arr.has_value())
+        {
+            (void)span;
+            return;
+        }
+
+        auto idx_res = lower_expr(s.index);
+        if (std::holds_alternative<Diagnostic>(idx_res))
+        {
+            diags_.push_back(std::get<Diagnostic>(std::move(idx_res)));
+            return;
+        }
+        auto idx = std::get<ExprValue>(std::move(idx_res));
+        if (idx.kind != TypeKind::Int)
+        {
+            return;
+        }
+        check_array_index_bounds(span, s.name, idx.expr, meta_it->second.len);
+
+        auto val_res = lower_expr(s.value);
+        if (std::holds_alternative<Diagnostic>(val_res))
+        {
+            diags_.push_back(std::get<Diagnostic>(std::move(val_res)));
+            return;
+        }
+        auto val = std::get<ExprValue>(std::move(val_res));
+        if (val.kind != TypeKind::Int && val.kind != TypeKind::Bool)
+        {
+            (void)span;
+            return;
+        }
+
+        const z3::expr updated = z3::store(*arr, idx.expr, val.expr);
+        lower_ctx_.array_vars.insert_or_assign(s.name, updated);
+    }
+
     void check_stmt_node(const BlockStmt& s, Span, TypeKind expected_return)
     {
         push_scope();
@@ -2627,6 +3002,8 @@ class Verifier
         std::unordered_map<std::string_view, z3::expr> post_then_bool;
         std::unordered_map<std::string_view, z3::expr> post_else_int;
         std::unordered_map<std::string_view, z3::expr> post_else_bool;
+        std::unordered_map<std::string_view, z3::expr> post_then_array;
+        std::unordered_map<std::string_view, z3::expr> post_else_array;
         std::vector<z3::expr> retained_facts;
 
         {
@@ -2642,6 +3019,7 @@ class Verifier
             }
             post_then_int = lower_ctx_.int_vars;
             post_then_bool = lower_ctx_.bool_vars;
+            post_then_array = lower_ctx_.array_vars;
             for (std::size_t i = branch_facts_start; i < facts_.size(); ++i)
             {
                 if (!cond_fact.has_value() || !z3::eq(facts_[i], *cond_fact))
@@ -2668,6 +3046,7 @@ class Verifier
             }
             post_else_int = lower_ctx_.int_vars;
             post_else_bool = lower_ctx_.bool_vars;
+            post_else_array = lower_ctx_.array_vars;
             for (std::size_t i = branch_facts_start; i < facts_.size(); ++i)
             {
                 if (!neg_cond.has_value() || !z3::eq(facts_[i], *neg_cond))
@@ -2688,7 +3067,8 @@ class Verifier
             facts_.push_back(fact);
         }
         join_branch_states(pre_int, pre_bool, {post_then_int, post_else_int},
-                           {post_then_bool, post_else_bool}, assigned_names, shadowed_names);
+                           {post_then_bool, post_else_bool},
+                           {post_then_array, post_else_array}, assigned_names, shadowed_names);
     }
 
     // Collect the set of names a loop body ASSIGNS (reassignment targets),
@@ -2707,6 +3087,12 @@ class Verifier
                     using Node = std::decay_t<decltype(node)>;
                     if constexpr (std::is_same_v<Node, AssignStmt>)
                     {
+                        out.insert(node.name);
+                    }
+                    else if constexpr (std::is_same_v<Node, IndexAssignStmt>)
+                    {
+                        // An element write mutates the array binding: the array
+                        // is a loop/branch-carried variable like any scalar.
                         out.insert(node.name);
                     }
                     else if constexpr (std::is_same_v<Node, BlockStmt>)
@@ -2838,6 +3224,7 @@ class Verifier
                             const std::unordered_map<std::string_view, z3::expr>& pre_bool,
                             const std::vector<std::unordered_map<std::string_view, z3::expr>>& post_int,
                             const std::vector<std::unordered_map<std::string_view, z3::expr>>& post_bool,
+                            const std::vector<std::unordered_map<std::string_view, z3::expr>>& post_array,
                             const std::unordered_set<std::string_view>& assigned_names,
                             const std::unordered_set<std::string_view>& shadowed_names)
     {
@@ -2889,6 +3276,32 @@ class Verifier
                     continue;
                 }
                 lower_ctx_.bool_vars.insert_or_assign(name, joined);
+                facts_.push_back(disj);
+            }
+            else if (auto prea = lower_ctx_.array_vars.find(name); prea != lower_ctx_.array_vars.end())
+            {
+                // Arrays assigned in branches: join to a fresh array symbol
+                // constrained to one of the branch-end arrays (falling back to
+                // the pre-branch array for a branch that leaves it untouched).
+                auto joined = fresh_array_symbol(name);
+                z3::expr disj = solver_.context().bool_val(false);
+                bool any_new = false;
+                const z3::expr pre_arr = prea->second;
+                for (const auto& post : post_array)
+                {
+                    auto it = post.find(name);
+                    const z3::expr& sym = it != post.end() ? it->second : pre_arr;
+                    if (!z3::eq(sym, pre_arr))
+                    {
+                        any_new = true;
+                    }
+                    disj = disj || (joined == sym);
+                }
+                if (!any_new)
+                {
+                    continue;
+                }
+                lower_ctx_.array_vars.insert_or_assign(name, joined);
                 facts_.push_back(disj);
             }
         }
@@ -3003,6 +3416,11 @@ class Verifier
                 {
                     itb->second = fresh_symbol(name, TypeKind::Bool);
                 }
+                else if (auto ita = lower_ctx_.array_vars.find(name);
+                         ita != lower_ctx_.array_vars.end())
+                {
+                    ita->second = fresh_array_symbol(name);
+                }
             }
             return;
         }
@@ -3066,6 +3484,7 @@ class Verifier
         // (the pop restores the pre-loop bindings).
         std::unordered_map<std::string_view, z3::expr> post_body_int;
         std::unordered_map<std::string_view, z3::expr> post_body_bool;
+        std::unordered_map<std::string_view, z3::expr> post_body_array;
         {
             push_scope();
 
@@ -3089,6 +3508,16 @@ class Verifier
                          itb != lower_ctx_.bool_vars.end())
                 {
                     itb->second = fresh_symbol(name, TypeKind::Bool);
+                }
+                else if (auto ita = lower_ctx_.array_vars.find(name);
+                         ita != lower_ctx_.array_vars.end())
+                {
+                    // Array-sort bindings are abstracted like scalars so the
+                    // preservation proof covers every reachable array state
+                    // (issue #278): the invariant facts constrain the element
+                    // content only through the index-bounds obligations, and
+                    // select/store give exact read-over-write semantics.
+                    ita->second = fresh_array_symbol(name);
                 }
             }
 
@@ -3178,6 +3607,11 @@ class Verifier
                 {
                     post_body_bool.insert_or_assign(name, itb->second);
                 }
+                else if (auto ita = lower_ctx_.array_vars.find(name);
+                         ita != lower_ctx_.array_vars.end())
+                {
+                    post_body_array.insert_or_assign(name, ita->second);
+                }
             }
 
             pop_scope();
@@ -3207,6 +3641,10 @@ class Verifier
             else if (auto itb = post_body_bool.find(name); itb != post_body_bool.end())
             {
                 lower_ctx_.bool_vars.insert_or_assign(name, itb->second);
+            }
+            else if (auto ita = post_body_array.find(name); ita != post_body_array.end())
+            {
+                lower_ctx_.array_vars.insert_or_assign(name, ita->second);
             }
         }
 
@@ -3260,6 +3698,7 @@ class Verifier
         // condition assumption to filter).
         std::vector<std::unordered_map<std::string_view, z3::expr>> post_int(s.arms.size());
         std::vector<std::unordered_map<std::string_view, z3::expr>> post_bool(s.arms.size());
+        std::vector<std::unordered_map<std::string_view, z3::expr>> post_array(s.arms.size());
         std::vector<z3::expr> retained_facts;
 
         for (std::size_t arm_idx = 0; arm_idx < s.arms.size(); ++arm_idx)
@@ -3276,6 +3715,7 @@ class Verifier
             }
             post_int[arm_idx] = lower_ctx_.int_vars;
             post_bool[arm_idx] = lower_ctx_.bool_vars;
+            post_array[arm_idx] = lower_ctx_.array_vars;
             for (std::size_t i = arm_facts_start; i < facts_.size(); ++i)
             {
                 retained_facts.push_back(facts_[i]);
@@ -3291,7 +3731,7 @@ class Verifier
         {
             facts_.push_back(fact);
         }
-        join_branch_states(pre_int, pre_bool, post_int, post_bool, assigned_names,
+        join_branch_states(pre_int, pre_bool, post_int, post_bool, post_array, assigned_names,
                            shadowed_names);
     }
 
@@ -3327,7 +3767,9 @@ class Verifier
         lower_ctx_.result_bool.reset();
         lower_ctx_.int_vars.clear();
         lower_ctx_.bool_vars.clear();
+        lower_ctx_.array_vars.clear();
         phys_vars_.clear();
+        array_meta_.clear();
         opaque_read_vars_.clear();
         facts_.clear();
         scopes_.clear();

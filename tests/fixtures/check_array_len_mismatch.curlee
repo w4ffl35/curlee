@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #278 expected-fail: the initializer's length must match the declared
+// array length exactly. Expected error:
+//   "array type mismatch in let: expected [Int; 8], got [Int; 4]"
+
+fn main() -> Int {
+  let q: [Int; 8] = [0; 4];
+  return q[0];
+}

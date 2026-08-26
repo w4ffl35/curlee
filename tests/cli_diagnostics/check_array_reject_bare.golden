@@ -1,0 +1,4 @@
+tests/fixtures/check_array_reject_bare.curlee:9:16: error: array 'q' must be indexed (e.g. q[i]) to produce a value
+  |
+  |   let v: Int = q;
+  |                ^

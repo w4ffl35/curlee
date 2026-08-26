@@ -1997,10 +1997,16 @@ int cmd_build(const std::string& entry_path, const std::string& output_path,
     const std::string ld = std::getenv("LD") != nullptr ? std::getenv("LD") : "ld";
     const fs::path rt_dir = runtime_file("rt.h").parent_path();
 
-    // 1. Compile the generated kernel C freestanding.
+    // 1. Compile the generated kernel C freestanding. The kernel is compiled
+    //    with -mno-sse -mno-sse2: the boot stub (crt0.S) never enables SSE
+    //    (CR4.OSFXSR), and the emitted C is pure scalar code that never needs
+    //    it — but gcc would otherwise use SSE instructions for 16-byte
+    //    aligned `{0}` zero-fills of array locals (issue #278), which #UD
+    //    without OSFXSR. Real kernels (e.g. Linux) compile with -mno-sse too.
     {
         const std::string cmd = shell_quote(cc) +
                                 " -ffreestanding -fno-builtin -nostdlib -std=c11 "
+                                "-mno-sse -mno-sse2 "
                                 "-I" +
                                 shell_quote(rt_dir.string()) + " -c " +
                                 shell_quote(kernel_c.string()) + " -o " +
@@ -2016,6 +2022,7 @@ int cmd_build(const std::string& entry_path, const std::string& output_path,
     {
         const std::string cmd = shell_quote(cc) +
                                 " -ffreestanding -fno-builtin -nostdlib -std=c11 "
+                                "-mno-sse -mno-sse2 "
                                 "-I" +
                                 shell_quote(rt_dir.string()) + " -c " + shell_quote(rt_c.string()) +
                                 " -o " + shell_quote(rt_o.string());

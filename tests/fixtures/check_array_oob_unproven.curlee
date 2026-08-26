@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #278 expected-fail: a SYMBOLIC index with no facts bounding it cannot
+// be proven in 0..N-1 — the verifier's per-access bounds obligation fails with
+// a model note (the MVP loop-invariant machinery can discharge this only when
+// the index is actually bounded). Expected error:
+//   "array index out of bounds for 'q' (array length 8)"
+
+fn main(i: Int) -> Int {
+  let q: [Int; 8] = [0; 8];
+  let v: Int = q[i];   // no facts bound i -> cannot prove 0 <= i < 8
+  return v;
+}

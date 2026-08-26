@@ -998,6 +998,24 @@ const curlee::parser::Expr* find_expr_at(const curlee::parser::Expr& expr, std::
             best = find_expr_at(*group->inner, offset, best);
         }
     }
+    else if (const auto* index = std::get_if<curlee::parser::IndexExpr>(&expr.node))
+    {
+        if (index->base)
+        {
+            best = find_expr_at(*index->base, offset, best);
+        }
+        if (index->index)
+        {
+            best = find_expr_at(*index->index, offset, best);
+        }
+    }
+    else if (const auto* arr = std::get_if<curlee::parser::ArrayLiteralExpr>(&expr.node))
+    {
+        if (arr->value)
+        {
+            best = find_expr_at(*arr->value, offset, best);
+        }
+    }
 
     return best;
 }
@@ -1086,6 +1104,20 @@ const curlee::parser::Expr* find_call_expr_at(const curlee::parser::Expr& expr, 
             best = find_call_expr_at(*group->inner, offset, best);
         }
     }
+    else if (const auto* index = std::get_if<curlee::parser::IndexExpr>(&expr.node))
+    {
+        if (index->index)
+        {
+            best = find_call_expr_at(*index->index, offset, best);
+        }
+    }
+    else if (const auto* arr = std::get_if<curlee::parser::ArrayLiteralExpr>(&expr.node))
+    {
+        if (arr->value)
+        {
+            best = find_call_expr_at(*arr->value, offset, best);
+        }
+    }
 
     return best;
 }
@@ -1107,6 +1139,11 @@ void find_call_exprs_in_stmt(const curlee::parser::Stmt& stmt, std::size_t offse
             }
             else if constexpr (std::is_same_v<T, curlee::parser::AssignStmt>)
             {
+                best = find_call_expr_at(node.value, offset, best);
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::IndexAssignStmt>)
+            {
+                best = find_call_expr_at(node.index, offset, best);
                 best = find_call_expr_at(node.value, offset, best);
             }
             else if constexpr (std::is_same_v<T, curlee::parser::ReturnStmt>)
@@ -1208,6 +1245,11 @@ void find_exprs_in_stmt(const curlee::parser::Stmt& stmt, std::size_t offset,
             }
             else if constexpr (std::is_same_v<T, curlee::parser::AssignStmt>)
             {
+                best = find_expr_at(node.value, offset, best);
+            }
+            else if constexpr (std::is_same_v<T, curlee::parser::IndexAssignStmt>)
+            {
+                best = find_expr_at(node.index, offset, best);
                 best = find_expr_at(node.value, offset, best);
             }
             else if constexpr (std::is_same_v<T, curlee::parser::ReturnStmt>)

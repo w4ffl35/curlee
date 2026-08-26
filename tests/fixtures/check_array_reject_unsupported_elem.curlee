@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #278 expected-fail: array element types are restricted to the
+// freestanding storable core types (Int/U8/U16/U32/U64); Bool arrays are out
+// of the MVP scope. Expected error:
+//   "array element type 'Bool' is not supported (expected Int, U8, U16, U32 or
+//    U64)"
+
+fn main() -> Int {
+  let q: [Bool; 8] = [true; 8];
+  return 0;
+}

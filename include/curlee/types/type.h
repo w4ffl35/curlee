@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -35,6 +36,10 @@ enum class TypeKind
 
     // Physical memory pointer type (element kind stored in element_kind/element_name).
     Phys,
+
+    // Fixed-size array type `[T; N]` (element kind stored in element_kind/
+    // element_name, length in array_len).
+    Array,
 };
 
 /**
@@ -51,6 +56,9 @@ struct Type
     // For Vec<T>, this stores the element type kind/name.
     std::optional<TypeKind> element_kind = std::nullopt;
     std::string_view element_name = {};
+    // For the fixed-size array type `[T; N]`, the compile-time length.
+    // Unset for all other kinds.
+    std::optional<std::uint64_t> array_len = std::nullopt;
 };
 
 [[nodiscard]] constexpr bool operator==(Type a, Type b)
@@ -74,6 +82,11 @@ struct Type
     if (a.kind == TypeKind::Phys)
     {
         return a.element_kind == b.element_kind && a.element_name == b.element_name;
+    }
+    if (a.kind == TypeKind::Array)
+    {
+        return a.element_kind == b.element_kind && a.element_name == b.element_name &&
+               a.array_len == b.array_len;
     }
     return true;
 }
@@ -135,6 +148,8 @@ struct CapabilityType
         return "U64";
     case TypeKind::Phys:
         return "Phys";
+    case TypeKind::Array:
+        return "Array";
     }
     return "<unknown>";
 }
@@ -159,6 +174,36 @@ struct CapabilityType
         return "Phys";
     }
     return to_string(t.kind);
+}
+
+/**
+ * @brief Human-readable display string for a Type, including array lengths
+ * (`[Int; 8]`). Unlike the constexpr `to_string`, this can format the numeric
+ * array length, so diagnostics use it when an array type may be involved.
+ */
+[[nodiscard]] inline std::string to_display_string(Type t)
+{
+    if (t.kind == TypeKind::Array)
+    {
+        const std::string elem = t.element_name.empty()
+                                     ? std::string(to_string(t.element_kind.value_or(TypeKind::Int)))
+                                     : std::string(t.element_name);
+        const std::string len =
+            t.array_len.has_value() ? std::to_string(*t.array_len) : std::string("<unknown>");
+        return "[" + elem + "; " + len + "]";
+    }
+    return std::string(to_string(t));
+}
+
+/**
+ * @brief True if the kind is a supported fixed-size array element kind:
+ * Int, U8, U16, U32 or U64 (the freestanding storable core types; issue #278).
+ * Bool arrays are out of the MVP scope.
+ */
+[[nodiscard]] constexpr bool is_array_element_kind(TypeKind kind)
+{
+    return kind == TypeKind::Int || kind == TypeKind::U8 || kind == TypeKind::U16 ||
+           kind == TypeKind::U32 || kind == TypeKind::U64;
 }
 
 /** @brief Resolve a core type name ("Int", "Bool", "String", "Unit") to a Type. */

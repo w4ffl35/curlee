@@ -45,10 +45,14 @@ file(WRITE "${_out_file}" "${_c_source}")
 
 # 2. Compile the emitted C freestanding under strict C11. `-pedantic` turns
 #    GNU extensions (empty unions, empty structs, void members) into errors so
-#    any extension-dependent emission is a hard failure.
+#    any extension-dependent emission is a hard failure. -mno-sse -mno-sse2
+#    mirror the `curlee build --link` flags: the boot stub never enables SSE
+#    (CR4.OSFXSR), and the emitted scalar C never needs it — but gcc would
+#    otherwise emit SSE for 16-byte-aligned `{0}` array zero-fills (issue
+#    #278), which would #UD at boot.
 execute_process(
   COMMAND "${curlee_cc}" -ffreestanding -fno-builtin -nostdlib -std=c11
-    -Wall -Werror -pedantic -c "${_out_file}" -o "${_out_file}.o"
+    -mno-sse -mno-sse2 -Wall -Werror -pedantic -c "${_out_file}" -o "${_out_file}.o"
   RESULT_VARIABLE _cc_rc
   OUTPUT_VARIABLE _cc_out
   ERROR_VARIABLE _cc_err

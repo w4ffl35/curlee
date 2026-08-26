@@ -132,6 +132,18 @@ run_smoke_for_preset() {
   expect_ok "check: check_u64_widen.curlee" "$bin" check tests/fixtures/check_u64_widen.curlee
   expect_fail "check: check_u64_widen_oob.curlee" "$bin" check tests/fixtures/check_u64_widen_oob.curlee
 
+  # Issue #278: fixed-size mutable arrays ([T; N] + indexed access) for ring
+  # buffers / driver state. The passing fixture covers acceptance #1-#4 (the
+  # fb.c tool_queue ring pattern, virtio_net.c rx_buf_state bookkeeping, bounded
+  # symbolic indices via loop invariants, read-over-write coherence); the
+  # failing fixture proves a constant OOB index is rejected, never silently
+  # compiled to C. Freestanding-only: `check` + the codegen fixture (array)
+  # below in codegen_tests; `run` rejects arrays (see run_array_vm_reject in
+  # the diagnostics goldens).
+  expect_ok "check: check_array_ring.curlee" "$bin" check tests/fixtures/check_array_ring.curlee
+  expect_fail "check: check_array_oob_const.curlee" "$bin" check tests/fixtures/check_array_oob_const.curlee
+  expect_fail "check: check_array_oob_unproven.curlee" "$bin" check tests/fixtures/check_array_oob_unproven.curlee
+
   # Examples (also expected success).
   expect_ok "check: mvp_run_int" "$bin" check examples/mvp_run_int.curlee
   expect_ok "run: mvp_run_control_flow" "$bin" run examples/mvp_run_control_flow.curlee

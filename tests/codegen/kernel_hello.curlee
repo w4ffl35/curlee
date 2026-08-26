@@ -1,12 +1,33 @@
 // Minimal bootable kernel fixture for `curlee build --link` (issue #256).
 // Uses the runtime's weak curlee_putc so the image links without a host
 // driver, then halts via curlee_halt after main returns.
+//
+// Extended with the fixed-size mutable array feature (issue #278): the two
+// characters 'H' and 'i' are pushed into a `[Int; 4]` ring buffer and popped
+// in FIFO order before being written — so the qemu boot smoke exercises the
+// array codegen (storage, indexed write, indexed read) in a real bootable
+// kernel, exactly the fb.c tool_queue pattern.
 extern fn curlee_putc(c: Int) -> Unit;
 extern fn curlee_halt() -> Unit;
 
 fn main() -> Unit {
-  curlee_putc(72); // 'H'
-  curlee_putc(105); // 'i'
+  let q: [Int; 4] = [0; 4]; // ring storage (tool_queue-style)
+  let head: Int = 0;
+  let count: Int = 0;
+  // push 'H' at slot 0
+  head = (head + 1) % 4;
+  count = count + 1;
+  q[0] = 72;
+  // push 'i' at slot 1
+  head = (head + 1) % 4;
+  count = count + 1;
+  q[1] = 105;
+  // pop FIFO: consumer index = (head + slots - count) % slots
+  let i0: Int = (head + 4 - count) % 4;
+  curlee_putc(q[i0]);
+  count = count - 1;
+  let i1: Int = (head + 4 - count) % 4;
+  curlee_putc(q[i1]);
   curlee_halt();
   return;
 }

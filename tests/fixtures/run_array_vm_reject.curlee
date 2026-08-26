@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #278: `run` (VM bytecode) must reject fixed-size arrays — they are
+// freestanding-only in the MVP (the VM has no array storage and no lowering
+// for IndexExpr / ArrayLiteralExpr). Expected error:
+//   "arrays are freestanding-only and not supported in the VM"
+
+fn main() -> Int {
+  let q: [Int; 8] = [0; 8];
+  q[0] = 42;
+  return q[0];
+}

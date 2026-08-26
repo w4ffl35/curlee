@@ -392,6 +392,155 @@ int main()
     }
 
     {
+        // Fixed-size arrays (issue #278): `let q: [T; N] = [v; N];` with
+        // indexed element reads/writes type-checks (acceptance #1).
+        (void)type_check_should_succeed(
+            "fn main() -> Int { let q: [Int; 8] = [0; 8]; q[0] = 42; "
+            "let v: Int = q[0]; return v; }",
+            "array let + indexed read/write type checks");
+        // The Int-LITERAL -> unsigned element adaptation on the repeat
+        // initializer (`[0; 16]` into a [U8; 16] binding) and on element
+        // writes (`rx[i] = 2`) mirrors the port_outb rule (acceptance #4).
+        (void)type_check_should_succeed(
+            "fn main() -> Int { let rx: [U8; 16] = [0; 16]; rx[0] = 2; "
+            "let s: U8 = rx[0]; return s + 0; }",
+            "U8 array with Int-literal adaptation type checks");
+        // U64 elements are supported; reads produce the U64 element type.
+        (void)type_check_should_succeed(
+            "fn main() -> Int { let u: [U64; 4] = [0; 4]; u[0] = 5; "
+            "let v: U64 = u[0]; return 0; }",
+            "U64 array element read type checks");
+    }
+
+    {
+        // Arrays: a constant out-of-bounds index is rejected on both reads and
+        // writes (acceptance #2: no silent OOB).
+        const auto diags = type_check_should_fail(
+            "fn main() -> Int { let q: [Int; 8] = [0; 8]; q[8] = 7; let v: Int = q[8]; "
+            "return v; }",
+            "constant OOB array index");
+        if (!has_diag_containing(diags, "array index out of bounds"))
+        {
+            fail("expected constant OOB index diagnostic");
+        }
+    }
+
+    {
+        // Arrays: a constant negative index is always out of bounds.
+        const auto diags = type_check_should_fail(
+            "fn main() -> Int { let q: [Int; 8] = [0; 8]; let v: Int = q[-1]; return v; }",
+            "constant negative array index");
+        if (!has_diag_containing(diags, "array index out of bounds: constant index -1"))
+        {
+            fail("expected constant negative index diagnostic");
+        }
+    }
+
+    {
+        // Arrays: the initializer length must match the declared length.
+        const auto diags = type_check_should_fail(
+            "fn main() -> Int { let q: [Int; 8] = [0; 4]; return q[0]; }",
+            "array length mismatch");
+        if (!has_diag_containing(diags, "array type mismatch in let: expected [Int; 8], got [Int; 4]"))
+        {
+            fail("expected array length mismatch diagnostic");
+        }
+    }
+
+    {
+        // Arrays: an element write must match the element type (no implicit
+        // Bool -> Int coercion).
+        const auto diags = type_check_should_fail(
+            "fn main() -> Int { let q: [Int; 8] = [0; 8]; q[0] = true; return q[0]; }",
+            "array element write mismatch");
+        if (!has_diag_containing(diags, "array element type mismatch in assignment"))
+        {
+            fail("expected array element write mismatch diagnostic");
+        }
+    }
+
+    {
+        // Arrays: a bare array name is not a first-class value; it must be
+        // indexed to produce an element.
+        const auto diags = type_check_should_fail(
+            "fn main() -> Int { let q: [Int; 8] = [0; 8]; let v: Int = q; return v; }",
+            "bare array name as value");
+        if (!has_diag_containing(diags, "must be indexed"))
+        {
+            fail("expected bare-array-value diagnostic");
+        }
+    }
+
+    {
+        // Arrays: multi-dimensional indexing is out of the MVP scope.
+        const auto diags = type_check_should_fail(
+            "fn main() -> Int { let q: [Int; 8] = [0; 8]; let v: Int = q[0][1]; return v; }",
+            "multi-dimensional array index");
+        if (!has_diag_containing(diags, "multi-dimensional arrays are not supported"))
+        {
+            fail("expected multi-dimensional index diagnostic");
+        }
+    }
+
+    {
+        // Arrays: only an array binding can be indexed.
+        const auto diags = type_check_should_fail(
+            "fn main() -> Int { let x: Int = 3; let v: Int = x[0]; return v; }",
+            "indexing a non-array value");
+        if (!has_diag_containing(diags, "cannot index non-array value"))
+        {
+            fail("expected non-array index diagnostic");
+        }
+    }
+
+    {
+        // Arrays: struct fields, parameters, return types and ghost snapshots
+        // are all rejected (freestanding-local `let` bindings only in the MVP).
+        const auto field_diags = type_check_should_fail(
+            "struct S { q: [Int; 8]; } fn main() -> Int { return 0; }",
+            "array struct field");
+        if (!has_diag_containing(field_diags, "not as struct fields"))
+        {
+            fail("expected array struct-field diagnostic");
+        }
+        const auto param_diags = type_check_should_fail(
+            "fn f(q: [Int; 8]) -> Int { return 0; } fn main() -> Int { return 0; }",
+            "array parameter");
+        if (!has_diag_containing(param_diags, "not as parameters"))
+        {
+            fail("expected array parameter diagnostic");
+        }
+        const auto return_diags = type_check_should_fail(
+            "fn f() -> [Int; 8] { let q: [Int; 8] = [0; 8]; return q; } "
+            "fn main() -> Int { return 0; }",
+            "array return type");
+        if (!has_diag_containing(return_diags, "not as return types"))
+        {
+            fail("expected array return-type diagnostic");
+        }
+        const auto ghost_diags = type_check_should_fail(
+            "fn main() -> Int { let q: [Int; 8] = [0; 8]; ghost let snap: [Int; 8] = q; "
+            "return 0; }",
+            "array ghost snapshot");
+        if (!has_diag_containing(ghost_diags, "not as ghost snapshots"))
+        {
+            fail("expected array ghost-snapshot diagnostic");
+        }
+    }
+
+    {
+        // Arrays: unsupported element kinds (Bool is not a storable core
+        // element type in the MVP) are rejected with a precise diagnostic.
+        const auto diags = type_check_should_fail(
+            "fn main() -> Int { let q: [Bool; 8] = [true; 8]; return 0; }",
+            "unsupported array element kind");
+        if (!has_diag_containing(diags, "array element type 'Bool' is not supported"))
+        {
+            fail("expected unsupported array element kind diagnostic");
+        }
+    }
+
+    {
         // Struct literal: extra/unknown field should be rejected with a precise span.
         const std::string source = "struct Point { x: Int; y: Int; } fn main() -> Int { let p: "
                                    "Point = Point{ x: 1, y: 2, z: 3 }; return 0; }";
@@ -1872,6 +2021,50 @@ int main()
         if (!(phys_u32 == phys_u32_same) || (phys_u32 == phys_u8))
         {
             fail("expected Phys equality to respect element kind");
+        }
+    }
+
+    // Fixed-size arrays (issue #278): TypeKind stringification, the display
+    // string with the numeric length, array equality (length-sensitive) and
+    // the element-kind gate.
+    {
+        if (to_string(TypeKind::Array) != "Array")
+        {
+            fail("expected Array TypeKind stringification to work");
+        }
+        const Type arr{.kind = TypeKind::Array,
+                       .element_kind = TypeKind::Int,
+                       .element_name = "Int",
+                       .array_len = 8};
+        if (to_display_string(arr) != "[Int; 8]")
+        {
+            fail("expected array display string '[Int; 8]'");
+        }
+        const Type arr_u8{.kind = TypeKind::Array,
+                          .element_kind = TypeKind::U8,
+                          .element_name = "U8",
+                          .array_len = 16};
+        if (to_display_string(arr_u8) != "[U8; 16]")
+        {
+            fail("expected array display string '[U8; 16]'");
+        }
+        // Equality respects the length: [Int; 8] != [Int; 4].
+        const Type arr_short{.kind = TypeKind::Array,
+                             .element_kind = TypeKind::Int,
+                             .element_name = "Int",
+                             .array_len = 4};
+        if (arr == arr_short || !(arr == Type{.kind = TypeKind::Array,
+                                              .element_kind = TypeKind::Int,
+                                              .element_name = "Int",
+                                              .array_len = 8}))
+        {
+            fail("expected array equality to respect the length");
+        }
+        if (!is_array_element_kind(TypeKind::Int) || !is_array_element_kind(TypeKind::U8) ||
+            !is_array_element_kind(TypeKind::U16) || !is_array_element_kind(TypeKind::U32) ||
+            !is_array_element_kind(TypeKind::U64) || is_array_element_kind(TypeKind::Bool))
+        {
+            fail("expected is_array_element_kind to be exact");
         }
     }
 

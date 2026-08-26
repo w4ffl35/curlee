@@ -18,6 +18,7 @@ namespace
 
 using curlee::diag::Diagnostic;
 using curlee::diag::Severity;
+using curlee::parser::ArrayLiteralExpr;
 using curlee::parser::AssignStmt;
 using curlee::parser::BinaryExpr;
 using curlee::parser::BlockStmt;
@@ -28,6 +29,8 @@ using curlee::parser::Function;
 using curlee::parser::GroupExpr;
 using curlee::parser::GhostLetStmt;
 using curlee::parser::IfStmt;
+using curlee::parser::IndexAssignStmt;
+using curlee::parser::IndexExpr;
 using curlee::parser::LetStmt;
 using curlee::parser::MatchStmt;
 using curlee::parser::MemberExpr;
@@ -181,6 +184,20 @@ static U64WidenCheck u64_widening_from_int(const Type& declared, const Type& ini
         return U64WidenCheck{.ok = false, .is_literal = true};
     }
     return U64WidenCheck{.ok = true};
+}
+
+// True if the expression is a fixed-size array repeat literal `[v; N]` whose
+// repeat value is a plain Int literal (parentheses unwrapped), e.g. `[0; 8]`.
+// Used by the Int-literal -> unsigned element adaptation for array lets
+// (mirrors the port_outb/Phys.write unsigned-literal rule, issue #278).
+static bool is_array_repeat_int_literal(const Expr& e)
+{
+    const auto* arr = std::get_if<curlee::parser::ArrayLiteralExpr>(&e.node);
+    if (arr == nullptr || arr->value == nullptr)
+    {
+        return false;
+    }
+    return plain_int_literal(*arr->value) != nullptr;
 }
 
 // True if a lexeme is a plain compile-time integer literal: decimal digits,
@@ -383,6 +400,12 @@ class Checker
             StructInfo info;
             for (const auto& field : s.fields)
             {
+                if (field.type.is_array())
+                {
+                    error_at(field.type.span, "array types are only supported as local 'let' "
+                                              "bindings in the MVP (not as struct fields)");
+                    continue;
+                }
                 auto ft = type_from_ast(field.type);
                 if (!ft.has_value())
                 {
@@ -407,6 +430,13 @@ class Checker
                 EnumInfo::VariantInfo vi;
                 if (v.payload.has_value())
                 {
+                    if (v.payload->is_array())
+                    {
+                        error_at(v.payload->span, "array types are only supported as local "
+                                                  "'let' bindings in the MVP (not as enum "
+                                                  "variant payloads)");
+                        continue;
+                    }
                     auto pt = type_from_ast(*v.payload);
                     if (pt.has_value())
                     {
@@ -518,6 +548,30 @@ class Checker
 
     [[nodiscard]] std::optional<Type> type_from_ast(const curlee::parser::TypeName& name)
     {
+        // Fixed-size array type `[T; N]` (issue #278): T must be a storable
+        // core element type and N a compile-time positive literal.
+        if (name.is_array())
+        {
+            const auto elem = core_type_from_name(name.name);
+            if (!elem.has_value() || !is_array_element_kind(elem->kind))
+            {
+                error_at(name.span, "array element type '" + std::string(name.name) +
+                                        "' is not supported (expected Int, U8, U16, U32 or U64)");
+                return std::nullopt;
+            }
+            const auto len = parse_int_literal_value(*name.array_len);
+            if (!len.has_value() || *len == 0)
+            {
+                error_at(name.span, "array length must be a positive integer literal");
+                return std::nullopt;
+            }
+            return Type{.kind = TypeKind::Array,
+                        .name = {},
+                        .element_kind = elem->kind,
+                        .element_name = name.name,
+                        .array_len = *len};
+        }
+
         // MVP: capability types are introduced by the explicit `cap <name>` syntax.
         if (name.is_capability)
         {
@@ -571,6 +625,15 @@ class Checker
             return std::nullopt;
         }
 
+        // Arrays are freestanding-local bindings only in the MVP: they cannot
+        // cross function boundaries (no slices/borrows yet; issue #278).
+        if (f.return_type->is_array())
+        {
+            error_at(f.return_type->span, "array types are only supported as local 'let' "
+                                          "bindings in the MVP (not as return types)");
+            return std::nullopt;
+        }
+
         auto ret = type_from_ast(*f.return_type);
         if (!ret.has_value())
         {
@@ -582,6 +645,12 @@ class Checker
 
         for (const auto& p : f.params)
         {
+            if (p.type.is_array())
+            {
+                error_at(p.type.span, "array types are only supported as local 'let' "
+                                      "bindings in the MVP (not as parameters)");
+                return std::nullopt;
+            }
             auto pt = type_from_ast(p.type);
             if (!pt.has_value())
             {
@@ -651,6 +720,32 @@ class Checker
 
         if (*init != *declared)
         {
+            // Fixed-size arrays: the length must match exactly and the element
+            // type must match, with one adaptation — an Int LITERAL repeat
+            // value (`[0; 16]`) adapts to an unsigned element width (U8/U16/
+            // U32/U64), mirroring the port_outb / Phys.write unsigned-literal
+            // rule. This is what makes `let rx: [U8; 16] = [0; 16];` (the
+            // virtio_net.c rx_buf_state pattern) expressible.
+            if (declared->kind == TypeKind::Array || init->kind == TypeKind::Array)
+            {
+                const bool len_ok = init->kind == TypeKind::Array &&
+                                    declared->array_len == init->array_len;
+                const bool elem_ok = init->kind == TypeKind::Array &&
+                                     *declared->element_kind == *init->element_kind;
+                const bool literal_adapt =
+                    init->kind == TypeKind::Array &&
+                    init->element_kind == TypeKind::Int &&
+                    is_phys_element_kind(*declared->element_kind) &&
+                    is_array_repeat_int_literal(s.value);
+                if (!len_ok || (!elem_ok && !literal_adapt))
+                {
+                    error_at(stmt_span, "array type mismatch in let: expected " +
+                                            to_display_string(*declared) + ", got " +
+                                            to_display_string(*init));
+                }
+                return;
+            }
+
             const auto widen = u64_widening_from_int(*declared, *init, s.value);
             if (widen.ok)
             {
@@ -679,6 +774,18 @@ class Checker
         // when omitted) and the initializer is checked for a matching type. The
         // binding is verification-only (the emitter rejects it in emitted
         // bodies), but type errors in ghost bindings must still be caught here.
+        //
+        // Fixed-size arrays are freestanding-local `let` bindings only in the
+        // MVP (issue #278): a ghost snapshot of an array is meaningless because
+        // predicates cannot reference array elements, so reject it here rather
+        // than let a phantom array binding leak into contract checking.
+        if (s.type.has_value() && s.type->is_array())
+        {
+            error_at(stmt_span, "array types are only supported as local 'let' "
+                                "bindings in the MVP (not as ghost snapshots)");
+            return;
+        }
+
         auto init = check_expr(s.value);
         if (!init.has_value())
         {
@@ -760,6 +867,103 @@ class Checker
             error_at(stmt_span, "type mismatch in assignment: expected " +
                                     std::string(to_string(target->first)) + ", got " +
                                     std::string(to_string(*value_t)));
+        }
+    }
+
+    // Constant-index bounds gate for `arr[i]` reads and `arr[i] = v` writes:
+    // an index that is a compile-time literal outside `0..N-1` is rejected
+    // here with a precise diagnostic. Symbolic indices are left to the
+    // verifier's per-access bounds obligation (which also covers constants, as
+    // defense in depth).
+    void check_constant_index_bounds(const Type& array_t, const Expr& index, Span access_span)
+    {
+        if (array_t.kind != TypeKind::Array || !array_t.array_len.has_value())
+        {
+            return;
+        }
+        const std::uint64_t len = *array_t.array_len;
+
+        if (const auto* lit = plain_int_literal(index); lit != nullptr)
+        {
+            const auto magnitude = parse_int_literal_value(lit->lexeme);
+            if (magnitude.has_value() && *magnitude >= len)
+            {
+                error_at(index.span, "array index out of bounds: constant index " +
+                                         std::to_string(*magnitude) + " is not in 0.." +
+                                         std::to_string(len - 1) + " (array length " +
+                                         std::to_string(len) + ")");
+            }
+            return;
+        }
+        // A negated literal (`q[-1]`) is a constant negative index: always
+        // out of bounds.
+        if (is_negated_int_literal_expr(index))
+        {
+            const auto* un = std::get_if<curlee::parser::UnaryExpr>(&index.node);
+            const auto magnitude =
+                un != nullptr && un->rhs != nullptr
+                    ? parse_int_literal_value(plain_int_literal(*un->rhs)->lexeme)
+                    : std::optional<std::uint64_t>{};
+            if (magnitude.has_value())
+            {
+                error_at(index.span, "array index out of bounds: constant index -" +
+                                         std::to_string(*magnitude) + " is not in 0.." +
+                                         std::to_string(len - 1) + " (array length " +
+                                         std::to_string(len) + ")");
+            }
+        }
+        (void)access_span;
+    }
+
+    void check_stmt_node(const IndexAssignStmt& s, Span stmt_span, Type)
+    {
+        // Element-write target must be an existing, assignable array binding.
+        const auto target = lookup_assignable_var(s.name);
+        if (!target.has_value())
+        {
+            error_at(stmt_span,
+                     "cannot assign to unknown name '" + std::string(s.name) + "'");
+            return;
+        }
+        if (!target->second)
+        {
+            error_at(stmt_span,
+                     "cannot assign to '" + std::string(s.name) +
+                         "': parameters and ghost snapshots are read-only "
+                         "(assignment targets must be local 'let' bindings)");
+            return;
+        }
+        if (target->first.kind != TypeKind::Array)
+        {
+            error_at(stmt_span, "cannot index non-array binding '" + std::string(s.name) + "'");
+            return;
+        }
+
+        const auto index_t = check_expr(s.index);
+        if (index_t.has_value() && index_t->kind != TypeKind::Int)
+        {
+            error_at(s.index.span, "array index must be an Int expression");
+        }
+        check_constant_index_bounds(target->first, s.index, stmt_span);
+
+        const auto value_t = check_expr(s.value);
+        if (!value_t.has_value())
+        {
+            return;
+        }
+
+        // The value must match the element type, with the unsigned-literal
+        // adaptation (`rx[i] = 2` on a [U8; N] array, mirroring port_outb).
+        const Type elem_type{.kind = *target->first.element_kind,
+                             .name = target->first.element_name};
+        const bool int_literal_for_unsigned =
+            value_t->kind == TypeKind::Int && is_phys_element_kind(elem_type.kind);
+        if (*value_t != elem_type && !int_literal_for_unsigned)
+        {
+            error_at(stmt_span, "array element type mismatch in assignment to '" +
+                                    std::string(s.name) + "': expected " +
+                                    to_display_string(elem_type) + ", got " +
+                                    to_display_string(*value_t));
         }
     }
 
@@ -1024,6 +1228,16 @@ class Checker
     {
         if (const auto v = lookup_var(e.name); v.has_value())
         {
+            // Arrays are not first-class values in the MVP: a bare array name
+            // must be indexed (`q[i]`). Element writes go through
+            // IndexAssignStmt, which resolves the binding directly.
+            if (v->kind == TypeKind::Array)
+            {
+                error_at(span, "array '" + std::string(e.name) +
+                                   "' must be indexed (e.g. " + std::string(e.name) +
+                                   "[i]) to produce a value");
+                return std::nullopt;
+            }
             return *v;
         }
 
@@ -1036,6 +1250,84 @@ class Checker
 
         error_at(span, "unknown name '" + std::string(e.name) + "'");
         return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<Type> check_expr_node(const IndexExpr& e, Span span)
+    {
+        if (e.base == nullptr || e.index == nullptr)
+        {
+            error_at(span, "invalid array index expression");
+            return std::nullopt;
+        }
+
+        // The base must be a plain array binding (GroupExpr unwrapped); the
+        // MVP has no arrays as first-class values and no multi-dimensional
+        // indexing (`q[i][j]` is out of scope).
+        const Expr* base = e.base.get();
+        while (const auto* g = std::get_if<GroupExpr>(&base->node))
+        {
+            base = g->inner.get();
+        }
+        const auto* base_name = std::get_if<NameExpr>(&base->node);
+        if (base_name == nullptr)
+        {
+            error_at(span, "only array bindings can be indexed in the MVP "
+                           "(multi-dimensional arrays are not supported)");
+            return std::nullopt;
+        }
+        const auto base_t = lookup_var(base_name->name);
+        if (!base_t.has_value())
+        {
+            error_at(span, "unknown name '" + std::string(base_name->name) + "'");
+            return std::nullopt;
+        }
+        if (base_t->kind != TypeKind::Array)
+        {
+            error_at(span, "cannot index non-array value '" + std::string(base_name->name) + "'");
+            return std::nullopt;
+        }
+
+        const auto index_t = check_expr(*e.index);
+        if (index_t.has_value() && index_t->kind != TypeKind::Int)
+        {
+            error_at(e.index->span, "array index must be an Int expression");
+            return std::nullopt;
+        }
+        check_constant_index_bounds(*base_t, *e.index, span);
+
+        // The element read has the element's type (Int or an unsigned width).
+        return Type{.kind = *base_t->element_kind, .name = base_t->element_name};
+    }
+
+    [[nodiscard]] std::optional<Type> check_expr_node(const ArrayLiteralExpr& e, Span span)
+    {
+        if (e.value == nullptr)
+        {
+            error_at(span, "invalid array literal");
+            return std::nullopt;
+        }
+        const auto value_t = check_expr(*e.value);
+        if (!value_t.has_value())
+        {
+            return std::nullopt;
+        }
+        if (!is_array_element_kind(value_t->kind))
+        {
+            error_at(span, "array literal element type " +
+                               std::string(to_string(*value_t)) +
+                               " is not supported (expected Int, U8, U16, U32 or U64)");
+            return std::nullopt;
+        }
+        const auto count = parse_int_literal_value(e.count_lexeme);
+        if (!count.has_value() || *count == 0)
+        {
+            error_at(span, "array literal count must be a positive integer literal");
+            return std::nullopt;
+        }
+        return Type{.kind = TypeKind::Array,
+                    .element_kind = value_t->kind,
+                    .element_name = to_string(*value_t),
+                    .array_len = *count};
     }
 
     [[nodiscard]] std::optional<Type> check_expr_node(const curlee::parser::UnaryExpr& e, Span span)

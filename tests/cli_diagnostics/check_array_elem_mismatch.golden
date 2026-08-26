@@ -1,0 +1,4 @@
+tests/fixtures/check_array_elem_mismatch.curlee:10:3: error: array element type mismatch in assignment to 'q': expected Int, got Bool
+  |
+  |   q[0] = true;
+  |   ^^^^^^^^^^^^

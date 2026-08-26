@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #278 expected-fail: an element write must match the element type (with
+// the single Int-LITERAL -> unsigned adaptation); a Bool value into an Int
+// array is rejected. Expected error:
+//   "array element type mismatch in assignment to 'q': expected Int, got Bool"
+
+fn main() -> Int {
+  let q: [Int; 8] = [0; 8];
+  q[0] = true;
+  return q[0];
+}

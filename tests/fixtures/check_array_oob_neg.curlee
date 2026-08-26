@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #278 expected-fail: a constant NEGATIVE index is always out of bounds
+// (the type checker's constant gate rejects it before the verifier runs).
+// Expected error:
+//   "array index out of bounds: constant index -1 is not in 0..7 (array length 8)"
+
+fn main() -> Int {
+  let q: [Int; 8] = [0; 8];
+  let v: Int = q[-1];
+  return v;
+}

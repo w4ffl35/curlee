@@ -1,0 +1,4 @@
+tests/fixtures/check_array_reject_ghost.curlee:11:13: error: array types are only supported as local 'let' bindings in the MVP (not as ghost snapshots)
+  |
+  |   ghost let snap: [Int; 8] = q;
+  |             ^^^^^^^^^^^^^^^^^^^

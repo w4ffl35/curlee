@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #278 expected-fail: multi-dimensional indexing is out of the MVP
+// scope (a flat [T; N] is the supported form; rx_buf[NET_RX_BUFS][NET_BUF_BYTES]
+// maps to [U8; NET_RX_BUFS * NET_BUF_BYTES]). Expected error:
+//   "only array bindings can be indexed in the MVP (multi-dimensional arrays
+//    are not supported)"
+
+fn main() -> Int {
+  let q: [Int; 8] = [0; 8];
+  let v: Int = q[0][1];
+  return v;
+}

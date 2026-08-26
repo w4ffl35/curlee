@@ -1,0 +1,4 @@
+tests/fixtures/check_array_reject_multi.curlee:11:16: error: only array bindings can be indexed in the MVP (multi-dimensional arrays are not supported)
+  |
+  |   let v: Int = q[0][1];
+  |                ^^^^^^^

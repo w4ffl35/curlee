@@ -1164,7 +1164,7 @@ if(CURLEE_ENABLE_FREESTANDING_SMOKE)
 
   # Each smoke test writes its emitted .c into its own subdirectory to avoid
   # races when ctest runs tests in parallel.
-  foreach(_fixture arith control_flow while_loop struct_fixture enum_match match_stmt phys_mem phys_param empty_union_enum forward_ref unit_empty match_unit_arms mixed_payload_enum phys_param_forward while_loop_unit multi_function extern_fn io_port unsigned_widen u64_widen)
+  foreach(_fixture arith control_flow while_loop struct_fixture enum_match match_stmt phys_mem phys_param empty_union_enum forward_ref unit_empty match_unit_arms mixed_payload_enum phys_param_forward while_loop_unit multi_function extern_fn io_port unsigned_widen u64_widen array)
     set(_fixture_workdir "${CMAKE_BINARY_DIR}/codegen_smoke_${_fixture}")
     file(MAKE_DIRECTORY "${_fixture_workdir}")
     add_test(

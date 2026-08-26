@@ -1,0 +1,4 @@
+tests/fixtures/check_array_reject_unsupported_elem.curlee:10:10: error: array element type 'Bool' is not supported (expected Int, U8, U16, U32 or U64)
+  |
+  |   let q: [Bool; 8] = [true; 8];
+  |          ^^^^^^^^^

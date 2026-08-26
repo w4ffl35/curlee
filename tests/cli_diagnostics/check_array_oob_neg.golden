@@ -1,0 +1,4 @@
+tests/fixtures/check_array_oob_neg.curlee:10:18: error: array index out of bounds: constant index -1 is not in 0..7 (array length 8)
+  |
+  |   let v: Int = q[-1];
+  |                  ^^

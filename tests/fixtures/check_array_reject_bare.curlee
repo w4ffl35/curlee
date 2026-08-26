@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #278 expected-fail: an array is not a first-class value in the MVP; a
+// bare array name must be indexed to produce an element value. Expected error:
+//   "array 'q' must be indexed (e.g. q[i]) to produce a value"
+
+fn main() -> Int {
+  let q: [Int; 8] = [0; 8];
+  let v: Int = q;
+  return v;
+}
