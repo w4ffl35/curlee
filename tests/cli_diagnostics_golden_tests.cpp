@@ -905,6 +905,20 @@ int main(int argc, char** argv)
     const fs::path rel_phys_read_non_phys =
         fs::path("tests/fixtures/check_phys_read_non_phys.curlee");
     const fs::path rel_io_port_ok = fs::path("tests/fixtures/check_io_port_ok.curlee");
+    // Large Int literals in [2^63, 2^64-1] (issue #276 review finding: the
+    // verifier's IntExpr lowering must not corrupt them to negative).
+    const fs::path rel_int_literal_64bit =
+        fs::path("tests/fixtures/check_int_literal_64bit.curlee");
+    const fs::path rel_int_literal_64bit_fail =
+        fs::path("tests/fixtures/check_int_literal_64bit_fail.curlee");
+    // Int literals at or above 2^64 (issue #276 review round 2: hex and
+    // underscore lexemes must not abort the process via an uncaught
+    // z3::exception from the raw lexeme; they must lower to their exact value
+    // like the plain decimal form).
+    const fs::path rel_int_literal_2_64 =
+        fs::path("tests/fixtures/check_int_literal_2_64.curlee");
+    const fs::path rel_int_literal_2_64_fail =
+        fs::path("tests/fixtures/check_int_literal_2_64_fail.curlee");
     const fs::path rel_io_port_outside_unsafe =
         fs::path("tests/fixtures/check_io_port_outside_unsafe.curlee");
     const fs::path rel_io_port_missing_cap =
@@ -1155,6 +1169,44 @@ int main(int argc, char** argv)
         if (!run_stderr_case("check-io-port-runtime-port",
                              {"curlee", "check", rel_io_port_runtime_port.string()},
                              dir / "check_io_port_runtime_port.golden", true))
+        {
+            return 1;
+        }
+
+        // Large Int literals (issue #276 review finding regression guards): the
+        // positive fixture verifies that 2^63 (decimal, hex, underscore) and
+        // -(2^63) lower to their exact values; the negative fixture proves the
+        // verifier still checks (the corrupted-literal bug made this contract
+        // pass vacuously with the sign flipped).
+        if (!run_stderr_case("check-int-literal-64bit",
+                             {"curlee", "check", rel_int_literal_64bit.string()},
+                             dir / "check_int_literal_64bit.golden", true))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("check-int-literal-64bit-fail",
+                             {"curlee", "check", rel_int_literal_64bit_fail.string()},
+                             dir / "check_int_literal_64bit_fail.golden", false))
+        {
+            return 1;
+        }
+
+        // Int literals at or above 2^64 (issue #276 review round 2): the
+        // positive fixture proves hex and underscore forms of 2^64 lower to
+        // their exact value (the old code aborted with an uncaught
+        // z3::exception); the negative fixture proves the verifier still
+        // checks, with a model showing the correct positive numeral.
+        if (!run_stderr_case("check-int-literal-2-64",
+                             {"curlee", "check", rel_int_literal_2_64.string()},
+                             dir / "check_int_literal_2_64.golden", true))
+        {
+            return 1;
+        }
+
+        if (!run_stderr_case("check-int-literal-2-64-fail",
+                             {"curlee", "check", rel_int_literal_2_64_fail.string()},
+                             dir / "check_int_literal_2_64_fail.golden", false))
         {
             return 1;
         }

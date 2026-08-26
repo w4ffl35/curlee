@@ -470,6 +470,60 @@ int main()
             }
         }
 
+        // Large Int literals in [2^63, 2^64-1] must stay positive (issue #276
+        // review finding: routing every literal through parse_port_literal
+        // (uint64) + static_cast<int64_t> flipped them negative). Plain decimal,
+        // hex (PhysAddrLiteral), and underscore forms all lower to the exact
+        // arbitrary-precision numeral.
+        {
+            const std::string kTwo63 = "9223372036854775808";
+            const auto expect_two63 = [&](std::string_view lexeme) {
+                auto e = make_expr(s, curlee::parser::IntExpr{.lexeme = lexeme});
+                auto r = v.lower_expr(e);
+                if (!std::holds_alternative<curlee::verification::ExprValue>(r))
+                {
+                    fail("expected lower_expr(IntExpr " + std::string(lexeme) + ") to succeed");
+                }
+                std::string numeral;
+                const auto& val = std::get<curlee::verification::ExprValue>(r).expr;
+                if (!val.is_numeral(numeral) || numeral != kTwo63)
+                {
+                    fail("lower_expr(IntExpr " + std::string(lexeme) + ") lowered to '" +
+                         (val.is_numeral() ? numeral : std::string("<non-numeral>")) +
+                         "' instead of " + kTwo63);
+                }
+            };
+            expect_two63("9223372036854775808");       // decimal 2^63 (IntLiteral)
+            expect_two63("0x8000000000000000");        // hex 2^63 (PhysAddrLiteral form)
+            expect_two63("9_223_372_036_854_775_808"); // underscore form 2^63
+
+            // Unary minus over the 2^63 literal must be exactly -(2^63): the
+            // IntExpr child lowers positive and the unary op negates.
+            auto e_neg = make_expr(
+                s, curlee::parser::UnaryExpr{
+                       .op = TokenKind::Minus,
+                       .rhs = make_expr_ptr(
+                           make_expr(s, curlee::parser::IntExpr{.lexeme = "9223372036854775808"}))});
+            auto r_neg = v.lower_expr(e_neg);
+            if (!std::holds_alternative<curlee::verification::ExprValue>(r_neg))
+            {
+                fail("expected lower_expr(unary - 2^63) to succeed");
+            }
+            std::string neg_numeral;
+            // Unary minus builds a Z3 app term `(- x)`; simplify it to the
+            // concrete numeral before comparing.
+            const auto& neg_val = std::get<curlee::verification::ExprValue>(r_neg).expr;
+            const z3::expr neg_simplified = neg_val.simplify();
+            if (!neg_simplified.is_numeral(neg_numeral) ||
+                neg_numeral != "-9223372036854775808")
+            {
+                fail("lower_expr(unary - 2^63) lowered to '" +
+                     (neg_simplified.is_numeral() ? neg_numeral
+                                                  : std::string("<non-numeral>")) +
+                     "' instead of -9223372036854775808");
+            }
+        }
+
         // String expressions unsupported.
         auto e_string = make_expr(s, curlee::parser::StringExpr{.lexeme = "\"hi\""});
         auto r_string = v.lower_expr(e_string);

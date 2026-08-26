@@ -1,0 +1,10 @@
+// Negative regression guard (issue #276 review finding): with the verifier's
+// uint64 -> int64 narrowing fix in place, `return 9223372036854775808;` is a
+// POSITIVE value, so `ensures result < 0` must be rejected with a model showing
+// the correct positive numeral (previously the corrupted literal made this
+// contract pass vacuously wrong).
+fn wrong_sign() -> Int
+  [ ensures result < 0; ]
+{
+  return 9223372036854775808; // 2^63
+}

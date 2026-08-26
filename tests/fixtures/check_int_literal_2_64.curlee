@@ -1,0 +1,30 @@
+// Int literals at or above 2^64 (issue #276 review round 2 regression
+// guards): hex and underscore-separated lexemes that overflow
+// parse_port_literal's uint64_t must still lower to their exact value in the
+// solver. The previous code fell through to int_val() with the RAW lexeme,
+// which made Z3 throw z3::exception and abort the process (rc=134, core
+// dumped). The arbitrary-precision conversion routes them to the same plain
+// decimal numeral string the decimal form uses, so 2^64 verifies exactly.
+fn two_64_hex() -> Int
+  [ ensures result == 18446744073709551616; ] // 2^64
+{
+  return 0x1_0000_0000_0000_0000; // 2^64 in hex (PhysAddrLiteral lexeme)
+}
+
+fn two_64_underscore() -> Int
+  [ ensures result == 18446744073709551616; ] // 2^64
+{
+  return 18_446_744_073_709_551_616; // 2^64 with '_' separators
+}
+
+fn two_64_hex_no_sep() -> Int
+  [ ensures result == 18446744073709551616; ] // 2^64
+{
+  return 0x10000000000000000; // 2^64 in hex, no separators
+}
+
+fn two_64_plus_one() -> Int
+  [ ensures result == 18446744073709551617; ] // 2^64 + 1
+{
+  return 0x1_0000_0000_0000_0001;
+}

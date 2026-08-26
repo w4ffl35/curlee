@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+#include <algorithm>
 #include <charconv>
 #include <cstddef>
 #include <curlee/lexer/token.h>
@@ -281,6 +282,143 @@ bool is_phys_address_literal(std::string_view lexeme)
         }
     }
     return true;
+}
+
+/**
+ * @brief True if the lexeme is a plain decimal numeral (digits only).
+ *
+ * Z3's numeral parser accepts such lexemes directly at arbitrary precision.
+ * Hex (0x...) and underscore-separated lexemes (PhysAddrLiteral forms) need
+ * conversion to a plain decimal numeral string before int_val(), so this
+ * classifier decides which path the IntExpr lowering takes (issue #276).
+ */
+bool is_plain_decimal_literal(std::string_view lexeme)
+{
+    if (lexeme.empty())
+    {
+        return false;
+    }
+    for (const char c : lexeme)
+    {
+        if (c < '0' || c > '9')
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Multiply a decimal numeral string by a small factor (2..16) at arbitrary
+// precision: the result grows as needed, so values at or above 2^64 stay
+// exact. Used by int_literal_to_decimal to convert hex/underscore lexemes to
+// the plain decimal form Z3's numeral parser accepts (issue #276 review
+// round 2 — converting through a fixed-width integer would overflow).
+std::string mul_decimal_small(std::string_view value, unsigned factor)
+{
+    std::string out;
+    out.reserve(value.size() + 1);
+    unsigned carry = 0;
+    for (auto it = value.rbegin(); it != value.rend(); ++it)
+    {
+        const unsigned cur = static_cast<unsigned>(*it - '0') * factor + carry;
+        out.push_back(static_cast<char>('0' + (cur % 10)));
+        carry = cur / 10;
+    }
+    while (carry != 0)
+    {
+        out.push_back(static_cast<char>('0' + (carry % 10)));
+        carry /= 10;
+    }
+    std::reverse(out.begin(), out.end());
+    return out;
+}
+
+// Add a small addend (0..15) to a decimal numeral string at arbitrary
+// precision (issue #276 review round 2).
+std::string add_decimal_small(std::string_view value, unsigned addend)
+{
+    std::string out(value);
+    unsigned carry = addend;
+    for (auto it = out.rbegin(); it != out.rend() && carry != 0; ++it)
+    {
+        const unsigned cur = static_cast<unsigned>(*it - '0') + carry;
+        *it = static_cast<char>('0' + (cur % 10));
+        carry = cur / 10;
+    }
+    if (carry != 0)
+    {
+        out.insert(out.begin(), static_cast<char>('0' + carry));
+    }
+    return out;
+}
+
+/**
+ * @brief Convert an Int literal lexeme to a plain decimal numeral string.
+ *
+ * Accepts the two IntExpr lexeme forms the parser can produce: decimal
+ * digits with optional '_' separators (IntLiteral) and hex literals
+ * (0x.../0X...) with optional '_' separators (PhysAddrLiteral). Z3's numeral
+ * parser accepts plain decimal numerals only — not '0x' prefixes or '_'
+ * separators — so non-decimal lexemes must be converted before int_val().
+ *
+ * The conversion is arbitrary precision: unlike parse_port_literal (which
+ * returns uint64_t and is used where ports are known to be 16-bit), this
+ * never routes through a fixed-width integer, so lexemes at or above 2^64
+ * (e.g. `0x1_0000_0000_0000_0000` or `18_446_744_073_709_551_616`) convert
+ * exactly and verify like their plain-decimal form (issue #276 review
+ * round 2). Returns nullopt for malformed lexemes (empty, bare "0x", no
+ * digits, or a digit outside the base).
+ */
+std::optional<std::string> int_literal_to_decimal(std::string_view lexeme)
+{
+    if (lexeme.empty())
+    {
+        return std::nullopt;
+    }
+    int base = 10;
+    std::string_view digits = lexeme;
+    if (lexeme.size() > 2 && lexeme[0] == '0' && (lexeme[1] == 'x' || lexeme[1] == 'X'))
+    {
+        base = 16;
+        digits = lexeme.substr(2);
+    }
+    std::string value = "0";
+    bool any_digit = false;
+    for (const char ch : digits)
+    {
+        if (ch == '_')
+        {
+            continue;
+        }
+        int digit = -1;
+        if (ch >= '0' && ch <= '9')
+        {
+            digit = ch - '0';
+        }
+        else if (base == 16 && ch >= 'a' && ch <= 'f')
+        {
+            digit = ch - 'a' + 10;
+        }
+        else if (base == 16 && ch >= 'A' && ch <= 'F')
+        {
+            digit = ch - 'A' + 10;
+        }
+        if (digit < 0 || digit >= base)
+        {
+            return std::nullopt;
+        }
+        any_digit = true;
+        value = mul_decimal_small(value, static_cast<unsigned>(base));
+        if (digit != 0)
+        {
+            value = add_decimal_small(value, static_cast<unsigned>(digit));
+        }
+    }
+    if (!any_digit)
+    {
+        return std::nullopt;
+    }
+    return value;
 }
 
 struct FunctionSig
@@ -752,6 +890,25 @@ class Verifier
         return value;
     }
 
+    // Lower a plain decimal numeral string to a Z3 Int constant. Z3's numeral
+    // parser accepts any well-formed decimal numeral at arbitrary precision,
+    // so a failure here means a malformed string reached the solver — catch
+    // the z3::exception and let the caller report a clean diagnostic instead
+    // of aborting the process (defense in depth, issue #276 review round 2:
+    // the raw hex/underscore lexeme path used to throw uncaught and abort
+    // with rc=134).
+    std::optional<z3::expr> try_int_val(const std::string& decimal)
+    {
+        try
+        {
+            return solver_.context().int_val(decimal.c_str());
+        }
+        catch (const z3::exception&)
+        {
+            return std::nullopt;
+        }
+    }
+
     // One fresh uninterpreted read function per width: port_in_<b|w|l> : Int -> Int.
     // No axioms constrain them, so the returned value is opaque to the solver.
     std::unordered_map<std::string_view, z3::func_decl> port_in_fns_;
@@ -1110,20 +1267,47 @@ class Verifier
                 using Node = std::decay_t<decltype(node)>;
                 if constexpr (std::is_same_v<Node, curlee::parser::IntExpr>)
                 {
-                    // Hex/underscore lexemes (PhysAddrLiteral forms, e.g.
-                    // `0x0E` inside a runtime port offset or a write() value)
-                    // are not accepted by Z3's numeral parser, so convert them
-                    // to a plain decimal numeral first (issue #276: a runtime
-                    // port like `io_base + 0x0E` lowers through here).
-                    const auto decimal = parse_port_literal(node.lexeme);
-                    if (decimal.has_value())
+                    // Plain decimal Int literals are accepted directly by Z3's
+                    // numeral parser (arbitrary precision): keep them on that
+                    // path so literals in [2^63, 2^64-1] stay positive (review
+                    // finding, issue #276 — routing them through int64_t
+                    // corrupted them to negative) and literals >= 2^64 verify
+                    // exactly. Hex/underscore lexemes (PhysAddrLiteral forms,
+                    // e.g. `0x0E` inside a runtime port offset or a write()
+                    // value) are not accepted by Z3's numeral parser, so
+                    // convert them to a plain decimal numeral STRING first
+                    // (issue #276: a runtime port like `io_base + 0x0E` lowers
+                    // through here).
+                    std::string numeral(node.lexeme);
+                    if (!is_plain_decimal_literal(node.lexeme))
                     {
-                        return ExprValue{solver_.context().int_val(static_cast<int64_t>(*decimal)),
-                                         TypeKind::Int, true};
+                        // Arbitrary-precision conversion: hex/underscore
+                        // lexemes at or above 2^64 (e.g.
+                        // `0x1_0000_0000_0000_0000` or
+                        // `18_446_744_073_709_551_616`) overflow
+                        // parse_port_literal's uint64_t, so routing through a
+                        // fixed-width integer is not an option — the raw
+                        // lexeme sent to int_val() would make Z3 throw
+                        // z3::exception and abort the process (review round 2,
+                        // rc=134). The decimal string keeps Z3's
+                        // arbitrary-precision path, so 2^64 verifies like its
+                        // plain-decimal form. Malformed lexemes get a clean
+                        // diagnostic instead of a crash.
+                        const auto decimal = int_literal_to_decimal(node.lexeme);
+                        if (!decimal.has_value())
+                        {
+                            return error_at(e.span, "invalid integer literal '" +
+                                                        std::string(node.lexeme) + "'");
+                        }
+                        numeral = std::move(*decimal);
                     }
-                    const std::string literal(node.lexeme);
-                    return ExprValue{solver_.context().int_val(literal.c_str()), TypeKind::Int,
-                                     true};
+                    auto lowered = try_int_val(numeral);
+                    if (!lowered.has_value())
+                    {
+                        return error_at(e.span, "invalid integer literal '" +
+                                                    std::string(node.lexeme) + "'");
+                    }
+                    return ExprValue{std::move(*lowered), TypeKind::Int, true};
                 }
                 else if constexpr (std::is_same_v<Node, curlee::parser::BoolExpr>)
                 {
@@ -1456,7 +1640,11 @@ class Verifier
                         {
                             return error_at(e.span, "port I/O address must be a constant literal");
                         }
-                        port_term = solver_.context().int_val(static_cast<int>(*port_value));
+                        // int_val(uint64_t) is exact for the full 64-bit range;
+                        // narrowing through a signed int would truncate literals
+                        // at or above 2^31 (same defect class as the general
+                        // IntExpr lowering fix, issue #276 review finding).
+                        port_term = solver_.context().int_val(*port_value);
                     }
                     else
                     {
