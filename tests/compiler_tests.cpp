@@ -1887,6 +1887,43 @@ fn main() -> Int {
                                       .value = std::make_unique<Expr>(std::move(value))};
             expect_phys_reject(std::move(root));
         }
+
+        // Port I/O (issue #269) is freestanding-only: the VM emitter must
+        // reject port_inb/port_outb nodes the same way it rejects Phys nodes.
+        using curlee::parser::PortIOExpr;
+
+        auto expect_port_io_reject = [&](Expr root)
+        {
+            const auto emitted = run_with_expr(std::move(root));
+            if (!std::holds_alternative<std::vector<curlee::diag::Diagnostic>>(emitted))
+            {
+                fail("expected emission to fail for PortIOExpr node");
+            }
+            const auto& diags = std::get<std::vector<curlee::diag::Diagnostic>>(emitted);
+            if (diags.empty() ||
+                diags[0].message.find("port I/O is freestanding-only") == std::string::npos)
+            {
+                fail("expected freestanding-only diagnostic for PortIOExpr node");
+            }
+        };
+
+        {
+            // port_inb(0x3FD) read.
+            Expr root;
+            root.node = PortIOExpr{.op = "port_inb", .port_lexeme = "0x3FD", .value = nullptr};
+            expect_port_io_reject(std::move(root));
+        }
+
+        {
+            // port_outb(0x3F8, v) write.
+            Expr value;
+            value.node = curlee::parser::IntExpr{.lexeme = "0x48"};
+            Expr root;
+            root.node = PortIOExpr{.op = "port_outb",
+                                   .port_lexeme = "0x3F8",
+                                   .value = std::make_unique<Expr>(std::move(value))};
+            expect_port_io_reject(std::move(root));
+        }
     }
 
     {

@@ -13,21 +13,31 @@
 #
 # Usage:
 #   bash scripts/freestanding_ci.sh [--preset linux-debug]
+#   bash scripts/freestanding_ci.sh --binary <path-to-curlee>
+#
+# --binary takes precedence over --preset and lets callers (e.g. the ctest
+# registration in CMakeLists.txt) point at the binary of the current build
+# tree, whatever preset it was configured with. Without --binary the script
+# derives the path from --preset (default linux-debug).
 set -euo pipefail
 
 preset="linux-debug"
+bin=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --preset) preset="$2"; shift 2 ;;
+    --binary) bin="$2"; shift 2 ;;
     -h|--help)
-      echo "Usage: scripts/freestanding_ci.sh [--preset <cmake-preset>]"
+      echo "Usage: scripts/freestanding_ci.sh [--preset <cmake-preset> | --binary <path-to-curlee>]"
       exit 0 ;;
     *) echo "Unknown arg: $1"; exit 2 ;;
   esac
 done
 
-bin="./build/${preset}/curlee"
+if [[ -z "$bin" ]]; then
+  bin="./build/${preset}/curlee"
+fi
 if [[ ! -x "$bin" ]]; then
   echo "curlee binary not found: $bin (run cmake --build --preset ${preset} first)"
   exit 1

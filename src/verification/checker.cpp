@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+#include <charconv>
 #include <cstddef>
 #include <curlee/lexer/token.h>
 #include <curlee/types/type.h>
@@ -696,20 +697,37 @@ class Verifier
         return {};
     }
 
-    // Strip underscore separators from an integer lexeme so Z3 parses it
-    // (Z3's rational parser does not accept '_').
-    static std::string strip_int_underscores(std::string_view lexeme)
+    // Parse a constant port literal (decimal or 0x-hex, with optional '_'
+    // separators) into its numeric value. Z3's rational parser accepts decimal
+    // numerals only — not '0x' hex prefixes or '_' separators — so the port
+    // must be converted to a plain decimal value before int_val(). Ports are
+    // 16-bit, so uint64_t is ample.
+    static std::optional<std::uint64_t> parse_port_literal(std::string_view lexeme)
     {
-        std::string out;
-        out.reserve(lexeme.size());
+        std::string cleaned;
+        cleaned.reserve(lexeme.size());
         for (const char ch : lexeme)
         {
             if (ch != '_')
             {
-                out.push_back(ch);
+                cleaned.push_back(ch);
             }
         }
-        return out;
+        std::uint64_t value = 0;
+        const char* begin = cleaned.data();
+        const char* end = cleaned.data() + cleaned.size();
+        int base = 10;
+        if (cleaned.size() > 2 && cleaned[0] == '0' && (cleaned[1] == 'x' || cleaned[1] == 'X'))
+        {
+            base = 16;
+            begin += 2;
+        }
+        const auto res = std::from_chars(begin, end, value, base);
+        if (res.ec != std::errc{} || res.ptr != end)
+        {
+            return std::nullopt;
+        }
+        return value;
     }
 
     // One fresh uninterpreted read function per width: port_in_<b|w|l> : Int -> Int.
@@ -1389,10 +1407,16 @@ class Verifier
                         return error_at(e.span,
                                         "unknown port I/O builtin '" + std::string(node.op) + "'");
                     }
-                    // The port lowers to its constant integer value. Underscores are
-                    // stripped because Z3's rational parser does not accept them.
+                    // The port lowers to its constant integer value. Hex and
+                    // underscore forms are converted to a decimal numeral because
+                    // Z3's rational parser does not accept them.
+                    const auto port_value = parse_port_literal(node.port_lexeme);
+                    if (!port_value.has_value())
+                    {
+                        return error_at(e.span, "port I/O address must be a constant literal");
+                    }
                     const z3::expr port_term =
-                        solver_.context().int_val(strip_int_underscores(node.port_lexeme).c_str());
+                        solver_.context().int_val(static_cast<int>(*port_value));
 
                     if (node.op.rfind("port_out", 0) == 0)
                     {
