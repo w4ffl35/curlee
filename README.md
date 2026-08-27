@@ -170,6 +170,21 @@ bootable kernel ELF:
   (`runtime/libgcc32_helpers.c`) are compiled and linked **automatically** — downstream
   projects never provide their own `libgcc32.c` (issue #288). The default `--arch x86_64`
   (multiboot2/PVH) target has native `int64_t` arithmetic and never links the helpers.
+- **Per-build-target static array sizing** with `curlee build --define NAME=VALUE` (issue #296):
+  the SAME source can declare a static array whose size is a **constant expression over build
+  constants and literals** — `static buf: [U8; W * H] = [0; W * H];` — and the parser folds the
+  length (`[U32; 128 * 128]`, `[U8; PAGES * 4096]`) to its decimal value at parse time, so two
+  builds of one source emit different-sized arrays (joeos's PVH `-kernel` LOAD budget vs the
+  GRUB full-size frame ring). The define name is also usable in **primary-expression positions**
+  (a bare identifier lowers to an `IntExpr` holding the constant), giving a build discriminator
+  (`if (JOE_PVH_BOOT == 1) { ... }`) without any `#ifdef`. `--define` is repeatable, accepts
+  decimal or `0x`-hex values, and is supported by `curlee check` too (so a module that sizes
+  arrays from defines verifies standalone). This is **not** a preprocessor: no `#ifdef`, no text
+  substitution, no defaults — an undefined define name is a plain identifier (an unresolved-name
+  error downstream), and a define name used as a function/index/member name is left to the
+  resolver. MVP scope: the constant-expression array length covers `+`/`*`/parentheses over
+  literals and defines (enough for every joeos sizing pattern); hex/underscore source lexemes
+  stay reserved for physical-address literals.
 - The **verification gate applies**: no proof, no build (nothing is emitted on failure).
 - The freestanding target is **Linux/x86-64 host only** (x86-64 or i386 kernel ELF) and has
   **no hosted builtins** (no `print`,
@@ -205,7 +220,9 @@ bootable kernel ELF:
   #278): a `let q: [T; N] = [v; N];` binding is a freestanding-local array (ring buffers /
   driver state — the `fb.c` `tool_queue` and `virtio_net.c` `rx_buf_state` patterns), where
   `T` is `Int`/`U8`/`U16`/`U32`/`U64`, `N` is a positive integer literal (decimal; hex is
-  reserved for physical-address literals), and `[0; N]` codegens to a zero-filled C array
+  reserved for physical-address literals) or, with `--define` build constants (issue #296), a
+  constant expression over defines and literals (`[U32; ASSET_W * ASSET_H]`), and `[0; N]`
+  codegens to a zero-filled C array
   (`{0}`), a non-zero repeat to an explicit brace list. Every element access carries a
   **verifier bounds obligation** — constant out-of-bounds (including negative) indices are
   rejected by the type checker, and symbolic indices must be provably in `0..N-1` (the

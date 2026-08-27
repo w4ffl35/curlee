@@ -858,5 +858,137 @@ int main()
         expect_diag(p.parse_pred());
     }
 
+    // --- Per-build array sizing (issue #296): array length constant folding ---
+    // `--define` values fold in array-length positions: W * H -> decimal.
+    {
+        auto toks = make_tokens({
+            {TokenKind::IntLiteral, "4"},
+            {TokenKind::Star, "*"},
+            {TokenKind::Identifier, "H"},
+            {TokenKind::Eof, ""},
+        });
+        std::vector<curlee::parser::BuildDefine> defines = {
+            curlee::parser::BuildDefine{.name = "W", .value = 4},
+            curlee::parser::BuildDefine{.name = "H", .value = 16},
+        };
+        curlee::parser::Parser p(toks, defines);
+        auto r = p.parse_array_length_constant();
+        if (std::holds_alternative<Diagnostic>(r))
+        {
+            fail("expected define length fold to succeed");
+        }
+        if (std::get<std::string>(r) != "64")
+        {
+            fail("expected W * H to fold to 64, got: " + std::get<std::string>(r));
+        }
+    }
+
+    // Parenthesized + additive folding: (2 * 3) + 4 -> 10.
+    {
+        auto toks = make_tokens({
+            {TokenKind::LParen, "("},
+            {TokenKind::IntLiteral, "2"},
+            {TokenKind::Star, "*"},
+            {TokenKind::IntLiteral, "3"},
+            {TokenKind::RParen, ")"},
+            {TokenKind::Plus, "+"},
+            {TokenKind::IntLiteral, "4"},
+            {TokenKind::Eof, ""},
+        });
+        curlee::parser::Parser p(toks);
+        auto r = p.parse_array_length_constant();
+        if (std::holds_alternative<Diagnostic>(r))
+        {
+            fail("expected parenthesized fold to succeed");
+        }
+        if (std::get<std::string>(r) != "10")
+        {
+            fail("expected (2 * 3) + 4 to fold to 10, got: " + std::get<std::string>(r));
+        }
+    }
+
+    // An undefined name is NOT a build constant: parse error.
+    {
+        auto toks = make_tokens({
+            {TokenKind::Identifier, "UNDEFINED"},
+            {TokenKind::Eof, ""},
+        });
+        curlee::parser::Parser p(toks);
+        auto r = p.parse_array_length_constant();
+        if (!std::holds_alternative<Diagnostic>(r))
+        {
+            fail("expected unknown length name to be a diagnostic");
+        }
+    }
+
+    // Overflow in a product is a diagnostic, not a wrap.
+    {
+        auto toks = make_tokens({
+            {TokenKind::IntLiteral, "4294967296"},
+            {TokenKind::Star, "*"},
+            {TokenKind::IntLiteral, "4294967296"},
+            {TokenKind::Eof, ""},
+        });
+        curlee::parser::Parser p(toks);
+        auto r = p.parse_array_length_constant();
+        if (!std::holds_alternative<Diagnostic>(r))
+        {
+            fail("expected overflowing product to be a diagnostic");
+        }
+    }
+
+    // A define name in a bare primary-expression position lowers to IntExpr.
+    {
+        auto toks = make_tokens({
+            {TokenKind::Identifier, "JOE_PVH_BOOT"},
+            {TokenKind::Eof, ""},
+        });
+        std::vector<curlee::parser::BuildDefine> defines = {
+            curlee::parser::BuildDefine{.name = "JOE_PVH_BOOT", .value = 1},
+        };
+        curlee::parser::Parser p(toks, defines);
+        auto r = p.parse_primary();
+        if (std::holds_alternative<Diagnostic>(r))
+        {
+            fail("expected define primary to parse");
+        }
+        const auto& expr = std::get<curlee::parser::Expr>(r);
+        const auto* lit = std::get_if<curlee::parser::IntExpr>(&expr.node);
+        if (lit == nullptr)
+        {
+            fail("expected define primary to lower to IntExpr");
+        }
+        if (lit->lexeme != "1")
+        {
+            fail("expected define value 1 in IntExpr, got: " + lit->lexeme);
+        }
+    }
+
+    // A define name followed by '(' is a user collision with a call and is NOT
+    // substituted (the resolver sees a plain name).
+    {
+        auto toks = make_tokens({
+            {TokenKind::Identifier, "F"},
+            {TokenKind::LParen, "("},
+            {TokenKind::IntLiteral, "1"},
+            {TokenKind::RParen, ")"},
+            {TokenKind::Eof, ""},
+        });
+        std::vector<curlee::parser::BuildDefine> defines = {
+            curlee::parser::BuildDefine{.name = "F", .value = 7},
+        };
+        curlee::parser::Parser p(toks, defines);
+        auto r = p.parse_call();
+        if (std::holds_alternative<Diagnostic>(r))
+        {
+            fail("expected F(1) to parse as a call");
+        }
+        const auto& expr = std::get<curlee::parser::Expr>(r);
+        if (std::get_if<curlee::parser::CallExpr>(&expr.node) == nullptr)
+        {
+            fail("expected F(1) to remain a CallExpr");
+        }
+    }
+
     return 0;
 }

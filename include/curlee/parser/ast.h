@@ -28,13 +28,18 @@ struct TypeName
     std::string_view name;
     std::optional<std::string_view> type_arg;
 
-    // For the fixed-size array form `[T; N]`, the compile-time length literal
-    // lexeme (decimal, underscores preserved). When set, `name` holds the
-    // element type name (Int/U8/U16/U32/U64) and `type_arg` is unused. This is
-    // the MVP array form (issue #278): freestanding-local `let` bindings only.
-    // Default-initialized so pre-existing designated initializers that omit
-    // the new member do not trip -Wmissing-field-initializers.
-    std::optional<std::string_view> array_len = std::nullopt;
+    // For the fixed-size array form `[T; N]`, the compile-time length as a
+    // decimal string. When set, `name` holds the element type name
+    // (Int/U8/U16/U32/U64) and `type_arg` is unused. N is normally the source
+    // literal lexeme, but with `--define` build constants (issue #296) it is
+    // the CONSTANT-FOLDED decimal value of an expression over build constants
+    // and literals (e.g. `[U32; ASSET_W * ASSET_H]` folds to `"16384"`), so a
+    // plain owning string (not a source slice) is required. This is the MVP
+    // array form (issue #278): freestanding-local `let` bindings and
+    // module-level `static` arrays. Default-initialized so pre-existing
+    // designated initializers that omit the new member do not trip
+    // -Wmissing-field-initializers.
+    std::optional<std::string> array_len = std::nullopt;
 
     [[nodiscard]] bool is_array() const { return array_len.has_value(); }
 };
@@ -109,7 +114,12 @@ struct Expr;
 /** @brief Integer literal expression. */
 struct IntExpr
 {
-    std::string_view lexeme;
+    // The integer literal lexeme (decimal, underscores preserved), or — with
+    // `--define` build constants (issue #296) — the constant-folded decimal
+    // value of a build-constant reference (a define name substituted in
+    // primary-expression position resolves to this). Owning so synthesized
+    // values (which do not alias the source buffer) have stable storage.
+    std::string lexeme;
 };
 
 /** @brief Boolean literal expression. */
@@ -169,8 +179,12 @@ struct IndexExpr
 struct ArrayLiteralExpr
 {
     std::unique_ptr<Expr> value;
-    // The count literal lexeme (decimal, underscores preserved).
-    std::string_view count_lexeme;
+    // The count as a decimal string: the source literal lexeme, or — with
+    // `--define` build constants (issue #296) — the constant-folded value of
+    // an expression over build constants and literals (e.g. `[0; W * H]`
+    // folds to `"16384"`). Owning, like IntExpr::lexeme, because synthesized
+    // folded values do not alias the source buffer.
+    std::string count_lexeme;
 };
 
 /** @brief Unary expression (e.g. `-x`). */

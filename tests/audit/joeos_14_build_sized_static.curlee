@@ -1,0 +1,129 @@
+// SPDX-License-Identifier: MIT
+//
+// JOE OS port-readiness audit — item 14 (issue #296): per-build-target static
+// array sizing. The SAME source declares a static array whose size is a
+// constant expression over `--define` build constants, plus a build
+// discriminator read in expression positions — the fb.c/virtio_net.c
+// `#ifndef JOE_PVH_BOOT` pattern the migration replaces.
+//
+// Mirrors the real migration (joeos kernel/fb.curlee):
+//   - `static asset_region: [U32; ASSET_W * ASSET_H] = [0; ASSET_W * ASSET_H];`
+//     is the Curlee replacement for the C shim's `unsigned int
+//     asset_region[ASSET_W * ASSET_H]` — GRUB build: ASSET_W=ASSET_H=128
+//     (16384 elements); PVH build: ASSET_W=ASSET_H=1 (the C 1-byte stub).
+//   - `fb_pvh_build()` (the `#ifdef JOE_PVH_BOOT` discriminator) becomes a
+//     Curlee function reading the define: `return JOE_PVH_BOOT;` — here
+//     `pvh_build` (a define-initialized static) + the `asset_region_w/h`
+//     geometry getters that return 0 on the PVH build, exactly like the C
+//     `fb_asset_region_w()` the joeos kernel.curlee gates on.
+//   - The C base getter `fb_asset_region_base_get()` (0 on the PVH stub)
+//     becomes `addr_of(asset_region)` gated on the discriminator (issue
+//     #286's addr_of is the Curlee "address of a Curlee-owned array").
+//
+// Build (GRUB geometry — full region):
+//   ./build/linux-debug/curlee build --link -o build/audit/14-grub.elf \
+//     --define ASSET_W=4 --define ASSET_H=4 --define JOE_PVH_BOOT=0 \
+//     tests/audit/joeos_14_build_sized_static.curlee
+// Build (PVH geometry — 1-element stub):
+//   ./build/linux-debug/curlee build --link -o build/audit/14-pvh.elf \
+//     --define ASSET_W=1 --define ASSET_H=1 --define JOE_PVH_BOOT=1 \
+//     tests/audit/joeos_14_build_sized_static.curlee
+// Boot (either ELF):
+//   qemu-system-x86_64 -display none \
+//     -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+//     -serial file:qemu-serial.log -no-reboot -kernel build/audit/14-*.elf
+//   (expect qemu rc=3 and "OK" + the region size digits + 'G'/'P' in
+//   qemu-serial.log: GRUB -> "OK16G", PVH -> "OK01P")
+//
+// The emitted C differs per build (`static uint32_t asset_region[16]` vs
+// `[1]`) and the linked ELF .bss differs — the acceptance criterion. The
+// serial log proves the discriminator AND the folded geometry agree with the
+// build's defines at runtime.
+
+extern fn curlee_halt() -> Unit;
+
+// fb.c's asset region (128x128 GRUB / 1-element PVH stub): sized by the
+// build's defines, folded to the decimal length at parse time.
+static asset_region: [U32; ASSET_W * ASSET_H] = [0; ASSET_W * ASSET_H];
+
+// The `#ifdef JOE_PVH_BOOT` build discriminator, as a define-initialized
+// static (1 on the PVH build, 0 on the GRUB build).
+static pvh_build: Int = JOE_PVH_BOOT;
+
+// fb.c's `fb_asset_region_w()`: 0 on the PVH build, the define value on the
+// GRUB build (kernel.curlee gates the ring loop on this).
+fn asset_region_w() -> Int {
+  if (JOE_PVH_BOOT == 1) {
+    return 0;
+  } else {
+    return ASSET_W;
+  }
+}
+
+fn asset_region_h() -> Int {
+  if (JOE_PVH_BOOT == 1) {
+    return 0;
+  } else {
+    return ASSET_H;
+  }
+}
+
+// fb.c's `fb_asset_region_base_get()`: 0 on the PVH stub; the array's runtime
+// address (via addr_of, issue #286) on the GRUB build. addr_of is an unsafe
+// builtin (cap phys.mem), so the getter takes the capability like the real
+// fb.curlee externs did (the C shim had no cap; the codegen drops it).
+fn asset_region_base(pm: cap phys.mem) -> Int {
+  if (JOE_PVH_BOOT == 1) {
+    return 0;
+  } else {
+    unsafe {
+      return addr_of(asset_region);
+    }
+  }
+}
+
+fn serial_putc(pm: cap phys.mem, c: Int) -> Unit {
+  unsafe {
+    let lsr: U8 = port_inb(0x3FD);        // COM1 LSR (opaque read)
+    while ((lsr & 32) == 0) { }           // wait for THR empty
+    port_outb(0x3F8, c);                  // COM1 THR
+  }
+  return;
+}
+
+fn main(pm: cap phys.mem) -> Unit {
+  unsafe {
+    // The discriminator and geometry must agree with the build's defines:
+    // PVH -> pvh_build==1, w==h==0, base==0 (stub, blitter gates off);
+    // GRUB -> pvh_build==0, w/h == ASSET_W/H, base != 0 (region present).
+    let w: Int = asset_region_w();
+    let h: Int = asset_region_h();
+    let base: Int = asset_region_base(pm);
+    let ok: Bool = (pvh_build == 1 && w == 0 && h == 0 && base == 0) ||
+                   (pvh_build == 0 && w == ASSET_W && h == ASSET_H && base != 0);
+    if (ok) {
+      serial_putc(pm, 79);                // 'O'
+      serial_putc(pm, 75);                // 'K'
+    } else {
+      serial_putc(pm, 66);                // 'B'
+      serial_putc(pm, 65);                // 'A'
+      serial_putc(pm, 68);                // 'D'
+    }
+    // Report the folded region size (ASSET_W * ASSET_H) as two decimal
+    // digits: GRUB 16 -> "16", PVH 1 -> "01". Proves the per-build array
+    // size from the boot log alone.
+    let elems: Int = ASSET_W * ASSET_H;
+    let tens: Int = elems / 10;
+    let ones: Int = elems % 10;
+    serial_putc(pm, 48 + tens);           // '1' / '0'
+    serial_putc(pm, 48 + ones);           // '6' / '1'
+    // Build discriminator char: 'G' (GRUB) / 'P' (PVH).
+    if (pvh_build == 1) {
+      serial_putc(pm, 80);                // 'P'
+    } else {
+      serial_putc(pm, 71);                // 'G'
+    }
+  }
+  curlee_halt();
+  return;
+}

@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: MIT
 #include <cassert>
+#include <charconv>
 #include <cstddef>
+#include <cstdint>
 #include <curlee/lexer/token.h>
 #include <curlee/parser/parser.h>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <string_view>
@@ -245,7 +248,10 @@ void assign_expr_ids_program(curlee::parser::Program& program)
 class Parser
 {
   public:
-    explicit Parser(std::span<const Token> tokens) : tokens_(tokens) {}
+    explicit Parser(std::span<const Token> tokens, std::span<const BuildDefine> defines = {})
+        : tokens_(tokens), defines_(defines.begin(), defines.end())
+    {
+    }
 
     [[nodiscard]] ParseResult parse_program()
     {
@@ -413,10 +419,28 @@ class Parser
 
   private:
     std::span<const Token> tokens_;
+    // Build-time constants injected via `--define NAME=VALUE` (issue #296),
+    // copied so synthesized lexemes can reference their name strings.
+    std::vector<BuildDefine> defines_;
     std::size_t pos_ = 0;
     std::vector<curlee::diag::Diagnostic> diagnostics_;
 
     [[nodiscard]] bool is_at_end() const { return peek().kind == TokenKind::Eof; }
+
+    // Look up a `--define` build constant by name (issue #296). Returns
+    // std::nullopt when the name is not a provided define (callers then treat
+    // it as an ordinary identifier).
+    [[nodiscard]] std::optional<std::uint64_t> lookup_define(std::string_view name) const
+    {
+        for (const auto& d : defines_)
+        {
+            if (d.name == name)
+            {
+                return d.value;
+            }
+        }
+        return std::nullopt;
+    }
 
     [[nodiscard]] const Token& peek() const
     {
@@ -515,10 +539,146 @@ class Parser
         return error_at(peek(), message);
     }
 
+    // Parse and constant-fold an array length / repeat count: the MVP form is
+    // a single positive integer literal (issue #278); with `--define` build
+    // constants (issue #296) the length may also be a constant expression over
+    // defines and literals — `[T; W * H]`, `[T; SLOTS * W * H]`,
+    // `[T; PAGES * 4096]` — folded here to a plain decimal string. Grammar
+    // (all operands non-negative constants; `*` binds tighter than `+`):
+    //
+    //   length := term ('+' term)*
+    //   term   := factor ('*' factor)*
+    //   factor := IntLiteral | '(' length ')' | define-name
+    //
+    // The folded value is a plain decimal string (hex/underscore lexemes are
+    // not length forms — hex stays reserved for physical-address literals).
+    // Returns the decimal string or a diagnostic. The positivity check lives
+    // in the type checker (as it does for plain literal lengths), so a folded
+    // 0 gets the same "positive integer literal" diagnostic as a source
+    // `[T; 0]`.
+    [[nodiscard]] std::variant<std::string, curlee::diag::Diagnostic>
+    parse_array_length_constant()
+    {
+        using LengthValue = std::variant<std::uint64_t, curlee::diag::Diagnostic>;
+
+        // One factor: a decimal IntLiteral, a `--define` name, or a
+        // parenthesized sub-expression.
+        auto parse_factor = [&]() -> LengthValue
+        {
+            if (match(TokenKind::IntLiteral))
+            {
+                const Token lit = previous();
+                std::string cleaned;
+                cleaned.reserve(lit.lexeme.size());
+                for (const char c : lit.lexeme)
+                {
+                    if (c != '_')
+                    {
+                        cleaned.push_back(c);
+                    }
+                }
+                std::uint64_t v = 0;
+                const auto res = std::from_chars(cleaned.data(), cleaned.data() + cleaned.size(), v);
+                if (res.ec != std::errc{} || res.ptr != cleaned.data() + cleaned.size())
+                {
+                    return error_at(lit, "array length constant is too large");
+                }
+                return v;
+            }
+            if (check(TokenKind::Identifier))
+            {
+                const auto define = lookup_define(peek().lexeme);
+                if (define.has_value())
+                {
+                    advance();
+                    return *define;
+                }
+            }
+            if (match(TokenKind::LParen))
+            {
+                auto inner = parse_array_length_constant();
+                if (std::holds_alternative<curlee::diag::Diagnostic>(inner))
+                {
+                    return std::get<curlee::diag::Diagnostic>(std::move(inner));
+                }
+                // Re-fold the parenthesized decimal string (it cannot
+                // overflow — it was already folded on the way out).
+                std::uint64_t v = 0;
+                for (const char c : std::get<std::string>(inner))
+                {
+                    v = v * 10 + static_cast<std::uint64_t>(c - '0');
+                }
+                if (auto err = consume(TokenKind::RParen, "expected ')' after array length");
+                    err.has_value())
+                {
+                    return *err;
+                }
+                return v;
+            }
+            return error_at(peek(),
+                            "array length must be an integer literal or a build-time constant");
+        };
+
+        // One `*`-separated product of factors.
+        auto parse_term = [&]() -> LengthValue
+        {
+            auto first = parse_factor();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(first))
+            {
+                return first;
+            }
+            std::uint64_t product = std::get<std::uint64_t>(first);
+            while (check(TokenKind::Star))
+            {
+                advance(); // consume '*'
+                auto next = parse_factor();
+                if (std::holds_alternative<curlee::diag::Diagnostic>(next))
+                {
+                    return next;
+                }
+                const std::uint64_t factor = std::get<std::uint64_t>(next);
+                if (factor != 0 && product > (std::numeric_limits<std::uint64_t>::max)() / factor)
+                {
+                    return error_at(previous(), "array length constant overflow");
+                }
+                product *= factor;
+            }
+            return product;
+        };
+
+        // One `+`-separated sum of products.
+        auto first_term = parse_term();
+        if (std::holds_alternative<curlee::diag::Diagnostic>(first_term))
+        {
+            return std::get<curlee::diag::Diagnostic>(std::move(first_term));
+        }
+        std::uint64_t total = std::get<std::uint64_t>(first_term);
+        while (check(TokenKind::Plus))
+        {
+            advance(); // consume '+'
+            auto next_term = parse_term();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(next_term))
+            {
+                return std::get<curlee::diag::Diagnostic>(std::move(next_term));
+            }
+            const std::uint64_t term = std::get<std::uint64_t>(next_term);
+            if (term > (std::numeric_limits<std::uint64_t>::max)() - total)
+            {
+                return error_at(previous(), "array length constant overflow");
+            }
+            total += term;
+        }
+        return std::to_string(total);
+    }
+
     [[nodiscard]] std::variant<TypeName, curlee::diag::Diagnostic> parse_type()
     {
         // Fixed-size array type: `[T; N]` (issue #278). T is a storable core
-        // element type (Int/U8/U16/U32/U64) and N is a compile-time literal.
+        // element type (Int/U8/U16/U32/U64) and N is a compile-time constant
+        // expression: a positive integer literal, or — with `--define` build
+        // constants (issue #296) — a constant expression over build defines
+        // and literals (e.g. `[U32; ASSET_W * ASSET_H]`), folded to its
+        // decimal value here so every downstream consumer sees a plain length.
         if (match(TokenKind::LBracket))
         {
             const Token lbracket = previous();
@@ -532,11 +692,11 @@ class Parser
             {
                 return *err;
             }
-            if (!check(TokenKind::IntLiteral))
+            auto len_res = parse_array_length_constant();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(len_res))
             {
-                return error_at(peek(), "array length must be an integer literal");
+                return std::get<curlee::diag::Diagnostic>(std::move(len_res));
             }
-            const Token len = advance();
             if (auto err = consume(TokenKind::RBracket, "expected ']' after array length");
                 err.has_value())
             {
@@ -548,7 +708,7 @@ class Parser
                 .is_capability = false,
                 .name = elem.lexeme,
                 .type_arg = std::nullopt,
-                .array_len = len.lexeme};
+                .array_len = std::get<std::string>(std::move(len_res))};
         }
 
         if (match(TokenKind::KwCap))
@@ -2578,7 +2738,7 @@ class Parser
                         // so it is consumed here and wrapped as a constant Int expression.
                         const Token lit = advance();
                         value.span = lit.span;
-                        value.node = curlee::parser::IntExpr{.lexeme = lit.lexeme};
+                        value.node = curlee::parser::IntExpr{.lexeme = std::string(lit.lexeme)};
                     }
                     else
                     {
@@ -3000,7 +3160,7 @@ class Parser
             const Token lit = previous();
             Expr expr;
             expr.span = lit.span;
-            expr.node = IntExpr{.lexeme = lit.lexeme};
+            expr.node = IntExpr{.lexeme = std::string(lit.lexeme)};
             return expr;
         }
 
@@ -3014,7 +3174,7 @@ class Parser
             const Token lit = previous();
             Expr expr;
             expr.span = lit.span;
-            expr.node = IntExpr{.lexeme = lit.lexeme};
+            expr.node = IntExpr{.lexeme = std::string(lit.lexeme)};
             return expr;
         }
 
@@ -3037,8 +3197,10 @@ class Parser
         }
 
         // Fixed-size array repeat literal: `[v; N]` (issue #278). The value is
-        // a general expression and N is a compile-time integer literal. Only
-        // valid as a `let` initializer for a `[T; N]` binding.
+        // a general expression and N is a compile-time constant: an integer
+        // literal or, with `--define` build constants (issue #296), a constant
+        // expression over defines and literals (`[0; W * H]`). Only valid as a
+        // `let`/`static` initializer for a `[T; N]` binding.
         if (match(TokenKind::LBracket))
         {
             const Token lbracket = previous();
@@ -3052,11 +3214,12 @@ class Parser
             {
                 return *err;
             }
-            if (!check(TokenKind::IntLiteral))
+            auto count_res = parse_array_length_constant();
+            if (std::holds_alternative<curlee::diag::Diagnostic>(count_res))
             {
-                return error_at(peek(), "array literal count must be an integer literal");
+                return std::get<curlee::diag::Diagnostic>(std::move(count_res));
             }
-            const Token count = advance();
+            const std::string count = std::get<std::string>(std::move(count_res));
             if (auto err = consume(TokenKind::RBracket, "expected ']' after array literal count");
                 err.has_value())
             {
@@ -3067,7 +3230,7 @@ class Parser
             expr.span = span_cover(lbracket.span, rbracket.span);
             expr.node = ArrayLiteralExpr{
                 .value = std::make_unique<Expr>(std::get<Expr>(std::move(value_res))),
-                .count_lexeme = count.lexeme};
+                .count_lexeme = std::move(count)};
             return expr;
         }
 
@@ -3091,6 +3254,27 @@ class Parser
             if (check(TokenKind::LBrace))
             {
                 return parse_struct_literal_after_name(name);
+            }
+
+            // `--define` build constant (issue #296): a bare identifier that
+            // matches a provided define name lowers to an IntExpr holding the
+            // constant's decimal value — the per-build-target discriminator
+            // (`if (JOE_PVH_BOOT == 1)`, `return ASSET_REGION_W;`) and the
+            // value source for array sizes. Substitution is limited to BARE
+            // primary position: a define name followed by `(`, `[` or `.` is a
+            // user collision with a function/index/member name and is left to
+            // the resolver (so a call on a substituted constant never reaches
+            // the type checker).
+            if (!check(TokenKind::LParen) && !check(TokenKind::LBracket) &&
+                !check(TokenKind::Dot))
+            {
+                if (const auto define = lookup_define(name.lexeme); define.has_value())
+                {
+                    Expr expr;
+                    expr.span = name.span;
+                    expr.node = IntExpr{.lexeme = std::to_string(*define)};
+                    return expr;
+                }
             }
 
             Expr expr;
@@ -3735,9 +3919,10 @@ class Dumper
 
 } // namespace
 
-ParseResult parse(std::span<const curlee::lexer::Token> tokens)
+ParseResult parse(std::span<const curlee::lexer::Token> tokens,
+                  std::span<const BuildDefine> defines)
 {
-    auto result = Parser(tokens).parse_program();
+    auto result = Parser(tokens, defines).parse_program();
     if (auto* program = std::get_if<Program>(&result))
     {
         assign_expr_ids_program(*program);
