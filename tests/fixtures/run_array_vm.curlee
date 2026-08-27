@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #300: fixed-size arrays run in the VM (curlee run) — local arrays
+// (the VM half of #278's freestanding-local `let q: [T; N] = [v; N];`).
+// Covers element write (`q[0] = 42;`), element read (`q[i]`), a symbolic
+// index through a loop-carried variable with the verifier's per-access
+// bounds obligation, and iteration over the buffer.
+//
+// Expected result: 42 (write 42 at [0], copy to [1] via a symbolic index,
+// then sum [0] + [1] - 42 = 42).
+//
+// Expected stdout: "curlee run: result 42"
+
+fn main() -> Int {
+  let q: [Int; 8] = [0; 8];
+  q[0] = 42;
+  let i: Int = 1;
+  q[i] = q[0];
+  return q[0] + q[1] - 42;
+}

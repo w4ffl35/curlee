@@ -1055,8 +1055,9 @@ int main(int argc, char** argv)
         fs::path("tests/fixtures/check_array_reject_ghost.curlee");
     const fs::path rel_array_reject_unsupported_elem =
         fs::path("tests/fixtures/check_array_reject_unsupported_elem.curlee");
-    const fs::path rel_run_array_vm_reject =
-        fs::path("tests/fixtures/run_array_vm_reject.curlee");
+    // Fixed-size arrays run in the VM (issue #300): the local and static array
+    // fixtures below are positive `curlee run` cases.
+    const fs::path rel_run_array_vm = fs::path("tests/fixtures/run_array_vm.curlee");
     // Module-level mutable state (issue #287) diagnostics.
     const fs::path rel_static_state = fs::path("tests/fixtures/check_static_state.curlee");
     const fs::path rel_static_contract_global =
@@ -1083,8 +1084,8 @@ int main(int argc, char** argv)
         fs::path("tests/fixtures/check_static_u8_scalar.curlee");
     const fs::path rel_static_oob = fs::path("tests/fixtures/check_static_oob.curlee");
     const fs::path rel_run_global_state = fs::path("tests/fixtures/run_global_state.curlee");
-    const fs::path rel_run_static_array_vm_reject =
-        fs::path("tests/fixtures/run_static_array_vm_reject.curlee");
+    const fs::path rel_run_static_array_vm =
+        fs::path("tests/fixtures/run_static_array_vm.curlee");
     // External-linkage module state (issue #297) diagnostics: the extern
     // static form passes `check` exactly like a `static` (same validation),
     // and `run` rejects it as freestanding-only (the VM has no external
@@ -1906,20 +1907,22 @@ int main(int argc, char** argv)
         {
             return 1;
         }
-        // `run` (VM bytecode) rejects arrays: they are freestanding-only in
-        // the MVP (no VM storage or lowering for IndexExpr/ArrayLiteralExpr).
-        if (!run_stderr_case("run-array-vm-reject",
-                             {"curlee", "run", rel_run_array_vm_reject.string()},
-                             dir / "run_array_vm_reject.golden", false))
+        // Fixed-size arrays run in the VM (issue #300): the local-array
+        // fixture covers `[T; N]` declarations, indexed element write/read and
+        // a symbolic loop-carried index under the verifier's per-access bounds
+        // obligation; the static-array fixture is the exact issue repro
+        // (`static buf: [Int; 4] = [0; 4]; buf[0] = 42; return buf[0];` -> 42).
+        // Both are positive `curlee run` cases (they return 42).
+        if (!run_stdio_case("run-array-vm", {"curlee", "run", rel_run_array_vm.string()},
+                            dir / "run_array_vm.stdout.golden",
+                            dir / "run_array_vm.stderr.golden", true))
         {
             return 1;
         }
-        // ...including module-level arrays (issue #287): the scalar half of
-        // module state runs in the VM (see run-global-state above), the array
-        // half is freestanding-only, rejected by the VM emitter.
-        if (!run_stderr_case("run-static-array-vm-reject",
-                             {"curlee", "run", rel_run_static_array_vm_reject.string()},
-                             dir / "run_static_array_vm_reject.golden", false))
+        if (!run_stdio_case("run-static-array-vm",
+                            {"curlee", "run", rel_run_static_array_vm.string()},
+                            dir / "run_static_array_vm.stdout.golden",
+                            dir / "run_static_array_vm.stderr.golden", true))
         {
             return 1;
         }

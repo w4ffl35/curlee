@@ -73,6 +73,16 @@ enum class OpCode : std::uint8_t
     EnumUnwrap,
     MakeStruct,
     GetField,
+    // Fixed-size arrays (issue #300, VM half of #278). ArrayNew pops the
+    // repeat value then the count (both Int) and reads a u16 string-constant
+    // index naming the element type ("Int"/"U8"/"U16"/"U32"/"U64"); it pushes
+    // the new array. ArrayGet pops the array then the index and pushes the
+    // element. ArraySet pops the array, the index and the value and pushes
+    // Unit. All three bounds-check at the access site (the VM's runtime
+    // mirror of the verifier's per-access 0 <= i && i < N obligation).
+    ArrayNew,
+    ArrayGet,
+    ArraySet,
 };
 
 /** @brief A compiled chunk of bytecode, constants and span map. */

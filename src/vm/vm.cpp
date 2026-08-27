@@ -1628,6 +1628,98 @@ VmResult VM::run(const Chunk& chunk, std::size_t fuel, const Capabilities& capab
             push(Value::unit_v());
             break;
         }
+        case OpCode::ArrayNew:
+        {
+            // Stack: [..., repeat_value, count]; a u16 operand names the
+            // element type via a string constant. Builds a fixed-size array of
+            // `count` copies of the repeat value (the runtime mirror of the
+            // freestanding `T q[N] = {v, v, ...};` emission).
+            if (ip + 1 >= chunk.code.size())
+            {
+                return err_result("truncated array element type index", span);
+            }
+            const std::uint16_t lo = chunk.code[ip++];
+            const std::uint16_t hi = chunk.code[ip++];
+            const std::uint16_t elem_idx = static_cast<std::uint16_t>(lo | (hi << 8));
+            if (elem_idx >= chunk.constants.size() ||
+                chunk.constants[elem_idx].kind != ValueKind::String)
+            {
+                return err_result("array element type index out of range", span);
+            }
+            const std::string elem_name = chunk.constants[elem_idx].string_value;
+
+            auto count = pop();
+            auto repeat = pop();
+            if (!count.has_value() || !repeat.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (count->kind != ValueKind::Int)
+            {
+                return err_result("array length must be Int", span);
+            }
+            if (count->int_value < 0)
+            {
+                return err_result("array length must be >= 0", span);
+            }
+            if (repeat->kind != ValueKind::Int)
+            {
+                return err_result("array element must be Int", span);
+            }
+
+            std::vector<Value> items;
+            items.assign(static_cast<std::size_t>(count->int_value), *repeat);
+            push(Value::array_v(elem_name, std::move(items)));
+            break;
+        }
+        case OpCode::ArrayGet:
+        {
+            auto index = pop();
+            auto array = pop();
+            if (!index.has_value() || !array.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (array->kind != ValueKind::Array || array->array_value == nullptr)
+            {
+                return err_result("array value must be Array", span);
+            }
+            if (index->kind != ValueKind::Int || index->int_value < 0 ||
+                static_cast<std::size_t>(index->int_value) >= array->array_value->items.size())
+            {
+                return err_result("array index out of bounds", span);
+            }
+
+            push(array->array_value->items[static_cast<std::size_t>(index->int_value)]);
+            break;
+        }
+        case OpCode::ArraySet:
+        {
+            auto value = pop();
+            auto index = pop();
+            auto array = pop();
+            if (!value.has_value() || !index.has_value() || !array.has_value())
+            {
+                return err_result("stack underflow", span);
+            }
+            if (array->kind != ValueKind::Array || array->array_value == nullptr)
+            {
+                return err_result("array value must be Array", span);
+            }
+            if (value->kind != ValueKind::Int)
+            {
+                return err_result("array element must be Int", span);
+            }
+            if (index->kind != ValueKind::Int || index->int_value < 0 ||
+                static_cast<std::size_t>(index->int_value) >= array->array_value->items.size())
+            {
+                return err_result("array index out of bounds", span);
+            }
+
+            array->array_value->items[static_cast<std::size_t>(index->int_value)] = *value;
+            push(Value::unit_v());
+            break;
+        }
         case OpCode::SetNewInt:
             push(Value::set_v());
             break;

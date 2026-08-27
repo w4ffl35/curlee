@@ -20,6 +20,7 @@ namespace curlee::vm
 struct Value;
 struct VecValue;
 struct SetValue;
+struct ArrayValue;
 
 enum class VecElementKind
 {
@@ -38,6 +39,7 @@ enum class ValueKind
     Enum,
     Vec,
     Set,
+    Array,
 };
 
 /**
@@ -58,6 +60,7 @@ struct Value
     std::shared_ptr<Value> payload;
     std::shared_ptr<VecValue> vec_value;
     std::shared_ptr<SetValue> set_value;
+    std::shared_ptr<ArrayValue> array_value;
 
     static Value int_v(std::int64_t v)
     {
@@ -73,6 +76,7 @@ struct Value
             .payload = nullptr,
             .vec_value = nullptr,
             .set_value = nullptr,
+            .array_value = nullptr,
         };
     } // GCOVR_EXCL_LINE
 
@@ -90,6 +94,7 @@ struct Value
             .payload = nullptr,
             .vec_value = nullptr,
             .set_value = nullptr,
+            .array_value = nullptr,
         };
     } // GCOVR_EXCL_LINE
 
@@ -142,6 +147,15 @@ struct Value
         }
         return out;
     } // GCOVR_EXCL_LINE
+
+    /**
+     * @brief A fixed-size array value (`[T; N]`, issue #278) as interpreted by
+     * the VM (issue #300): a normal in-memory buffer of element values. The
+     * element type name ("Int"/"U8"/"U16"/"U32"/"U64") is carried for display
+     * parity with the freestanding target; every element is stored as an Int
+     * (the VM's single numeric representation).
+     */
+    static Value array_v(std::string element_name, std::vector<Value> items);
 };
 
 struct VecValue
@@ -155,6 +169,24 @@ struct SetValue
 {
     std::unordered_set<std::int64_t> items;
 };
+
+struct ArrayValue
+{
+    // Element type name as written in the source ("Int", "U8", "U16", "U32",
+    // "U64"); all elements are stored as ValueKind::Int in the VM.
+    std::string element_name;
+    std::vector<Value> items;
+};
+
+inline Value Value::array_v(std::string element_name, std::vector<Value> items)
+{
+    Value out;
+    out.kind = ValueKind::Array;
+    out.array_value = std::make_shared<ArrayValue>();
+    out.array_value->element_name = std::move(element_name);
+    out.array_value->items = std::move(items);
+    return out;
+} // GCOVR_EXCL_LINE
 
 inline Value Value::vec_v(std::size_t max_len, VecElementKind element_kind)
 {
@@ -234,6 +266,13 @@ inline bool operator==(const Value& a, const Value& b)
             return a.set_value == nullptr && b.set_value == nullptr;
         }
         return a.set_value->items == b.set_value->items;
+    case ValueKind::Array:
+        if (a.array_value == nullptr || b.array_value == nullptr)
+        {
+            return a.array_value == nullptr && b.array_value == nullptr;
+        }
+        return a.array_value->element_name == b.array_value->element_name &&
+               a.array_value->items == b.array_value->items;
     }
     return false;
 }
@@ -294,6 +333,13 @@ inline std::string to_string(const Value& v)
             return "Set<Int>(null)";
         }
         return "Set<Int>(len=" + std::to_string(v.set_value->items.size()) + ")";
+    case ValueKind::Array:
+        if (v.array_value == nullptr)
+        {
+            return "Array<?>(null)";
+        }
+        return "[" + v.array_value->element_name + "; " +
+               std::to_string(v.array_value->items.size()) + "]";
     }
     return "<unknown>";
 }
