@@ -13,8 +13,9 @@ These are intentionally separate from `tests/diagnostics/` (renderer unit tests)
   acceptance #1-#4; `check_array_oob_*.golden` cover constant OOB / negative / unproven
   symbolic index rejections; `check_array_{len,elem}_mismatch.golden` and
   `check_array_reject_*.golden` cover the MVP rejection diagnostics (multi-dim, bare-name,
-  struct field, param, return, ghost, unsupported element kind); `run_array_vm_reject.golden`
-  asserts `curlee run` rejects arrays (freestanding-only).
+  struct field, param, return, ghost, unsupported element kind); `run_array_vm.stdout.golden`
+  and `run_static_array_vm.stdout.golden` assert `curlee run` executes local and module-level
+  arrays (issue #300), each returning 42.
 - Address-of a Curlee-owned array (issue #286): `check_addr_of.golden` (empty on success)
   covers the virtio-shaped descriptor-fill pattern (stable opaque addresses, Int -> U64
   widening into a descriptor field, a phys_read_u8 round-trip, the `base >> 12` PFN setup);
@@ -40,8 +41,8 @@ These are intentionally separate from `tests/diagnostics/` (renderer unit tests)
   `check_static_*.golden` cover the front-end MVP diagnostics (type mismatch, non-literal
   initializer, duplicate / function-conflict names, unsupported type, array length
   mismatch, non-repeat array initializer, the unsigned-scalar `let`-mirror rule, and
-  constant out-of-bounds on a global array); `run_static_array_vm_reject.golden` asserts
-  `curlee run` rejects module-level arrays (freestanding-only, like local arrays).
+  constant out-of-bounds on a global array); `run_static_array_vm.stdout.golden` asserts
+  `curlee run` executes module-level arrays (issue #300), returning 42.
 - Tests run with working directory set to the repo root so relative paths are stable.
 
 ## Ownership conventions

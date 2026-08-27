@@ -189,12 +189,14 @@ class Emitter
         }
 
         // Module-level mutable state (issue #287): allocate a global slot per
-        // scalar `static` and emit its one-time initializer at program start.
-        // The slots occupy the LOW region of the VM's locals array (before any
+        // `static` and emit its one-time initializer at program start. The
+        // slots occupy the LOW region of the VM's locals array (before any
         // function's locals), so they persist across the whole run and separate
         // function calls observe each other's mutations. Fixed-size array
-        // statics are freestanding-only (the VM has no array storage, exactly
-        // like array `let`s).
+        // statics (issue #300) get the same persistent slot, holding the
+        // interpreted array buffer (the VM half of the freestanding
+        // `static T name[N] = { ... };` emission); ArraySet mutates that
+        // buffer in place, so cross-call persistence matches the scalar case.
         globals_.clear();
         std::uint16_t global_slot = 0;
         for (const auto& s : program.statics)
@@ -210,17 +212,18 @@ class Emitter
                                      "in the VM; use curlee build --link"));
                 return diags_;
             }
-            if (s.type.is_array())
-            {
-                diags_.push_back(
-                    error_at(s.span, "arrays are freestanding-only and not supported in the VM"));
-                return diags_;
-            }
             globals_.emplace(s.name, global_slot++);
         }
         for (const auto& s : program.statics)
         {
-            emit_expr(s.value);
+            if (s.type.is_array())
+            {
+                emit_array_initializer(s.span, s.name, s.type, s.value);
+            }
+            else
+            {
+                emit_expr(s.value);
+            }
             if (!diags_.empty())
             {
                 return diags_;
@@ -463,13 +466,20 @@ class Emitter
 
     void emit_stmt_node(const LetStmt& stmt, Span span)
     {
-        // Fixed-size arrays are freestanding-only in the MVP (issue #278):
-        // the VM has no array storage, so reject before evaluating the
-        // initializer (whose ArrayLiteralExpr has no VM lowering either).
+        // Fixed-size arrays (issue #300, the VM half of #278): `let q: [T; N] =
+        // [v; N];` lowers to a repeat-value + count + element-name ArrayNew
+        // pushed into a normal local slot. The interpreted buffer mutates in
+        // place through ArraySet, mirroring the freestanding C array.
         if (stmt.type.is_array())
         {
-            diags_.push_back(
-                error_at(span, "arrays are freestanding-only and not supported in the VM"));
+            emit_array_initializer(span, stmt.name, stmt.type, stmt.value);
+            if (!diags_.empty())
+            {
+                return;
+            }
+            const auto slot = static_cast<std::uint16_t>(local_base_ + locals_.size());
+            locals_.emplace(stmt.name, slot);
+            chunk_.emit_local(OpCode::StoreLocal, slot, span);
             return;
         }
 
@@ -493,11 +503,41 @@ class Emitter
 
     void emit_stmt_node(const IndexAssignStmt& stmt, Span span)
     {
-        // `arr[i] = v;` mutates an array element: freestanding-only in the MVP
-        // (issue #278); the VM rejects arrays outright.
-        (void)stmt;
-        diags_.push_back(
-            error_at(span, "arrays are freestanding-only and not supported in the VM"));
+        // `arr[i] = v;` mutates an array element (issue #300): load the array
+        // binding (local or static global slot), evaluate the index and the
+        // value, then ArraySet — which bounds-checks at the access site, the
+        // VM's runtime mirror of the verifier's per-access obligation.
+        auto it = locals_.find(stmt.name);
+        if (it != locals_.end())
+        {
+            chunk_.emit_local(OpCode::LoadLocal, it->second, span);
+        }
+        else
+        {
+            auto git = globals_.find(stmt.name);
+            if (git != globals_.end())
+            {
+                chunk_.emit_local(OpCode::LoadLocal, git->second, span);
+            }
+            else
+            {
+                diags_.push_back(error_at(
+                    span, "unknown name '" + std::string(stmt.name) + "' in runnable code"));
+                return;
+            }
+        }
+
+        emit_expr(stmt.index);
+        if (!diags_.empty())
+        {
+            return;
+        }
+        emit_expr(stmt.value);
+        if (!diags_.empty())
+        {
+            return;
+        }
+        chunk_.emit(OpCode::ArraySet, span);
     }
 
     void emit_stmt_node(const AssignStmt& stmt, Span span)
@@ -734,6 +774,66 @@ class Emitter
         {
             patch_u16(patch, static_cast<std::uint16_t>(ip()));
         }
+    }
+
+    // Fixed-size array initializer (issue #300): `[v; N]` in a `let`/`static`
+    // position evaluates the repeat value once, pushes the count, then emits
+    // ArrayNew with a string constant naming the element type. The freestanding
+    // target requires the same "repeat literal only" shape, so a non-repeat
+    // initializer is rejected identically here.
+    void emit_array_initializer(Span span, std::string_view name,
+                                const curlee::parser::TypeName& type, const Expr& value)
+    {
+        const auto* arr = std::get_if<ArrayLiteralExpr>(&value.node);
+        if (arr == nullptr || arr->value == nullptr)
+        {
+            diags_.push_back(error_at(span, "array '" + std::string(name) +
+                                                "': initializer must be an array repeat "
+                                                "literal [v; N]"));
+            return;
+        }
+
+        emit_expr(*arr->value);
+        if (!diags_.empty())
+        {
+            return;
+        }
+
+        // The count is a plain decimal string (the parser folds define-based
+        // lengths and strips underscores); the type checker guarantees it is a
+        // positive integer, so this is defense in depth.
+        std::uint64_t count = 0;
+        bool count_ok = false;
+        try
+        {
+            count = std::stoull(arr->count_lexeme);
+            count_ok = true;
+        }
+        catch (const std::exception&)
+        {
+            count_ok = false;
+        }
+        if (!count_ok || count == 0)
+        {
+            diags_.push_back(error_at(span, "array '" + std::string(name) +
+                                                "': invalid length '" + arr->count_lexeme + "'"));
+            return;
+        }
+        if (count > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+        {
+            diags_.push_back(error_at(span, "array '" + std::string(name) +
+                                                "': length exceeds the VM's 64-bit limit"));
+            return;
+        }
+
+        const auto elem_idx = emit_string_constant(type.name, span, "array element type");
+        if (!diags_.empty())
+        {
+            return;
+        }
+        chunk_.emit_constant(Value::int_v(static_cast<std::int64_t>(count)), span);
+        chunk_.emit(OpCode::ArrayNew, span);
+        chunk_.emit_u16(elem_idx, span);
     }
 
     void emit_expr(const Expr& expr)
@@ -1489,14 +1589,37 @@ class Emitter
             span, "address-of (addr_of) is freestanding-only and not supported in the VM"));
     }
 
-    void emit_expr_node(const curlee::parser::IndexExpr&, Span span)
+    void emit_expr_node(const curlee::parser::IndexExpr& expr, Span span)
     {
-        diags_.push_back(error_at(span, "arrays are freestanding-only and not supported in the VM"));
+        // `q[i]` element read (issue #300): load the array binding, evaluate
+        // the index, then ArrayGet — which bounds-checks at the access site.
+        if (expr.base == nullptr || expr.index == nullptr)
+        {
+            diags_.push_back(error_at(span, "invalid array index expression"));
+            return;
+        }
+
+        emit_expr(*expr.base);
+        if (!diags_.empty())
+        {
+            return;
+        }
+        emit_expr(*expr.index);
+        if (!diags_.empty())
+        {
+            return;
+        }
+        chunk_.emit(OpCode::ArrayGet, span);
     }
 
     void emit_expr_node(const curlee::parser::ArrayLiteralExpr&, Span span)
     {
-        diags_.push_back(error_at(span, "arrays are freestanding-only and not supported in the VM"));
+        // `[v; N]` in a value position. Like the freestanding target, the
+        // repeat literal is only supported as a `let`/`static` initializer
+        // (handled by emit_array_initializer); the front-end rejects it
+        // anywhere else, so this is defense in depth.
+        diags_.push_back(error_at(
+            span, "array literals are only supported as 'let' initializers in the VM"));
     }
 };
 

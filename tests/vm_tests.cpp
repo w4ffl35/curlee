@@ -210,6 +210,33 @@ int main(int argc, char** argv)
             fail("expected non-null Set and null Set to compare unequal");
         }
 
+        // Fixed-size arrays (issue #300): equality compares element name and
+        // contents; to_string renders the `[T; N]` shape.
+        const Value ar1 = Value::array_v("Int", {Value::int_v(1), Value::int_v(2)});
+        const Value ar2 = Value::array_v("Int", {Value::int_v(1), Value::int_v(2)});
+        const Value ar3 = Value::array_v("Int", {Value::int_v(1), Value::int_v(3)});
+        const Value ar4 = Value::array_v("U8", {Value::int_v(1), Value::int_v(2)});
+        if (!(ar1 == ar2) || (ar1 == ar3) || (ar1 == ar4))
+        {
+            fail("unexpected Array value equality behavior");
+        }
+        if (to_string(ar1) != "[Int; 2]" || to_string(ar4) != "[U8; 2]")
+        {
+            fail("unexpected Array to_string");
+        }
+        Value null_array_a;
+        null_array_a.kind = ValueKind::Array;
+        Value null_array_b;
+        null_array_b.kind = ValueKind::Array;
+        if (!(null_array_a == null_array_b) || to_string(null_array_a) != "Array<?>(null)")
+        {
+            fail("expected null Array defensive behavior");
+        }
+        if (null_array_a == ar1 || ar1 == null_array_a)
+        {
+            fail("expected null Array and non-null Array to compare unequal");
+        }
+
         if (i1 == b1 || i1 == s1 || i1 == u1)
         {
             fail("expected different Value kinds to compare unequal");
@@ -1216,6 +1243,255 @@ int main(int argc, char** argv)
         if (res.ok || res.error != "vec value must be Vec")
         {
             fail("expected VecSet null-backing guard");
+        }
+    }
+
+    {
+        // Fixed-size arrays (issue #300): ArrayNew -> StoreLocal -> ArraySet ->
+        // ArrayGet round trip. `[7; 4]` builds four copies of the repeat value,
+        // element 0 is overwritten with 42, and the read-back returns 42.
+        Chunk chunk;
+        const auto elem_idx = chunk.add_constant(Value::string_v("Int"));
+        chunk.max_locals = 1;
+        chunk.emit_constant(Value::int_v(7));
+        chunk.emit_constant(Value::int_v(4));
+        chunk.emit(OpCode::ArrayNew);
+        chunk.emit_u16(static_cast<std::uint16_t>(elem_idx));
+        chunk.emit_local(OpCode::StoreLocal, 0);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(42));
+        chunk.emit(OpCode::ArraySet);
+        chunk.emit(OpCode::Pop);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::ArrayGet);
+        chunk.emit(OpCode::Return);
+
+        run_twice_deterministic(chunk, Value::int_v(42));
+    }
+
+    {
+        // Array elements alias their backing store through the shared pointer:
+        // a second load of the same local observes the in-place ArraySet write
+        // (the runtime basis of static-array cross-call persistence).
+        Chunk chunk;
+        const auto elem_idx = chunk.add_constant(Value::string_v("Int"));
+        chunk.max_locals = 1;
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(2));
+        chunk.emit(OpCode::ArrayNew);
+        chunk.emit_u16(static_cast<std::uint16_t>(elem_idx));
+        chunk.emit_local(OpCode::StoreLocal, 0);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit_constant(Value::int_v(9));
+        chunk.emit(OpCode::ArraySet);
+        chunk.emit(OpCode::Pop);
+        chunk.emit_local(OpCode::LoadLocal, 0);
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::ArrayGet);
+        chunk.emit(OpCode::Return);
+
+        run_twice_deterministic(chunk, Value::int_v(9));
+    }
+
+    {
+        Chunk chunk;
+        const auto elem_idx = chunk.add_constant(Value::string_v("Int"));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(4));
+        chunk.emit(OpCode::ArrayNew);
+        chunk.emit_u16(static_cast<std::uint16_t>(elem_idx));
+        chunk.emit_constant(Value::int_v(4));
+        chunk.emit(OpCode::ArrayGet);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "array index out of bounds")
+        {
+            fail("expected ArrayGet upper-bound index guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto elem_idx = chunk.add_constant(Value::string_v("Int"));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(4));
+        chunk.emit(OpCode::ArrayNew);
+        chunk.emit_u16(static_cast<std::uint16_t>(elem_idx));
+        chunk.emit_constant(Value::int_v(-1));
+        chunk.emit(OpCode::ArrayGet);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "array index out of bounds")
+        {
+            fail("expected ArrayGet negative-index guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto elem_idx = chunk.add_constant(Value::string_v("Int"));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(4));
+        chunk.emit(OpCode::ArrayNew);
+        chunk.emit_u16(static_cast<std::uint16_t>(elem_idx));
+        chunk.emit_constant(Value::int_v(4));
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::ArraySet);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "array index out of bounds")
+        {
+            fail("expected ArraySet upper-bound index guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto elem_idx = chunk.add_constant(Value::string_v("Int"));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(4));
+        chunk.emit(OpCode::ArrayNew);
+        chunk.emit_u16(static_cast<std::uint16_t>(elem_idx));
+        chunk.emit_constant(Value::int_v(-1));
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::ArraySet);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "array index out of bounds")
+        {
+            fail("expected ArraySet negative-index guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto elem_idx = chunk.add_constant(Value::string_v("Int"));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(-3));
+        chunk.emit(OpCode::ArrayNew);
+        chunk.emit_u16(static_cast<std::uint16_t>(elem_idx));
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "array length must be >= 0")
+        {
+            fail("expected ArrayNew negative-length guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto elem_idx = chunk.add_constant(Value::string_v("Int"));
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit_constant(Value::int_v(3));
+        chunk.emit(OpCode::ArrayNew);
+        chunk.emit_u16(static_cast<std::uint16_t>(elem_idx));
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "array element must be Int")
+        {
+            fail("expected ArrayNew non-Int repeat guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        const auto elem_idx = chunk.add_constant(Value::string_v("Int"));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(4));
+        chunk.emit(OpCode::ArrayNew);
+        chunk.emit_u16(static_cast<std::uint16_t>(elem_idx));
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::bool_v(true));
+        chunk.emit(OpCode::ArraySet);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "array element must be Int")
+        {
+            fail("expected ArraySet non-Int element guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNew);
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit(OpCode::ArrayGet);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "array value must be Array")
+        {
+            fail("expected ArrayGet non-Array guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::VecNew);
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(1));
+        chunk.emit(OpCode::ArraySet);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "array value must be Array")
+        {
+            fail("expected ArraySet non-Array guard");
+        }
+    }
+
+    {
+        // ArrayNew reads its u16 element-name operand: a truncated operand and
+        // an out-of-range index both fail defensively.
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(4));
+        chunk.emit(OpCode::ArrayNew);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "truncated array element type index")
+        {
+            fail("expected ArrayNew truncated-operand guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit_constant(Value::int_v(0));
+        chunk.emit_constant(Value::int_v(4));
+        chunk.emit(OpCode::ArrayNew);
+        chunk.emit_u16(static_cast<std::uint16_t>(9999));
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "array element type index out of range")
+        {
+            fail("expected ArrayNew out-of-range element-type guard");
+        }
+    }
+
+    {
+        Chunk chunk;
+        chunk.emit(OpCode::ArrayNew);
+
+        VM vm;
+        const auto res = vm.run(chunk);
+        if (res.ok || res.error != "truncated array element type index")
+        {
+            fail("expected ArrayNew full-underflow guard");
         }
     }
 

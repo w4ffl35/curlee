@@ -1,0 +1,13 @@
+// Fixed-size arrays run in the VM (issue #300): a module-level static array
+// written and read from main (the exact issue repro shape) plus a local array
+// with a symbolic loop-carried index under the verifier's per-access bounds
+// obligation. Returns 42.
+static buf: [Int; 4] = [0; 4];
+
+fn main() -> Int {
+  buf[0] = 42;
+  let q: [Int; 8] = [0; 8];
+  let i: Int = 1;
+  q[i] = buf[0];
+  return q[i];
+}

@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #300: module-level (static) arrays run in the VM (curlee run), the
+// exact repro from the issue body — `static buf: [Int; 4] = [0; 4]; ... buf[0]
+// = 42; return buf[0];` must return 42. The static array lives in a persistent
+// low slot of the VM's locals array (issue #287), initialized once at program
+// start; ArraySet mutates the interpreted buffer in place.
+//
+// Expected stdout: "curlee run: result 42"
+
+static buf: [Int; 4] = [0; 4];
+
+fn main() -> Int {
+  buf[0] = 42;
+  return buf[0];
+}
