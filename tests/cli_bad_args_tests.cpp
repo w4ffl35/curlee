@@ -831,6 +831,105 @@ int main()
         expect_contains(err, "requires an output file", "stderr");
     }
 
+    // build/check --define: missing value (issue #296).
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "build", "--define"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for missing --define value");
+        }
+        expect_contains(err, "expected NAME=VALUE after --define", "stderr");
+    }
+
+    // build --define=: empty value (issue #296).
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "build", "--define=", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for empty --define=");
+        }
+        expect_contains(err, "expected NAME=VALUE after --define=", "stderr");
+    }
+
+    // build --define: malformed name/value forms are rejected with a usage
+    // error naming the define (issue #296).
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "build", "--define", "9BAD=5", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for a numeric define name");
+        }
+        expect_contains(err, "invalid --define", "stderr");
+    }
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "build", "--define", "OK=abc", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for a non-integer define value");
+        }
+        expect_contains(err, "invalid --define", "stderr");
+    }
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "build", "--define", "NOVALUE", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for a define without '='");
+        }
+        expect_contains(err, "invalid --define", "stderr");
+    }
+
+    // build --define: duplicate names are rejected (issue #296).
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "build", "--define", "BUF=1", "--define", "BUF=2", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for a duplicate define");
+        }
+        expect_contains(err, "duplicate --define: 'BUF'", "stderr");
+    }
+
+    // check --define: a well-formed define is accepted by the parser (the
+    // check then fails on the missing file, not on the flag); a malformed one
+    // is rejected with a usage error (issue #296).
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "check", "--define", "BUF=16", "definitely_missing.curlee"}, out, err);
+        if (rc != 1)
+        {
+            fail("expected file-open error for check --define");
+        }
+        expect_contains(err, "error: failed to open file", "stderr");
+    }
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "check", "--define", "BUF=", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for an empty check --define value");
+        }
+        expect_contains(err, "invalid --define", "stderr");
+    }
+
     // build --link: a mid-pipeline toolchain failure triggers the fail()
     // cleanup lambda, which removes every scratch file (incl. the bundled
     // libgcc32 object) before returning kExitError (issue #288, review round

@@ -68,7 +68,44 @@ step "3. Codegen freestanding C (phys.mem)"
 "$bin" build --target freestanding-c -o "$outdir/phys_mem.c" tests/codegen/phys_mem.curlee >/dev/null
 test -s "$outdir/phys_mem.c"
 
-step "4. Link kernel ELF (--link) + entry check"
+# Runtime objects shared by the --define BSS check (step 4) and the qemu boot
+# smoke (step 6).
+$cc -ffreestanding -fno-builtin -nostdlib -std=c11 -mno-sse -mno-sse2 -Iruntime -c \
+  runtime/rt.c -o "$outdir/rt.o"
+$cc -ffreestanding -fno-builtin -nostdlib -c \
+  runtime/crt0.S -o "$outdir/crt0.o"
+
+step "4. Per-build static array sizing (--define, issue #296): the same source
+     built twice must emit different array sizes (BSS difference)."
+# joeos-scale: a 64 KB static buffer is the PVH-LOAD-budget case from
+# docs/phase2c-report.md §4.3 (a full-size Curlee static array must NOT land
+# in the PVH build's BSS); the small build is the 1-element stub.
+"$bin" build --target freestanding-c --define BUF_W=65536 --define BUF_H=1 \
+  --define JOE_PVH_BOOT=1 -o "$outdir/define_large.c" tests/codegen/define_array.curlee >/dev/null
+"$bin" build --target freestanding-c --define BUF_W=1 --define BUF_H=1 \
+  --define JOE_PVH_BOOT=1 -o "$outdir/define_small.c" tests/codegen/define_array.curlee >/dev/null
+grep -q "static uint8_t buf\[65536\] = {0};" "$outdir/define_large.c"
+grep -q "static uint8_t buf\[1\] = {0};" "$outdir/define_small.c"
+# The linked ELF .bss sizes must differ: 64 KB vs 1 B in the same runtime.
+$cc -ffreestanding -fno-builtin -nostdlib -std=c11 -mno-sse -mno-sse2 -Iruntime -c \
+  "$outdir/define_large.c" -o "$outdir/define_large.o"
+$cc -ffreestanding -fno-builtin -nostdlib -std=c11 -mno-sse -mno-sse2 -Iruntime -c \
+  "$outdir/define_small.c" -o "$outdir/define_small.o"
+ld -nostdlib -T runtime/linker.ld -o "$outdir/define_large.elf" \
+  "$outdir/define_large.o" "$outdir/rt.o" "$outdir/crt0.o"
+ld -nostdlib -T runtime/linker.ld -o "$outdir/define_small.elf" \
+  "$outdir/define_small.o" "$outdir/rt.o" "$outdir/crt0.o"
+large_bss=$(size "$outdir/define_large.elf" | awk 'NR==2 {print $3}')
+small_bss=$(size "$outdir/define_small.elf" | awk 'NR==2 {print $3}')
+if [[ -n "$large_bss" && -n "$small_bss" && "$large_bss" != "$small_bss" ]]; then
+  log "per-build BSS sizes differ: $large_bss (BUF_W=65536) vs $small_bss (BUF_W=1)"
+else
+  # The emitted-C difference is the guarantee even when the section rounds
+  # identically; joeos-scale arrays (2.4 MB frame ring) move the section size.
+  log "per-build emitted array sizes differ (buf[65536] vs buf[1]); .bss section sizes: $large_bss vs $small_bss"
+fi
+
+step "5. Link kernel ELF (--link) + entry check"
 "$bin" build --link -o "$outdir/kernel.elf" tests/codegen/kernel_hello.curlee >/dev/null
 test -s "$outdir/kernel.elf"
 objdump -f "$outdir/kernel.elf" | grep -q "start address 0x"
@@ -78,7 +115,7 @@ nm "$outdir/kernel.elf" | grep -q " _start$"
 readelf -S "$outdir/kernel.elf" | grep -q "\.note\.Xen"
 log "kernel entry + PVH note check OK"
 
-step "5. qemu boot smoke (skips if qemu missing)"
+step "6. qemu boot smoke (skips if qemu missing)"
 if ! command -v qemu-system-x86_64 >/dev/null 2>&1; then
   log "qemu-system-x86_64 not present; skipping boot smoke (codegen + link verified)"
   exit 0
@@ -89,10 +126,6 @@ fi
 # which exits qemu with status 3.
 $cc -ffreestanding -fno-builtin -nostdlib -std=c11 -mno-sse -mno-sse2 -Iruntime -c \
   tests/freestanding/debug_exit_driver.c -o "$outdir/debug_exit_driver.o"
-$cc -ffreestanding -fno-builtin -nostdlib -std=c11 -mno-sse -mno-sse2 -Iruntime -c \
-  runtime/rt.c -o "$outdir/rt.o"
-$cc -ffreestanding -fno-builtin -nostdlib -c \
-  runtime/crt0.S -o "$outdir/crt0.o"
 ld -nostdlib -T runtime/linker.ld -o "$outdir/kernel_smoke.elf" \
   "$outdir/kernel_hello.o" "$outdir/debug_exit_driver.o" "$outdir/rt.o" "$outdir/crt0.o"
 

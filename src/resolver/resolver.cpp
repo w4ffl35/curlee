@@ -99,9 +99,10 @@ class Resolver
   public:
     Resolver(std::optional<std::filesystem::path> base_path,
              std::optional<std::filesystem::path> entry_dir,
-             std::vector<std::filesystem::path> stdlib_roots = {})
+             std::vector<std::filesystem::path> stdlib_roots = {},
+             std::span<const curlee::parser::BuildDefine> defines = {})
         : base_path_(std::move(base_path)), entry_dir_(std::move(entry_dir)),
-          stdlib_roots_(std::move(stdlib_roots))
+          stdlib_roots_(std::move(stdlib_roots)), defines_(defines.begin(), defines.end())
     {
     }
 
@@ -150,6 +151,9 @@ class Resolver
     std::optional<std::filesystem::path> base_path_;
     std::optional<std::filesystem::path> entry_dir_;
     std::vector<std::filesystem::path> stdlib_roots_;
+    // Build-time constants (`--define NAME=VALUE`, issue #296) forwarded to
+    // the parser for imported-module parsing.
+    std::vector<curlee::parser::BuildDefine> defines_;
     bool resolving_ensures_ = false;
 
     struct ModuleInfo
@@ -241,7 +245,7 @@ class Resolver
             }
 
             const auto& toks = std::get<std::vector<curlee::lexer::Token>>(lexed);
-            auto parsed = curlee::parser::parse(toks);
+            auto parsed = curlee::parser::parse(toks, defines_);
             if (!std::holds_alternative<curlee::parser::Program>(parsed))
             {
                 Diagnostic d;
@@ -836,14 +840,15 @@ ResolveResult resolve(const curlee::parser::Program& program,
 ResolveResult resolve(const curlee::parser::Program& program,
                       const curlee::source::SourceFile& source,
                       std::optional<std::filesystem::path> entry_dir,
-                      std::vector<std::filesystem::path> stdlib_roots)
+                      std::vector<std::filesystem::path> stdlib_roots,
+                      std::span<const BuildDefine> defines)
 {
     std::optional<std::filesystem::path> base;
     if (!source.path.empty())
     {
         base = std::filesystem::path(source.path).parent_path();
     }
-    Resolver r(std::move(base), std::move(entry_dir), std::move(stdlib_roots));
+    Resolver r(std::move(base), std::move(entry_dir), std::move(stdlib_roots), defines);
     return r.run(program);
 }
 

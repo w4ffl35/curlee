@@ -478,7 +478,7 @@ int main()
         {
             const std::string kTwo63 = "9223372036854775808";
             const auto expect_two63 = [&](std::string_view lexeme) {
-                auto e = make_expr(s, curlee::parser::IntExpr{.lexeme = lexeme});
+                auto e = make_expr(s, curlee::parser::IntExpr{.lexeme = std::string(lexeme)});
                 auto r = v.lower_expr(e);
                 if (!std::holds_alternative<curlee::verification::ExprValue>(r))
                 {
@@ -1632,7 +1632,7 @@ int main()
         const curlee::source::Span s{.start = 0, .end = 1};
 
         auto port_lit = [&](std::string_view lexeme)
-        { return make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = lexeme})); };
+        { return make_expr_ptr(make_expr(s, curlee::parser::IntExpr{.lexeme = std::string(lexeme)})); };
 
         auto read_ok = [&](std::string_view op, std::unique_ptr<curlee::parser::Expr> port)
         {

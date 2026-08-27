@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cstdint>
 #include <cstdlib>
@@ -95,12 +96,12 @@ void print_usage(std::ostream& out)
     out << "  curlee <file.curlee>\n";
     out << "  curlee lex <file.curlee>\n";
     out << "  curlee parse <file.curlee>\n";
-    out << "  curlee check <file.curlee>\n";
+    out << "  curlee check [--define NAME=VALUE]... <file.curlee>\n";
     out << "  curlee run [--fuel <n>] [--seed <n>] [--profile] [--profile-format <text|json>] "
            "[--bundle <file.bundle>] [--cap <capability>]... <file.curlee>\n";
     out << "  curlee <lex|parse|check|run|build> [--diag-format <text|json>] ...\n";
     out << "  curlee build [--target freestanding-c] [--link] [--arch <x86_64|i386>] "
-           "[-o out] <entry.curlee>\n";
+           "[--define NAME=VALUE]... [-o out] <entry.curlee>\n";
     out << "    --target freestanding-c: emit freestanding C for the verified program\n";
     out << "      (the only supported target; no hosted builtins: no print, no String,\n";
     out << "      no Vec. The verification gate applies: no proof, no build).\n";
@@ -143,6 +144,14 @@ void print_build_usage(std::ostream& out)
     out << "flags:\n";
     out << "  --target <target>   codegen target; the only supported value is `freestanding-c`\n";
     out << "                      (default). Other targets are rejected.\n";
+    out << "  --define NAME=VALUE  inject a build-time integer constant (repeatable, issue\n";
+    out << "                      #296): the parser resolves NAME in array-length / repeat-\n";
+    out << "                      count constant expressions (`static buf: [U8; W * H] =`\n";
+    out << "                      `[0; W * H];`) and in primary-expression positions\n";
+    out << "                      (`if (JOE_PVH_BOOT == 1)`), so the SAME source can be built\n";
+    out << "                      per target with different static array sizes. This is NOT a\n";
+    out << "                      preprocessor — no #ifdef, no text substitution, no defaults\n";
+    out << "                      (an undefined name is a plain identifier / resolve error).\n";
     out << "  --link              additionally compile the emitted C with\n";
     out << "                      `cc -ffreestanding -fno-builtin -nostdlib -c`, assemble\n";
     out << "                      the runtime boot stub (runtime/crt0.S for x86_64,\n";
@@ -792,7 +801,8 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
                   const std::optional<std::filesystem::path>& entry_dir_override = std::nullopt,
                   std::vector<curlee::bundle::ImportPin>* out_import_pins = nullptr,
                   std::vector<std::uint8_t>* out_bytecode = nullptr,
-                  std::string* out_c_source = nullptr)
+                  std::string* out_c_source = nullptr,
+                  const std::vector<curlee::parser::BuildDefine>& defines = {})
 {
     auto loaded = source::load_source_file(path);
     if (auto* err = std::get_if<source::LoadError>(&loaded))
@@ -989,7 +999,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             }
 
             const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
-            auto parsed = parser::parse(toks);
+            auto parsed = parser::parse(toks, defines);
             if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
             {
                 render_diags(std::get<std::vector<diag::Diagnostic>>(parsed), stable_file);
@@ -1050,7 +1060,8 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             }
 
             const auto resolved =
-                resolver::resolve(mod_program, stable_file, std::optional{entry_dir}, stdlib_roots);
+                resolver::resolve(mod_program, stable_file, std::optional{entry_dir}, stdlib_roots,
+                                  defines);
             if (std::holds_alternative<std::vector<diag::Diagnostic>>(resolved))
             {
                 render_diags(std::get<std::vector<diag::Diagnostic>>(resolved), stable_file);
@@ -1085,7 +1096,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
         }
 
         const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
-        auto parsed = parser::parse(toks);
+        auto parsed = parser::parse(toks, defines);
         if (std::holds_alternative<std::vector<diag::Diagnostic>>(parsed))
         {
             render_diags(std::get<std::vector<diag::Diagnostic>>(parsed), file);
@@ -1183,7 +1194,7 @@ int cmd_read_only(std::string_view cmd, const std::string& path,
             parser::reassign_expr_ids(program);
         }
 
-        const auto resolved = resolver::resolve(program, file, entry_dir, stdlib_roots);
+        const auto resolved = resolver::resolve(program, file, entry_dir, stdlib_roots, defines);
         if (std::holds_alternative<std::vector<diag::Diagnostic>>(resolved))
         {
             render_diags(std::get<std::vector<diag::Diagnostic>>(resolved), file);
@@ -1823,6 +1834,89 @@ std::optional<std::uint64_t> parse_u64(std::string_view s)
     return out;
 }
 
+// Parse `--define NAME=VALUE` (issue #296): NAME is `[A-Za-z_][A-Za-z0-9_]*`
+// and VALUE a non-negative integer (decimal, or 0x-hex with optional
+// underscores), folded to a `parser::BuildDefine`. Returns std::nullopt on a
+// malformed define (the caller prints the specific usage error).
+std::optional<curlee::parser::BuildDefine> parse_build_define(std::string_view raw)
+{
+    const auto eq = raw.find('=');
+    if (eq == std::string_view::npos || eq == 0 || eq + 1 >= raw.size())
+    {
+        return std::nullopt;
+    }
+    const std::string_view name = raw.substr(0, eq);
+    if (name.empty() || !(std::isalpha(static_cast<unsigned char>(name[0])) || name[0] == '_'))
+    {
+        return std::nullopt;
+    }
+    for (const char c : name)
+    {
+        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_'))
+        {
+            return std::nullopt;
+        }
+    }
+
+    std::string_view value_text = raw.substr(eq + 1);
+    std::string cleaned;
+    cleaned.reserve(value_text.size());
+    for (const char c : value_text)
+    {
+        if (c != '_')
+        {
+            cleaned.push_back(c);
+        }
+    }
+    if (cleaned.empty())
+    {
+        return std::nullopt;
+    }
+    std::uint64_t value = 0;
+    const char* begin = cleaned.data();
+    const char* end = cleaned.data() + cleaned.size();
+    int base = 10;
+    if (cleaned.size() > 2 && cleaned[0] == '0' && (cleaned[1] == 'x' || cleaned[1] == 'X'))
+    {
+        base = 16;
+        begin += 2;
+        if (begin == end)
+        {
+            return std::nullopt;
+        }
+    }
+    const auto res = std::from_chars(begin, end, value, base);
+    if (res.ec != std::errc{} || res.ptr != end)
+    {
+        return std::nullopt;
+    }
+    return curlee::parser::BuildDefine{.name = std::string(name), .value = value};
+}
+
+// Append a `--define NAME=VALUE` argument to `defines`, rejecting malformed
+// syntax and duplicate names (a define must resolve unambiguously). Returns
+// an error message, or an empty string on success.
+std::string add_build_define(std::vector<curlee::parser::BuildDefine>& defines,
+                             std::string_view raw)
+{
+    const auto parsed = parse_build_define(raw);
+    if (!parsed.has_value())
+    {
+        return "invalid --define (expected NAME=VALUE with NAME [A-Za-z_][A-Za-z0-9_]* "
+               "and a non-negative integer VALUE): " +
+               std::string(raw);
+    }
+    for (const auto& existing : defines)
+    {
+        if (existing.name == parsed->name)
+        {
+            return "duplicate --define: '" + parsed->name + "' is already defined";
+        }
+    }
+    defines.push_back(*parsed);
+    return "";
+}
+
 std::optional<DiagOutputFormat> parse_diag_output_format(std::string_view raw)
 {
     if (raw == "text")
@@ -1898,12 +1992,14 @@ int cmd_fmt(const std::string& path, bool check)
 // without writing an output file.
 int cmd_build(const std::string& entry_path, const std::string& output_path,
               const std::vector<std::filesystem::path>& stdlib_roots, bool to_stdout, bool link,
-              const std::string& arch, DiagOutputFormat diag_format)
+              const std::string& arch, DiagOutputFormat diag_format,
+              const std::vector<curlee::parser::BuildDefine>& defines)
 {
     std::string c_source;
     const int rc =
         cmd_read_only("build", entry_path, empty_caps(), kDefaultFuel, std::nullopt, false,
-                      diag_format, {}, stdlib_roots, std::nullopt, nullptr, nullptr, &c_source);
+                      diag_format, {}, stdlib_roots, std::nullopt, nullptr, nullptr, &c_source,
+                      defines);
     if (rc != kExitOk)
     {
         return rc;
@@ -2292,6 +2388,7 @@ int run(int argc, char** argv)
         auto stdlib_roots = load_stdlib_roots_from_env();
         std::optional<std::filesystem::path> root;
         std::vector<std::string> positional;
+        std::vector<curlee::parser::BuildDefine> defines;
 
         for (std::size_t i = 0; i < args.size();)
         {
@@ -2377,6 +2474,50 @@ int run(int argc, char** argv)
                     return kExitUsage;
                 }
                 arch = std::string(value);
+                ++i;
+                continue;
+            }
+
+            // `--define NAME=VALUE` injects a build-time integer constant
+            // (issue #296): the parser resolves the name in array-length /
+            // repeat-count constant expressions and in primary-expression
+            // positions, so the SAME source can be built per-target with
+            // different static array sizes. Repeatable; duplicates are errors.
+            if (a == "--define")
+            {
+                if (i + 1 >= args.size())
+                {
+                    std::cerr << "error: expected NAME=VALUE after --define\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                const std::string msg = add_build_define(defines, args[i + 1]);
+                if (!msg.empty())
+                {
+                    std::cerr << "error: " << msg << "\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                i += 2;
+                continue;
+            }
+
+            if (a.starts_with("--define="))
+            {
+                const auto value = a.substr(std::string_view("--define=").size());
+                if (value.empty())
+                {
+                    std::cerr << "error: expected NAME=VALUE after --define=\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                const std::string msg = add_build_define(defines, value);
+                if (!msg.empty())
+                {
+                    std::cerr << "error: " << msg << "\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
                 ++i;
                 continue;
             }
@@ -2517,7 +2658,8 @@ int run(int argc, char** argv)
             entry_path = (*root / entry_path).string();
         }
 
-        return cmd_build(entry_path, output, stdlib_roots, to_stdout, link, arch, diag_format);
+        return cmd_build(entry_path, output, stdlib_roots, to_stdout, link, arch, diag_format,
+                         defines);
     }
 
     if (cmd == "fmt")
@@ -3161,6 +3303,87 @@ int run(int argc, char** argv)
 
         return cmd_read_only(cmd, *path, caps, fuel, seed, use_window_graphics_backend, diag_format,
                              profile_options, stdlib_roots);
+    }
+
+    if (cmd == "check")
+    {
+        // `curlee check [--define NAME=VALUE]... <file.curlee>`: the same
+        // verification pipeline as `build`, with per-build-target constants
+        // (issue #296) so a module that sizes static arrays from defines can
+        // be verified standalone (joeos's `make check` passes the same defines
+        // the build uses). No codegen is emitted.
+        std::optional<std::string> path;
+        std::vector<curlee::parser::BuildDefine> defines;
+        for (std::size_t i = 0; i < args.size();)
+        {
+            const std::string_view a = args[i];
+
+            if (a == "--define")
+            {
+                if (i + 1 >= args.size())
+                {
+                    std::cerr << "error: expected NAME=VALUE after --define\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                const std::string msg = add_build_define(defines, args[i + 1]);
+                if (!msg.empty())
+                {
+                    std::cerr << "error: " << msg << "\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                i += 2;
+                continue;
+            }
+
+            if (a.starts_with("--define="))
+            {
+                const auto value = a.substr(std::string_view("--define=").size());
+                if (value.empty())
+                {
+                    std::cerr << "error: expected NAME=VALUE after --define=\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                const std::string msg = add_build_define(defines, value);
+                if (!msg.empty())
+                {
+                    std::cerr << "error: " << msg << "\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                ++i;
+                continue;
+            }
+
+            if (a.starts_with('-'))
+            {
+                std::cerr << "error: unknown option: " << a << "\n\n";
+                print_usage(std::cerr);
+                return kExitUsage;
+            }
+
+            if (path.has_value())
+            {
+                std::cerr << "error: expected a single <file.curlee>\n\n";
+                print_usage(std::cerr);
+                return kExitUsage;
+            }
+            path = std::string(a);
+            ++i;
+        }
+
+        if (!path.has_value())
+        {
+            std::cerr << "error: expected <file.curlee>\n\n";
+            print_usage(std::cerr);
+            return kExitUsage;
+        }
+
+        return cmd_read_only(cmd, *path, empty_caps(), kDefaultFuel, std::nullopt, false,
+                             diag_format, {}, load_stdlib_roots_from_env(), std::nullopt, nullptr,
+                             nullptr, nullptr, defines);
     }
 
     if (args.size() != 1)

@@ -65,3 +65,17 @@ the generated C is linked against `runtime/rt.c` + `runtime/crt0.S` +
 - `joeos_10_vbe_globals.curlee` — the vbe_state.c shim's shape (a probe
   writing 4 scalar globals, read later by a separate function) in pure Curlee
   (issue #287).
+- `joeos_14_build_sized_static.curlee` — per-build-target static array sizing
+  (issue #296): the SAME source declares a static array sized by `--define`
+  build constants (`[U32; ASSET_W * ASSET_H]`), a define-initialized build
+  discriminator static, and the addr_of-based base getter — the fb.c
+  `#ifndef JOE_PVH_BOOT` pattern. Built twice (`--define ASSET_W=4
+  --define ASSET_H=4 --define JOE_PVH_BOOT=0` vs `=1`), the emitted C declares
+  `static uint32_t asset_region[16]` vs `[1]` (the linked ELF's asset_region
+  symbol is 64 B vs 4 B; the .bss SECTION size is dominated by the runtime's
+  fixed buffers, so the large-array case — the joeos 2.4 MB frame ring — is
+  what moves the section size), and the serial log reports the folded size +
+  build discriminator ('OK16G' vs 'OK01P'). The negative-case fixture is the
+  same file WITHOUT defines: `[T; ASSET_W * ASSET_H]` fails to parse with
+  "array length must be an integer literal or a build-time constant" (an
+  undefined define name is not a constant).

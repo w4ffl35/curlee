@@ -78,6 +78,38 @@ static void run_positive_case(const fs::path& fixture, const fs::path& expected)
     }
 }
 
+// Positive define fixture (issue #296): `curlee build --define NAME=VALUE ...`
+// must succeed and emit C that exactly matches the golden `.expected` file.
+static void run_positive_define_case(const fs::path& fixture, const fs::path& expected,
+                                     const std::vector<std::string>& defines)
+{
+    std::vector<std::string> argv = {"curlee", "build", "-o", "-"};
+    for (const auto& d : defines)
+    {
+        argv.push_back("--define");
+        argv.push_back(d);
+    }
+    argv.push_back(fixture.string());
+
+    std::string out;
+    std::string err;
+    const int rc = run_cli(argv, out, err);
+
+    if (rc != 0)
+    {
+        fail("build --define failed for " + fixture.string() + ":\n" + err);
+    }
+
+    const std::string expected_out = slurp(expected);
+    if (out != expected_out)
+    {
+        std::cerr << "GOLDEN MISMATCH: " << fixture.filename().string() << "\n";
+        std::cerr << "--- expected ---\n" << expected_out;
+        std::cerr << "--- got ---\n" << out;
+        std::exit(1);
+    }
+}
+
 // Error fixtures: `curlee build` must fail (verification gate or hosted
 // builtin rejection) with the expected diagnostic in stderr.
 static void run_negative_case(const fs::path& fixture, const std::string& expected_diag)
@@ -124,7 +156,7 @@ int main(int argc, char** argv)
     // unsigned_widen.expected, u64_widen.expected, array.expected,
     // phys_read_runtime.expected, phys_write_runtime.expected,
     // static_state.expected, addr_of.expected, shadow_arrays.expected,
-    // extern_static.expected.
+    // extern_static.expected, define_array.expected.
     for (const char* name :
          {"arith", "control_flow", "while_loop", "struct_fixture", "enum_match",
           "match_stmt", "phys_mem", "phys_param", "empty_union_enum", "forward_ref",
@@ -136,6 +168,47 @@ int main(int argc, char** argv)
     {
         run_positive_case(fixtures_dir / (std::string(name) + ".curlee"),
                           fixtures_dir / (std::string(name) + ".expected"));
+    }
+
+    // Per-build-target static array sizing (issue #296): the define golden is
+    // generated with BUF_W=4, BUF_H=4, JOE_PVH_BOOT=0.
+    run_positive_define_case(fixtures_dir / "define_array.curlee",
+                             fixtures_dir / "define_array.expected",
+                             {"BUF_W=4", "BUF_H=4", "JOE_PVH_BOOT=0"});
+
+    // Behavioral check (issue #296 acceptance criterion 1): the SAME source
+    // built with different defines must emit DIFFERENT array sizes — the
+    // per-build-target BSS-size difference that joeos's PVH/GRUB split needs.
+    {
+        auto build_with = [&](const std::string& size_define) -> std::string
+        {
+            std::string out;
+            std::string err;
+            const int rc =
+                run_cli({"curlee", "build", "-o", "-", "--define", "BUF_W=" + size_define,
+                         "--define", "BUF_H=1", "--define", "JOE_PVH_BOOT=1",
+                         (fixtures_dir / "define_array.curlee").string()},
+                        out, err);
+            if (rc != 0)
+            {
+                fail("define build BUF_W=" + size_define + " failed:\n" + err);
+            }
+            return out;
+        };
+        const std::string small = build_with("1");
+        const std::string large = build_with("1024");
+        if (small.find("static uint8_t buf[1] = {0};") == std::string::npos)
+        {
+            fail("expected the small define build to emit buf[1], got:\n" + small);
+        }
+        if (large.find("static uint8_t buf[1024] = {0};") == std::string::npos)
+        {
+            fail("expected the large define build to emit buf[1024], got:\n" + large);
+        }
+        if (small == large)
+        {
+            fail("define builds must emit different C for different BUF_W");
+        }
     }
 
     // Error cases: the verification gate is enforced and hosted builtins are

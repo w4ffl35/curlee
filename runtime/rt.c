@@ -87,3 +87,18 @@ CURLEE_RT_WEAK void curlee_putc(char c)
 {
     (void)c; // default: no-op so linking always succeeds; host overrides.
 }
+
+CURLEE_RT_WEAK void curlee_sfence(void)
+{
+#if defined(__x86_64__) || defined(__i386__)
+    // Store fence: ordered with "memory" clobber so the compiler cannot hoist
+    // or sink the preceding volatile stores past it. The descriptor writes a
+    // driver published (phys_write_* volatile stores) stay ahead of the
+    // avail-idx store the device polls.
+    __asm__ volatile("sfence" ::: "memory");
+#else
+    // Other architectures are future work; keep a compiler barrier so the
+    // symbol still provides a defined ordering point.
+    __asm__ volatile("" ::: "memory");
+#endif
+}

@@ -1,0 +1,22 @@
+// Per-build-target static array sizing (issue #296): the SAME source declares
+// a static array whose size is a constant expression over `--define` build
+// constants, plus a build discriminator read in a primary-expression position.
+// Two `curlee build` invocations with different defines emit different array
+// sizes (this golden is generated with `--define BUF_W=4 --define BUF_H=4
+// --define JOE_PVH_BOOT=0`; see codegen_tests.cpp run_positive_define_case).
+static buf: [U8; BUF_W * BUF_H] = [0; BUF_W * BUF_H];
+
+// The build discriminator: a define value read in an expression position.
+static pvh: Int = JOE_PVH_BOOT;
+
+fn is_pvh() -> Int {
+  if (JOE_PVH_BOOT == 1) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+fn main() -> Int {
+  return BUF_W;
+}
