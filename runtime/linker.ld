@@ -36,6 +36,12 @@ SECTIONS
         *(.data .data.*)
     }
 
+    /* Start .bss on a fresh page so GNU ld emits a separate RW LOAD segment
+     * (otherwise a small .bss/.stack adjacent to .text collapses into one
+     * RWX LOAD segment, which ld warns about). The 64-bit PVH layout is
+     * unchanged: its .bss already landed on a page boundary. */
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
+
     .bss (NOLOAD) : {
         __bss_start = .;
         *(.bss .bss.*)

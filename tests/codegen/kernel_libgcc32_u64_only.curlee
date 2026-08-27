@@ -1,0 +1,22 @@
+// i386-only boot fixture driving the bundled libgcc32 helpers with U64 types
+// and NO Int anywhere (issue #288). Unlike kernel_libgcc32.curlee /
+// kernel_libgcc32_extern.curlee (whose emitted C contains both int64_t and
+// uint64_t), this fixture's emitted C contains uint64_t but NO int64_t — it
+// exercises the `c_source.find("int64_t")` false / `find("uint64_t")` true
+// side of the auto-link gate in cli_impl.ipp, so the helpers must still be
+// linked (the gate is "any 64-bit type -> link the helpers").
+//
+// This fixture is 32-bit-only: the 64-bit PVH target never links the
+// helpers, so an explicit __udivdi3 extern call would be an undefined symbol
+// there.
+extern fn __udivdi3(a: U64, b: U64) -> U64;
+extern fn curlee_halt() -> Unit;
+
+fn main() -> Unit {
+  let a: U64 = 4000000000;
+  let b: U64 = 7;
+  let q: U64 = __udivdi3(a, b);
+  let exp: U64 = 571428571; // 4000000000 / 7
+  if (q == exp) { curlee_halt(); }
+  return;
+}

@@ -740,6 +740,82 @@ int main()
         expect_contains(err, "error: unknown command: wat", "stderr");
     }
 
+    // build --arch: missing value (issue #288).
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "build", "--arch"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for missing --arch value");
+        }
+        expect_contains(err, "error: expected arch after --arch", "stderr");
+    }
+
+    // build --arch=: empty value (issue #288).
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture({"curlee", "build", "--arch=", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for empty --arch=");
+        }
+        expect_contains(err, "error: expected arch after --arch=", "stderr");
+    }
+
+    // build --arch: unsupported value, both split and --arch= forms (issue #288).
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "build", "--arch", "arm64", "-o", "out.elf", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for unsupported --arch value");
+        }
+        expect_contains(err, "error: unsupported build arch: arm64", "stderr");
+    }
+    {
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "build", "--arch=arm64", "-o", "out.elf", "x.curlee"}, out, err);
+        if (rc != 2)
+        {
+            fail("expected usage exit code for unsupported --arch= value");
+        }
+        expect_contains(err, "error: unsupported build arch: arm64", "stderr");
+    }
+
+    // build --arch: both supported values are accepted by the parser (the
+    // build then fails on the missing entry file, not on the flag).
+    {
+        for (const std::string& arch : {std::string("x86_64"), std::string("i386")})
+        {
+            std::string out;
+            std::string err;
+            const int rc = run_cli_capture(
+                {"curlee", "build", "--arch", arch, "definitely_missing.curlee"}, out, err);
+            if (rc != 1)
+            {
+                fail("expected file-open error for --arch " + arch);
+            }
+            expect_contains(err, "error: failed to open file", "stderr");
+        }
+        {
+            std::string out;
+            std::string err;
+            const int rc = run_cli_capture(
+                {"curlee", "build", "--arch=i386", "definitely_missing.curlee"}, out, err);
+            if (rc != 1)
+            {
+                fail("expected file-open error for --arch=i386");
+            }
+            expect_contains(err, "error: failed to open file", "stderr");
+        }
+    }
+
     // build --link requires an output file (issue #256): -o must be given.
     {
         const fs::path extern_fixture =

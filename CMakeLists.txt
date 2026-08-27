@@ -1164,7 +1164,7 @@ if(CURLEE_ENABLE_FREESTANDING_SMOKE)
 
   # Each smoke test writes its emitted .c into its own subdirectory to avoid
   # races when ctest runs tests in parallel.
-  foreach(_fixture arith control_flow while_loop struct_fixture enum_match match_stmt phys_mem phys_param empty_union_enum forward_ref unit_empty match_unit_arms mixed_payload_enum phys_param_forward while_loop_unit multi_function extern_fn io_port unsigned_widen u64_widen array phys_read_runtime phys_write_runtime addr_of shadow_arrays)
+  foreach(_fixture arith control_flow while_loop struct_fixture enum_match match_stmt phys_mem phys_param empty_union_enum forward_ref unit_empty match_unit_arms mixed_payload_enum phys_param_forward while_loop_unit multi_function extern_fn io_port unsigned_widen u64_widen array phys_read_runtime phys_write_runtime addr_of shadow_arrays kernel_libgcc32 kernel_libgcc32_extern kernel_libgcc32_u64_only kernel_nolibgcc32)
     set(_fixture_workdir "${CMAKE_BINARY_DIR}/codegen_smoke_${_fixture}")
     file(MAKE_DIRECTORY "${_fixture_workdir}")
     add_test(
@@ -1195,6 +1195,26 @@ if(CURLEE_ENABLE_FREESTANDING_SMOKE)
       -P ${CMAKE_SOURCE_DIR}/cmake/linker_boot_smoke.cmake
   )
   set_tests_properties(curlee_linker_boot_smoke PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  )
+
+  # i386 link smoke (issue #288): `curlee build --link --arch i386` auto-links
+  # the bundled libgcc32 helpers for 64-bit-arithmetic kernels (no downstream
+  # helper file) and the default x86_64 PVH link carries NONE of them. Skips
+  # visibly when the C toolchain lacks -m32 support. Requires readelf/nm/ld.
+  set(_i386_workdir "${CMAKE_BINARY_DIR}/i386_link_smoke")
+  file(MAKE_DIRECTORY "${_i386_workdir}")
+  add_test(
+    NAME curlee_i386_link_smoke
+    COMMAND ${CMAKE_COMMAND}
+      -Dcurlee_binary=$<TARGET_FILE:curlee>
+      -Dcurlee_fixture=${CMAKE_SOURCE_DIR}/tests/codegen/kernel_libgcc32.curlee
+      -Dcurlee_fixture_u64_only=${CMAKE_SOURCE_DIR}/tests/codegen/kernel_libgcc32_u64_only.curlee
+      -Dcurlee_fixture_no64=${CMAKE_SOURCE_DIR}/tests/codegen/kernel_nolibgcc32.curlee
+      -Dcurlee_outdir=${_i386_workdir}
+      -P ${CMAKE_SOURCE_DIR}/cmake/i386_link_smoke.cmake
+  )
+  set_tests_properties(curlee_i386_link_smoke PROPERTIES
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
   )
 
@@ -1246,6 +1266,22 @@ target_include_directories(curlee_runtime_mem_tests PRIVATE
 target_link_libraries(curlee_runtime_mem_tests PRIVATE curlee_rt)
 target_compile_options(curlee_runtime_mem_tests PRIVATE -fno-builtin)
 add_test(NAME curlee_runtime_mem_tests COMMAND curlee_runtime_mem_tests)
+
+# Host-visible unit tests for the bundled 32-bit libgcc-ABI helpers
+# (runtime/libgcc32_helpers.c, issue #288). The helpers are compiled into the
+# x86-64 test binary and cross-checked against native 64-bit arithmetic over
+# the edge-case vectors the issue's verification plan lists (divide by zero,
+# negative operands, shift counts >= 32/64, the two-divl single-word-divisor
+# path). -fno-builtin keeps the compiler from constant-folding the calls.
+add_executable(curlee_libgcc32_helpers_tests
+  tests/libgcc32_helpers_tests.cpp
+  runtime/libgcc32_helpers.c
+)
+target_include_directories(curlee_libgcc32_helpers_tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/runtime
+)
+target_compile_options(curlee_libgcc32_helpers_tests PRIVATE -fno-builtin)
+add_test(NAME curlee_libgcc32_helpers_tests COMMAND curlee_libgcc32_helpers_tests)
 
 # Freestanding compile-smoke: rt.c compiles with
 # `gcc -ffreestanding -fno-builtin -nostdlib -c -Wall -Wextra -Wpedantic

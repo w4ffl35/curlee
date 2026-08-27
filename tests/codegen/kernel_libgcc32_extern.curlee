@@ -1,0 +1,68 @@
+// Boot fixture exercising the bundled libgcc32 helpers directly through
+// extern calls (issue #288).
+//
+// The Curlee language cannot express U64 arithmetic (division/modulo are
+// hard errors in the MVP type checker), so the unsigned helpers and the
+// divide-by-zero behavior are driven here through `extern fn` declarations:
+// codegen emits 1:1 identifiers, the freestanding link resolves them to the
+// bundled runtime/libgcc32_helpers.c (auto-linked by `curlee build --link
+// --arch i386` when the emitted C uses 64-bit types), and the booted kernel
+// calls them with edge-case vectors. The verifier treats extern calls as
+// trusted boundaries, so this also exercises the helpers' defined
+// divide-by-zero behavior (0 / dividend) end-to-end.
+//
+// This fixture is 32-bit-only (the 64-bit PVH target never links the
+// helpers; an explicit __udivdi3 call would be an undefined symbol there).
+// Each check emits a single byte: 1 = helper result matches the expected
+// value, 0 = mismatch.
+extern fn __udivdi3(a: U64, b: U64) -> U64;
+extern fn __umoddi3(a: U64, b: U64) -> U64;
+extern fn __divdi3(a: Int, b: Int) -> Int;
+extern fn __moddi3(a: Int, b: Int) -> Int;
+extern fn curlee_putc(c: Int) -> Unit;
+extern fn curlee_halt() -> Unit;
+
+fn main() -> Unit {
+  // Unsigned divide/modulo (single-word divisor path, operands < 2^32).
+  let a: U64 = 4000000000;
+  let b: U64 = 7;
+  let z: U64 = 0;
+  let exp_q: U64 = 571428571; // 4000000000 / 7
+  let exp_r: U64 = 3;         // 4000000000 % 7
+  let q: U64 = __udivdi3(a, b);
+  let r: U64 = __umoddi3(a, b);
+  if (q == exp_q) { curlee_putc(1); } else { curlee_putc(0); }
+  if (r == exp_r) { curlee_putc(1); } else { curlee_putc(0); }
+  // Unsigned divide-by-zero: quotient 0, remainder dividend (defined
+  // behavior for this runtime).
+  let q0: U64 = __udivdi3(a, z);
+  if (q0 == z) { curlee_putc(1); } else { curlee_putc(0); }
+  let r0: U64 = __umoddi3(a, z);
+  if (r0 == a) { curlee_putc(1); } else { curlee_putc(0); }
+  // Signed divide/modulo with a dividend >= 2^32 and a single-word divisor:
+  // exercises the two-divl path of udivmoddi4_impl (the branch that #DE'd in
+  // the old per-project reference on large dividends).
+  let big: Int = 1000000000000;
+  let d7: Int = 7;
+  let exp_dq: Int = 142857142857; // 1000000000000 / 7
+  let exp_dr: Int = 1;            // 1000000000000 % 7
+  let dq: Int = __divdi3(big, d7);
+  let dr: Int = __moddi3(big, d7);
+  if (dq == exp_dq) { curlee_putc(1); } else { curlee_putc(0); }
+  if (dr == exp_dr) { curlee_putc(1); } else { curlee_putc(0); }
+  // Signed edge cases: negative operands, INT64_MIN-scale magnitudes.
+  let nq: Int = __divdi3(-1000000000000, 7);
+  if (nq == -142857142857) { curlee_putc(1); } else { curlee_putc(0); }
+  let nm: Int = __moddi3(-1000000000000, 7);
+  if (nm == -1) { curlee_putc(1); } else { curlee_putc(0); }
+  let min3: Int = __divdi3(-9223372036854775807, 3);
+  if (min3 == -3074457345618258602) { curlee_putc(1); } else { curlee_putc(0); }
+  // Signed divide-by-zero: 0 (defined behavior for this runtime).
+  let zs: Int = 0;
+  let qz: Int = __divdi3(big, zs);
+  if (qz == 0) { curlee_putc(1); } else { curlee_putc(0); }
+  let mz: Int = __moddi3(big, zs);
+  if (mz == big) { curlee_putc(1); } else { curlee_putc(0); }
+  curlee_halt();
+  return;
+}
