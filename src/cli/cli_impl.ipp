@@ -161,7 +161,11 @@ void print_build_usage(std::ostream& out)
     out << "freestanding subset (no hosted builtins):\n";
     out << "  - Supported: Int, Bool, U8/U16/U32/U64 arithmetic, structs/enums (storable\n";
     out << "    payloads only), match, if/else, while, verified contracts, extern fn,\n";
-    out << "    module-level `static name: Type = expr;` state (issue #287), Phys<T> +\n";
+    out << "    module-level `static name: Type = expr;` state (issue #287) and its\n";
+    out << "    external-linkage form `extern static name: Type = expr;` (issue #297:\n";
+    out << "    emitted as a plain file-scope C global with no `static` keyword and the\n";
+    out << "    identifier verbatim, so hand-written boot assembly/C linked into the\n";
+    out << "    image can write it before curlee_main runs), Phys<T> +\n";
     out << "    read()/write(), the runtime-address reads and writes\n";
     out << "    (phys_read_u8/u16/u32/u64 and phys_write_u8/u16/u32/u64; a general\n";
     out << "    Int/U64 address, issues #279/#285), the address-of builtin\n";
@@ -174,7 +178,7 @@ void print_build_usage(std::ostream& out)
     out << "    cannot be stored (struct fields, enum payloads), returned, or used as\n";
     out << "    parameters.\n";
     out << "  - The VM never runs freestanding programs (`curlee run` rejects Phys/extern\n";
-    out << "    bodies); `curlee build` is the execution path.\n";
+    out << "    bodies and extern statics); `curlee build` is the execution path.\n";
 }
 
 // GCOVR_EXCL_START

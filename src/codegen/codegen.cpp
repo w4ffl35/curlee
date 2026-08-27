@@ -1175,6 +1175,14 @@ class CEmitter
     // MVP has no cross-module extern mechanism), and persists across separate
     // calls into the module. A local `let` shadowing a static emits the same
     // raw name, which C resolves to the local (shadowing semantics match).
+    //
+    // `extern static name: T = expr;` (issue #297) is the EXTERNAL-linkage
+    // form: the emitted C drops the `static` keyword entirely (plain file-scope
+    // global, default external linkage) and keeps the identifier verbatim, so
+    // hand-written boot assembly or C linked into the same final image can
+    // write the symbol before `curlee_main` runs and Curlee reads it back via
+    // a normal name reference. The initializer is the default value (e.g. 0
+    // for the PVH build that has no boot.S).
     void emit_statics()
     {
         for (const auto& s : program_->statics)
@@ -1238,8 +1246,8 @@ class CEmitter
                     list += "}";
                     init = std::move(list);
                 }
-                writer_.line("static " + elem_c + " " + std::string(s.name) + "[" + len + "] = " +
-                             init + ";");
+                writer_.line((s.is_extern ? "" : "static ") + elem_c + " " +
+                             std::string(s.name) + "[" + len + "] = " + init + ";");
                 continue;
             }
 
@@ -1256,7 +1264,12 @@ class CEmitter
             {
                 return;
             }
-            writer_.line("static " + c_type + " " + std::string(s.name) + " = " + init + ";");
+            // `extern static` drops the `static` keyword: the symbol gets
+            // external linkage (writable by boot assembly/C before curlee_main
+            // runs). The identifier is emitted verbatim (no curlee_ mangle),
+            // matching how `extern fn` identifiers are emitted.
+            writer_.line((s.is_extern ? "" : "static ") + c_type + " " + std::string(s.name) +
+                         " = " + init + ";");
         }
 
         if (!program_->statics.empty())

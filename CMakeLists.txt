@@ -1164,7 +1164,7 @@ if(CURLEE_ENABLE_FREESTANDING_SMOKE)
 
   # Each smoke test writes its emitted .c into its own subdirectory to avoid
   # races when ctest runs tests in parallel.
-  foreach(_fixture arith control_flow while_loop struct_fixture enum_match match_stmt phys_mem phys_param empty_union_enum forward_ref unit_empty match_unit_arms mixed_payload_enum phys_param_forward while_loop_unit multi_function extern_fn io_port unsigned_widen u64_widen array phys_read_runtime phys_write_runtime addr_of shadow_arrays kernel_libgcc32 kernel_libgcc32_extern kernel_libgcc32_u64_only kernel_nolibgcc32)
+  foreach(_fixture arith control_flow while_loop struct_fixture enum_match match_stmt phys_mem phys_param empty_union_enum forward_ref unit_empty match_unit_arms mixed_payload_enum phys_param_forward while_loop_unit multi_function extern_fn io_port unsigned_widen u64_widen array phys_read_runtime phys_write_runtime addr_of shadow_arrays extern_static kernel_libgcc32 kernel_libgcc32_extern kernel_libgcc32_u64_only kernel_nolibgcc32)
     set(_fixture_workdir "${CMAKE_BINARY_DIR}/codegen_smoke_${_fixture}")
     file(MAKE_DIRECTORY "${_fixture_workdir}")
     add_test(
@@ -1180,6 +1180,30 @@ if(CURLEE_ENABLE_FREESTANDING_SMOKE)
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     )
   endforeach()
+
+  # Extern-static handoff smoke (issue #297): a hand-written .S stub (the
+  # boot.S analogue) writes a fixed value into the externally-linkable Curlee
+  # static BEFORE the Curlee entry point runs; the entry point reads it back
+  # via a normal function call. Proves the external-linkage emission (bare
+  # global, `nm` reports ` g `), the write-before-Curlee-runs ordering, and
+  # the read-back — acceptance criterion 1 + the issue's minimal fixture —
+  # without qemu. Requires a C toolchain + nm.
+  set(_handoff_workdir "${CMAKE_BINARY_DIR}/extern_static_handoff_smoke")
+  file(MAKE_DIRECTORY "${_handoff_workdir}")
+  add_test(
+    NAME curlee_extern_static_handoff_smoke
+    COMMAND ${CMAKE_COMMAND}
+      -Dcurlee_binary=$<TARGET_FILE:curlee>
+      -Dcurlee_cc=${CURLEE_FREESTANDING_CC}
+      -Dcurlee_fixture=${CMAKE_SOURCE_DIR}/tests/codegen/extern_static_handoff.curlee
+      -Dcurlee_stub=${CMAKE_SOURCE_DIR}/tests/freestanding/handoff_stub.S
+      -Dcurlee_driver=${CMAKE_SOURCE_DIR}/tests/freestanding/handoff_driver.c
+      -Dcurlee_workdir=${_handoff_workdir}
+      -P ${CMAKE_SOURCE_DIR}/cmake/extern_static_handoff_smoke.cmake
+  )
+  set_tests_properties(curlee_extern_static_handoff_smoke PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  )
 
   # Link-boot smoke (issue #256): `curlee build --link` must produce a bootable
   # x86-64 ELF whose entry is _start with the linker symbols present. Requires

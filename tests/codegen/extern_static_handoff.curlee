@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #297 external-linkage handoff — the kernel fixture used by both the
+// hosted smoke (handoff_stub.S + handoff_driver.c) and the qemu boot smoke
+// (handoff_crt0.S). `extern static boot_value: U64 = 0;` codegens to
+// `uint64_t boot_value = 0;` — external linkage, verbatim name — which the
+// hand-written boot assembly deposits a fixed value into BEFORE this entry
+// point runs. main() reads it back via a normal function call and returns it
+// (the qemu stub reports the return value through isa-debug-exit).
+extern static boot_value: U64 = 0;
+
+fn boot_value_get() -> U64 {
+  return boot_value;
+}
+
+fn main() -> U64 {
+  return boot_value_get();
+}

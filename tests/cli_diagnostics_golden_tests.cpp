@@ -1085,6 +1085,16 @@ int main(int argc, char** argv)
     const fs::path rel_run_global_state = fs::path("tests/fixtures/run_global_state.curlee");
     const fs::path rel_run_static_array_vm_reject =
         fs::path("tests/fixtures/run_static_array_vm_reject.curlee");
+    // External-linkage module state (issue #297) diagnostics: the extern
+    // static form passes `check` exactly like a `static` (same validation),
+    // and `run` rejects it as freestanding-only (the VM has no external
+    // code/linker to honor the linkage contract).
+    const fs::path rel_extern_static_ok =
+        fs::path("tests/fixtures/check_extern_static_ok.curlee");
+    const fs::path rel_extern_static_non_literal =
+        fs::path("tests/fixtures/check_extern_static_non_literal.curlee");
+    const fs::path rel_run_extern_static_vm_reject =
+        fs::path("tests/fixtures/run_extern_static_vm_reject.curlee");
 
     const fs::path check_requires_divide_golden = dir / "check_requires_divide.golden";
     const fs::path check_refinement_implies_golden = dir / "check_refinement_implies.golden";
@@ -1910,6 +1920,32 @@ int main(int argc, char** argv)
         if (!run_stderr_case("run-static-array-vm-reject",
                              {"curlee", "run", rel_run_static_array_vm_reject.string()},
                              dir / "run_static_array_vm_reject.golden", false))
+        {
+            return 1;
+        }
+
+        // External-linkage module state (issue #297) diagnostics. The extern
+        // static form passes `check` with the same validation as a `static`
+        // (types, literal initializer, root-scope uniqueness; reads from
+        // function bodies resolve through the normal globals path), and `run`
+        // rejects it as freestanding-only — the VM has no external
+        // code/linker to honor the linkage contract (mirroring extern
+        // functions).
+        if (!run_stderr_case("check-extern-static-ok",
+                             {"curlee", "check", rel_extern_static_ok.string()},
+                             dir / "check_extern_static_ok.golden", true))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("check-extern-static-non-literal",
+                             {"curlee", "check", rel_extern_static_non_literal.string()},
+                             dir / "check_extern_static_non_literal.golden", false))
+        {
+            return 1;
+        }
+        if (!run_stderr_case("run-extern-static-vm-reject",
+                             {"curlee", "run", rel_run_extern_static_vm_reject.string()},
+                             dir / "run_extern_static_vm_reject.golden", false))
         {
             return 1;
         }

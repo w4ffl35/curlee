@@ -32,7 +32,10 @@ unsafe {
 
 - **Target:** a plain fixed-size array **binding** — a freestanding-local
   `let q: [T; N] = [v; N];` (issue #278) or a module-level `static q: [T; N]`
-  (issue #287). Grouping parens around the name are accepted; an indexed
+  (issue #287), including the externally-linkable `extern static q: [T; N]`
+  form (issue #297 — the emitted global has external linkage, so a
+  boot-written DMA region is addressable the same way). Grouping parens around
+  the name are accepted; an indexed
   element (`addr_of(q[0])`), a scalar, or any other expression is a type
   error. No pointer arithmetic / pointer types — this is exactly "the address
   of ONE array I already own".

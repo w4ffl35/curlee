@@ -256,6 +256,20 @@ bootable kernel ELF:
   mechanism). Scalar statics run on the VM (persistent low locals slots); array statics are
   freestanding-only, and global array element accesses are still bounds-checked like local
   arrays.
+- **Externally-linkable module state** `extern static name: Type = expr;` (issue #297): the
+  same module-level mutable binding but with **external linkage** — the freestanding codegen
+  emits a plain file-scope C global (`uint64_t name = 0;`, **no** `static` keyword, identifier
+  verbatim with no `curlee_` mangle), so hand-written boot assembly or C linked into the same
+  final image can **write the symbol before `curlee_main` runs** and Curlee reads it back via
+  a normal function call. This is the assembly→Curlee handoff that eliminates the tiny C
+  shim joeos needs for the multiboot2 info pointer: `kernel/boot.S` captures `%ebx` into
+  `extern static mb2_info_addr: U64 = 0;` before any Curlee code runs, `kernel/mb2.curlee`
+  reads it through a getter, and the initializer `= 0` is the sensible default for builds
+  without a boot stub (the PVH path — the emitted definition always links, so the `weak`
+  attribute joeos's `mb2_state.c` used is no longer needed). Same type/literal-initializer
+  rules and same opaque-per-function verifier story as `static`. Extern statics are
+  freestanding-only: `curlee run` rejects them (the VM has no external code/linker to honor
+  the linkage contract), exactly like extern functions.
 - The VM never runs freestanding programs (`curlee run` rejects `Phys`/`extern`/port I/O
   bodies); `curlee build` is the freestanding execution path.
 

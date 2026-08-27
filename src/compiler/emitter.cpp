@@ -199,6 +199,17 @@ class Emitter
         std::uint16_t global_slot = 0;
         for (const auto& s : program.statics)
         {
+            // Extern statics (issue #297) are freestanding-only: the VM has no
+            // external code/linker, so the external-linkage contract (boot
+            // assembly writing the symbol before the entry point runs) cannot
+            // be honored — exactly like extern functions.
+            if (s.is_extern)
+            {
+                diags_.push_back(
+                    error_at(s.span, "extern statics are freestanding-only and not supported "
+                                     "in the VM; use curlee build --link"));
+                return diags_;
+            }
             if (s.type.is_array())
             {
                 diags_.push_back(

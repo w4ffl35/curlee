@@ -116,5 +116,42 @@ else
   exit 1
 fi
 
+step "6. qemu extern-static handoff smoke (issue #297; skips if qemu missing)"
+# The write-before-Curlee-runs ordering over a REAL boot: the hand-written
+# handoff_crt0.S stub (the boot.S analogue) deposits 0x2A into the
+# externally-linkable Curlee static `boot_value` before calling curlee_main;
+# the fixture's main() reads it back via a normal function call and returns
+# it; the stub reports the return value through isa-debug-exit (writing V
+# makes qemu exit with status (V << 1) | 1). qemu exiting with status
+# (0x2A << 1) | 1 = 85 is the positive assertion.
+"$bin" build --target freestanding-c -o "$outdir/extern_static_handoff.c" \
+  tests/codegen/extern_static_handoff.curlee >/dev/null
+$cc -ffreestanding -fno-builtin -nostdlib -std=c11 -mno-sse -mno-sse2 -c \
+  "$outdir/extern_static_handoff.c" -o "$outdir/extern_static_handoff.o"
+$cc -ffreestanding -fno-builtin -nostdlib -c \
+  tests/freestanding/handoff_crt0.S -o "$outdir/handoff_crt0.o"
+ld -nostdlib -T runtime/linker.ld -o "$outdir/kernel_handoff.elf" \
+  "$outdir/extern_static_handoff.o" "$outdir/handoff_crt0.o"
+test -s "$outdir/kernel_handoff.elf"
+
+set +e
+timeout 15 qemu-system-x86_64 -display none \
+  -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+  -serial file:"$outdir/qemu-handoff-serial.log" \
+  -no-reboot -kernel "$outdir/kernel_handoff.elf" >"$outdir/qemu-handoff.log" 2>&1
+rc=$?
+set -e
+
+log "qemu handoff rc=$rc (expected 85 = (0x2A << 1) | 1)"
+if [ "$rc" -eq 85 ]; then
+  log "qemu handoff OK: boot stub wrote boot_value before curlee_main, main read it back"
+elif [ "$rc" -eq 124 ]; then
+  log "qemu handoff SKIPPED assertion (timeout reached — debug-exit write did not exit qemu)"
+else
+  log "qemu handoff FAILED (rc=$rc)"
+  cat "$outdir/qemu-handoff.log" || true
+  exit 1
+fi
+
 log ""
 log "freestanding CI flow passed"

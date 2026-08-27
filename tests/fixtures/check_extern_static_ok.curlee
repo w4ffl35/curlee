@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #297: externally-linkable module state — `extern static name: Type =
+// expr;`. Same module-level state semantics as `static` (readable and
+// assignable from any function, initializer must be a compile-time literal)
+// but with EXTERNAL linkage in the freestanding codegen: the emitted C is a
+// plain file-scope global (no `static` keyword) under the verbatim identifier,
+// so hand-written boot assembly (boot.S) can write it before curlee_main runs
+// and Curlee reads it back via a normal function call — the mb2_info_addr
+// landing pad that replaces kernel/mb2_state.c.
+//
+// `curlee check` must accept this program: the extern static is validated
+// exactly like a `static` (types, literal initializer, root-scope uniqueness),
+// and reads from function bodies resolve through the normal globals path.
+
+extern static mb2_info_addr: U64 = 0;
+extern static boot_phase: Int = 0;
+
+fn mb2_info_addr_get() -> U64 {
+  return mb2_info_addr;
+}
+
+fn main() -> Int {
+  let base: U64 = mb2_info_addr_get();
+  let phase: Int = boot_phase;
+  if (phase > 0) {
+    boot_phase = 0;
+  }
+  return phase;
+}

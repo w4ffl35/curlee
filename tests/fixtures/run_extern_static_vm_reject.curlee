@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #297: `run` (VM bytecode) must reject extern statics exactly like
+// extern functions and array statics — the VM has no external code/linker, so
+// the external-linkage contract (boot assembly writing the symbol before the
+// entry point runs) cannot be honored. `curlee build --link` is the execution
+// path. Expected error:
+//   "extern statics are freestanding-only and not supported in the VM; use
+//    curlee build --link"
+
+extern static mb2_info_addr: U64 = 0;
+
+fn main() -> Int {
+  return 0;
+}

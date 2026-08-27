@@ -1,0 +1,4 @@
+tests/fixtures/check_extern_static_non_literal.curlee:10:24: error: static 'x': initializer must be a compile-time literal (Int, Bool, or [v; N] repeat)
+  |
+  | extern static x: Int = 1 + 2;
+  |                        ^^^^^

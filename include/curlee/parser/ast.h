@@ -675,6 +675,17 @@ struct EnumDecl
  * literal for scalars, an `[v; N]` repeat literal for arrays), mirroring C
  * `static` initializers. Module-private: there is no cross-module extern
  * mechanism in the MVP.
+ *
+ * `extern static name: Type = expr;` (issue #297) is the same binding with
+ * EXTERNAL linkage: the codegen emits a plain file-scope C global (no
+ * `static` keyword) under the identifier verbatim (no `curlee_` mangle), so
+ * hand-written boot assembly or C linked into the same final image can write
+ * it before `curlee_main` runs and Curlee reads it back via a normal name
+ * reference — the external-linkage handoff for boot-time values like the
+ * multiboot2 info pointer captured by boot.S. The initializer is the default
+ * value (e.g. 0 for builds without a boot stub). Extern statics are
+ * freestanding-only: the VM has no external code/linker, so `curlee run`
+ * rejects them (mirroring extern functions).
  */
 struct StaticVarDecl
 {
@@ -682,6 +693,11 @@ struct StaticVarDecl
     std::string_view name;
     TypeName type;
     Expr value;
+
+    // True for the `extern static name: Type = expr;` form (issue #297):
+    // external linkage in the emitted C (no `static`, verbatim symbol name).
+    // False for the module-private `static` form.
+    bool is_extern = false;
 };
 
 /** @brief Full parsed program (imports, types, module state and functions). */

@@ -1937,6 +1937,70 @@ fn main() -> Unit { return; }
         expect_parse_error_contains(src, "expected 'fn'");
     }
 
+    // Extern-static declarations (issue #297): `extern static name: Type =
+    // expr;` parses into StaticVarDecl with is_extern set, and the dump
+    // renders the `extern` prefix. A plain `static` keeps is_extern == false.
+    {
+        const std::string src = R"(
+extern static mb2_info_addr: U64 = 0;
+static private_state: Int = 1;
+fn main() -> Int { return 0; }
+)";
+
+        const auto lexed = lexer::lex(src);
+        if (!std::holds_alternative<std::vector<lexer::Token>>(lexed))
+        {
+            fail("lex failed on extern-static program");
+        }
+        const auto& toks = std::get<std::vector<lexer::Token>>(lexed);
+        const auto parsed = parser::parse(toks);
+        if (!std::holds_alternative<parser::Program>(parsed))
+        {
+            fail("parse failed on extern-static program");
+        }
+
+        const auto& prog = std::get<parser::Program>(parsed);
+        if (prog.statics.size() != 2)
+        {
+            fail("expected 2 static declarations (extern static + static)");
+        }
+        const auto& ext = prog.statics[0];
+        if (!ext.is_extern)
+        {
+            fail("expected first static to be marked is_extern");
+        }
+        if (ext.name != "mb2_info_addr" || ext.type.name != "U64")
+        {
+            fail("expected extern static mb2_info_addr: U64");
+        }
+        if (prog.statics[1].is_extern)
+        {
+            fail("expected plain static to have is_extern == false");
+        }
+
+        // The dump must render the declaration as `extern static ... ;`.
+        const std::string dumped = parser::dump(prog);
+        if (dumped.find("extern static mb2_info_addr: U64 = 0;") == std::string::npos)
+        {
+            std::cerr << "dump was:\n" << dumped << "\n";
+            fail("dump missing 'extern static mb2_info_addr: U64 = 0;'");
+        }
+        if (dumped.find("static private_state: Int = 1;") == std::string::npos)
+        {
+            std::cerr << "dump was:\n" << dumped << "\n";
+            fail("dump missing plain 'static private_state: Int = 1;'");
+        }
+    }
+
+    // `extern` followed by neither `fn` nor `static` is an error.
+    {
+        const std::string src = R"(
+extern value: Int = 0;
+fn main() -> Int { return 0; }
+)";
+        expect_parse_error_contains(src, "expected 'fn'");
+    }
+
     // Contract-block `ghost let` snapshot parses into Function::ghost_lets and
     // round-trips through the dumper.
     {

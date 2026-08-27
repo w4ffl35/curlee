@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #297: extern statics are validated exactly like `static` — the
+// initializer must be a compile-time literal. A non-literal initializer would
+// otherwise leak a non-constant file-scope C initializer into the emitted C
+// (e.g. `int64_t x = curlee_foo();`, invalid at file scope). Expected error:
+//   "static 'x': initializer must be a compile-time literal (Int, Bool, or
+//    [v; N] repeat)"
+
+extern static x: Int = 1 + 2;
+
+fn main() -> Int {
+  return 0;
+}
