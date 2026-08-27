@@ -52,6 +52,14 @@ extern "C"
 
     CURLEE_RT_WEAK void curlee_putc(char c);
 
+    // Store fence for DMA ring publication (issue #296): the descriptor /
+    // ring-field stores a driver made must be visible to a device before the
+    // avail-index store it reads. On x86 (TSO for regular stores) this is a
+    // no-op for correctness, but the explicit instruction keeps the ordering
+    // visible to emulators that model it (QEMU TCG). Weak like curlee_putc so
+    // a host may override it; non-x86 builds degrade to a compiler barrier.
+    CURLEE_RT_WEAK void curlee_sfence(void) CURLEE_RT_NOEXCEPT;
+
 #if defined(__cplusplus)
 }
 #endif
