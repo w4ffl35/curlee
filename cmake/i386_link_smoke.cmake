@@ -24,12 +24,14 @@
 #     .got.plt out of .text).
 #
 # Optional fixtures pin the auto-link gate in cli_impl.ipp from both sides:
-#   - curlee_fixture_u64_only: emitted C has uint64_t but NO int64_t (the
-#     language maps Int->int64_t and U64->uint64_t, so a U64-only program is
-#     the one case where the `find("int64_t")` check misses). The gate still
-#     links the helpers via the uint64_t clause. 32-bit-only: the 64-bit PVH
-#     target never links the helpers, so the extern __udivdi3 call would be
-#     an undefined symbol there.
+#   - curlee_fixture_u64_only: a program using ONLY U64 (no Int). Its emitted
+#     C contains uint64_t — and since the token "uint64_t" embeds the
+#     substring "int64_t", the gate's `find("int64_t")` check fires and the
+#     helpers are linked. (A separate find("uint64_t") clause in the gate is
+#     dead code by construction; see the fixture header.) This proves a
+#     U64-only kernel links AND boots with the bundled helpers. 32-bit-only:
+#     the 64-bit PVH target never links the helpers, so the extern __udivdi3
+#     call would be an undefined symbol there.
 #   - curlee_fixture_no64: emitted C has neither int64_t nor uint64_t (a
 #     kernel whose only extern takes/returns nothing). On i386 the gate must
 #     NOT link the helpers, and a stale curlee_libgcc32.o from an earlier
@@ -49,8 +51,9 @@ if(NOT DEFINED curlee_outdir)
   message(FATAL_ERROR "curlee_outdir not set")
 endif()
 
-# Optional gate-pinning fixtures (see header comment): U64-only (uint64_t but
-# no int64_t) and no-64-bit-types-at-all.
+# Optional gate-pinning fixtures (see header comment): U64-only (emitted C
+# with uint64_t, which embeds the int64_t substring) and
+# no-64-bit-types-at-all.
 if(NOT DEFINED curlee_fixture_u64_only)
   set(curlee_fixture_u64_only "")
 endif()
@@ -205,10 +208,10 @@ curlee_link_fixture("" "${_elf64}" "${curlee_fixture}")
 curlee_check_elf_class("${_elf64}" "ELF64" "Advanced Micro Devices X86-64")
 curlee_check_helpers("${_elf64}" FALSE)
 
-# 3. U64-only fixture (uint64_t but no int64_t in the emitted C), --arch i386:
-#    the auto-link gate must still link the helpers via the uint64_t clause.
-#    32-bit-only: x86_64 never links the helpers, so the extern __udivdi3
-#    call would be an undefined symbol there (not asserted).
+# 3. U64-only fixture (emitted C has uint64_t, which embeds the int64_t
+#    substring the gate checks), --arch i386: the auto-link gate must still
+#    link the helpers. 32-bit-only: x86_64 never links the helpers, so the
+#    extern __udivdi3 call would be an undefined symbol there (not asserted).
 if(NOT curlee_fixture_u64_only STREQUAL "")
   set(_elf32_u64 "${curlee_outdir}/kernel32_u64only.elf")
   curlee_link_fixture("i386" "${_elf32_u64}" "${curlee_fixture_u64_only}")

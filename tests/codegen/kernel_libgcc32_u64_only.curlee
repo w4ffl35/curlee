@@ -1,14 +1,22 @@
-// i386-only boot fixture driving the bundled libgcc32 helpers with U64 types
-// and NO Int anywhere (issue #288). Unlike kernel_libgcc32.curlee /
-// kernel_libgcc32_extern.curlee (whose emitted C contains both int64_t and
-// uint64_t), this fixture's emitted C contains uint64_t but NO int64_t — it
-// exercises the `c_source.find("int64_t")` false / `find("uint64_t")` true
-// side of the auto-link gate in cli_impl.ipp, so the helpers must still be
-// linked (the gate is "any 64-bit type -> link the helpers").
+// i386-only boot fixture driving the bundled libgcc32 helpers from the U64
+// side (issue #288). This program uses ONLY U64 types (no Int anywhere), so
+// the emitted C contains `uint64_t` and no standalone `int64_t` tokens.
 //
-// This fixture is 32-bit-only: the 64-bit PVH target never links the
-// helpers, so an explicit __udivdi3 extern call would be an undefined symbol
-// there.
+// NOTE on the auto-link gate in cli_impl.ipp: the token "uint64_t" embeds
+// the substring "int64_t" (u|int64_t), so the gate's single
+// `c_source.find("int64_t")` check fires for ANY emitted C that contains
+// uint64_t. An earlier revision had a separate find("uint64_t") disjunct;
+// that was dead code (no emitted C can contain uint64_t without also
+// containing the int64_t substring) and was removed in review round 1 — see
+// the cli_impl.ipp gate comment.
+//
+// This fixture does NOT "exercise a uint64_t-only gate clause" — that is
+// impossible by construction. Its real job is to pin the end-to-end
+// behavior: a U64-only kernel links (the gate fires via the
+// int64_t-substring path) and boots with the bundled helpers, so unsigned
+// 64-bit divide (__udivdi3) resolves on i386. 32-bit-only: the 64-bit PVH
+// target never links the helpers, so an explicit __udivdi3 extern call would
+// be an undefined symbol there.
 extern fn __udivdi3(a: U64, b: U64) -> U64;
 extern fn curlee_halt() -> Unit;
 

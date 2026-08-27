@@ -831,6 +831,29 @@ int main()
         expect_contains(err, "requires an output file", "stderr");
     }
 
+    // build --link: a mid-pipeline toolchain failure triggers the fail()
+    // cleanup lambda, which removes every scratch file (incl. the bundled
+    // libgcc32 object) before returning kExitError (issue #288, review round
+    // 1). Trigger it deterministically by pointing -o at a nonexistent output
+    // directory: codegen succeeds, then opening workdir/curlee_kernel.c fails
+    // and the cleanup path runs — no C compiler needed, so it is portable.
+    {
+        const fs::path missing_dir =
+            fs::temp_directory_path() / "curlee_link_missing_dir_xyz";
+        fs::remove_all(missing_dir); // ensure it does not exist
+        std::string out;
+        std::string err;
+        const int rc = run_cli_capture(
+            {"curlee", "build", "--link", "-o", (missing_dir / "kernel.elf").string(),
+             fixture.string()},
+            out, err);
+        if (rc != 1)
+        {
+            fail("expected error exit for build --link into a missing directory");
+        }
+        expect_contains(err, "error: build --link: cannot open scratch file", "stderr");
+    }
+
     std::cout << "OK\n";
     return 0;
 }

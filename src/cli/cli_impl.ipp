@@ -2002,14 +2002,14 @@ int cmd_build(const std::string& entry_path, const std::string& output_path,
     // the gate: any program with int64_t/uint64_t MAY reference a helper, and
     // linking a few unused (dead) helper functions when it does not is
     // harmless (issue #288). The 64-bit PVH target never links them.
-    // GCOVR_EXCL_LINE below: the find("uint64_t") disjunct only runs when
-    // find("int64_t") already failed (|| short-circuit), but the token
-    // "uint64_t" embeds the substring "int64_t", so that disjunct's "found"
-    // branch can never fire for emitted C; all reachable branches are covered
-    // by the i386 link smoke fixtures (kernel_libgcc32{,_u64_only,_no64}).
-    const bool needs_libgcc32 =
-        is_i386 && (c_source.find("int64_t") != std::string::npos || // GCOVR_EXCL_LINE
-                    c_source.find("uint64_t") != std::string::npos);
+    //
+    // A single find("int64_t") is sufficient: the codegen maps Int -> int64_t
+    // and U64 -> uint64_t, and the token "uint64_t" embeds the substring
+    // "int64_t" (u|int64_t), so any emitted C containing uint64_t also
+    // matches the int64_t check. A separate find("uint64_t") disjunct would
+    // be dead code (it could never be the deciding branch) — see the
+    // kernel_libgcc32_u64_only.curlee fixture header.
+    const bool needs_libgcc32 = is_i386 && c_source.find("int64_t") != std::string::npos;
     if (!needs_libgcc32)
     {
         // Drop a stale helper object from a previous build into the same
