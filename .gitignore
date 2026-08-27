@@ -37,3 +37,6 @@ Thumbs.db
 *.so
 compile_commands.json
 .cache/
+
+# headlesscode orchestrator worktrees / state (never source, never commit)
+/.worktrees/
