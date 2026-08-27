@@ -1,0 +1,4 @@
+tests/fixtures/run_extern_static_vm_reject.curlee:11:8: error: extern statics are freestanding-only and not supported in the VM; use curlee build --link
+  |
+  | extern static mb2_info_addr: U64 = 0;
+  |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

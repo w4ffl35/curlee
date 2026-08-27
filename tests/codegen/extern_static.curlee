@@ -1,0 +1,46 @@
+// SPDX-License-Identifier: MIT
+//
+// Issue #297: externally-linkable module state — `extern static name: T =
+// expr;`. The freestanding codegen emits a plain file-scope C global (NO
+// `static` keyword, external linkage) under the identifier verbatim (no
+// `curlee_` mangle), so hand-written boot assembly or C linked into the same
+// final image can write the symbol BEFORE `curlee_main` runs and Curlee reads
+// it back via a normal name reference. This is the external-linkage handoff
+// for boot-time values like the multiboot2 info pointer that joeos's boot.S
+// captures from %ebx at CPU entry.
+//
+// The initializer is the DEFAULT value (e.g. 0 for the PVH build, which has
+// no boot.S to write the symbol): `extern static mb2_info_addr: U64 = 0;`
+// emits `uint64_t mb2_info_addr = 0;`, so a build without a boot stub links
+// and reads the sensible default.
+//
+// Shapes covered (mirroring the joeos mb2_state.c landing pad):
+//   - scalar U64 extern static (the `mb2_info_addr` shape, read by a getter
+//     function — the `mb2_info_addr_get()` replacement);
+//   - scalar Int extern static;
+//   - fixed-size array [U8; N] extern static (a boot-deposited DMA/buffer
+//     region);
+//   - reading via a normal function call from `main`.
+//
+// `curlee run` rejects extern statics (freestanding-only — the VM has no
+// external code/linker to honor the linkage contract); `curlee build` is the
+// execution path.
+
+extern static mb2_info_addr: U64 = 0;
+extern static handoff_flag: Int = 0;
+extern static boot_scratch: [U8; 16] = [0; 16];
+
+fn mb2_info_addr_get() -> U64 {
+  return mb2_info_addr;
+}
+
+fn main() -> Int {
+  let v: U64 = mb2_info_addr_get();
+  let f: Int = handoff_flag;
+  boot_scratch[0] = 0xAB;
+  let b: U8 = boot_scratch[0];
+  if (v == mb2_info_addr) {
+    return f + b;
+  }
+  return 0;
+}

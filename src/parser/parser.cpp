@@ -329,7 +329,32 @@ class Parser
                 }
                 seen_non_import = true;
 
-                auto s = parse_static_decl();
+                auto s = parse_static_decl(/*is_extern=*/false);
+                if (std::holds_alternative<curlee::diag::Diagnostic>(s))
+                {
+                    diagnostics_.push_back(std::get<curlee::diag::Diagnostic>(std::move(s)));
+                    synchronize_top_level();
+                    continue;
+                }
+                program.statics.push_back(std::get<StaticVarDecl>(std::move(s)));
+                continue;
+            }
+
+            // `extern static name: Type = expr;` (issue #297): the same
+            // module-level mutable binding with EXTERNAL linkage. The codegen
+            // emits a plain file-scope C global (no `static`, verbatim
+            // identifier) so hand-written boot assembly or C linked into the
+            // same final image can write it before `curlee_main` runs and
+            // Curlee reads it back via a normal name reference.
+            if (check(TokenKind::KwExtern) && check_next(TokenKind::KwStatic))
+            {
+                if (!seen_non_import)
+                {
+                    first_non_import_span = peek().span;
+                }
+                seen_non_import = true;
+
+                auto s = parse_static_decl(/*is_extern=*/true);
                 if (std::holds_alternative<curlee::diag::Diagnostic>(s))
                 {
                     diagnostics_.push_back(std::get<curlee::diag::Diagnostic>(std::move(s)));
@@ -374,7 +399,8 @@ class Parser
             }
 
             diagnostics_.push_back(error_at(
-                peek(), "expected 'import', 'struct', 'enum', 'static', 'fn', or 'extern fn'"));
+                peek(), "expected 'import', 'struct', 'enum', 'static', 'fn', 'extern fn', or "
+                        "'extern static'"));
             advance();
         }
 
@@ -396,6 +422,17 @@ class Parser
     {
         assert(pos_ < tokens_.size()); // GCOVR_EXCL_LINE
         return tokens_[pos_];
+    }
+
+    // True when the token AFTER the current one has `kind` (bounds-safe; used
+    // to disambiguate `extern fn` from `extern static` at the top level).
+    [[nodiscard]] bool check_next(TokenKind kind) const
+    {
+        if (pos_ + 1 >= tokens_.size())
+        {
+            return false;
+        }
+        return tokens_[pos_ + 1].kind == kind;
     }
 
     [[nodiscard]] const Token& previous() const
@@ -802,12 +839,25 @@ class Parser
 
     // Module-level mutable state declaration (issue #287):
     //   static name: Type = expr;
+    // and the external-linkage form (issue #297):
+    //   extern static name: Type = expr;
     // Type is a storable scalar (Int/Bool/U8/U16/U32/U64) or a fixed-size
     // array `[T; N]`; expr must be a compile-time literal (Int/Bool literal for
     // scalars, `[v; N]` repeat literal for arrays). The literal restriction is
-    // enforced by the type checker, which has the type information.
-    [[nodiscard]] std::variant<StaticVarDecl, curlee::diag::Diagnostic> parse_static_decl()
+    // enforced by the type checker, which has the type information. `is_extern`
+    // selects the `extern static` form: the codegen emits a plain file-scope C
+    // global (no `static`, verbatim identifier) so external boot code can write
+    // it before `curlee_main` runs.
+    [[nodiscard]] std::variant<StaticVarDecl, curlee::diag::Diagnostic>
+    parse_static_decl(bool is_extern)
     {
+        if (is_extern)
+        {
+            if (auto err = consume(TokenKind::KwExtern, "expected 'extern'"); err.has_value())
+            {
+                return *err;
+            }
+        }
         if (auto err = consume(TokenKind::KwStatic, "expected 'static'"); err.has_value())
         {
             return *err;
@@ -856,7 +906,8 @@ class Parser
         return StaticVarDecl{.span = span_cover(kw.span, semi.span),
                              .name = name.lexeme,
                              .type = std::move(type),
-                             .value = std::move(value)};
+                             .value = std::move(value),
+                             .is_extern = is_extern};
     }
 
     [[nodiscard]] std::variant<Function::Param, curlee::diag::Diagnostic> parse_param()
@@ -3256,6 +3307,10 @@ class Dumper
 
     void dump_static_decl(const StaticVarDecl& s)
     {
+        if (s.is_extern)
+        {
+            out_ << "extern ";
+        }
         out_ << "static " << s.name << ": ";
         dump_type(s.type);
         out_ << " = ";
