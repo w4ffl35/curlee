@@ -1,0 +1,17 @@
+// Minimal kernel with NO 64-bit integer types anywhere (issue #288). The
+// language maps every Int to int64_t and every U64 to uint64_t in the
+// emitted C, so this fixture — whose only extern takes/returns nothing and
+// whose body only calls it — produces C with neither token. It exercises the
+// auto-link gate's "no 64-bit types -> do NOT link the libgcc32 helpers"
+// side on BOTH targets:
+//   - --arch i386: needs_libgcc32 is false, so the bundled
+//     runtime/libgcc32_helpers.c is NOT compiled/linked and a stale
+//     curlee_libgcc32.o from a previous i386 build into the same output
+//     directory is dropped;
+//   - default x86_64: unchanged (helpers never linked).
+extern fn curlee_halt() -> Unit;
+
+fn main() -> Unit {
+  curlee_halt();
+  return;
+}

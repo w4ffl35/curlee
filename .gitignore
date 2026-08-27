@@ -1,5 +1,12 @@
 build/
 
+# Agent/harness scratch (never committed).
+.headlesscode/
+.env
+.harness.*
+harness.log
+ORCHESTRATOR_TASK.md
+
 # Z3 build artifact (written to the invoking directory by the vendored Z3 build).
 .z3-trace
 

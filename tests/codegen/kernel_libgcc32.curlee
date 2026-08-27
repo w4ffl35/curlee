@@ -1,0 +1,76 @@
+// Boot fixture for the bundled 32-bit libgcc-ABI helpers (issue #288).
+//
+// `curlee build --link --arch i386` compiles the emitted C with -m32, where
+// GCC lowers 64-bit integer arithmetic to libgcc-ABI helper calls. This
+// fixture forces 64-bit multiply / signed divide / modulo / variable-count
+// shifts / compare / negation (Int -> int64_t) plus U64 storage (uint64_t,
+// which triggers the helpers' presence in the emitted C) and emits every
+// result over serial, so the boot smoke can cross-check the 32-bit kernel
+// against the identical 64-bit PVH build of the same fixture (native
+// int64_t arithmetic, no helpers) and against a golden byte stream.
+//
+// 64-bit results are emitted as 8 little-endian bytes via curlee_putc
+// (driven by a host serial driver in the boot smoke). The two builds must
+// produce byte-identical serial output.
+//
+// The unsigned-division / divide-by-zero edge cases are covered by
+// tests/codegen/kernel_libgcc32_extern.curlee (extern calls into the
+// helpers) and by the host unit tests in tests/libgcc32_helpers_tests.cpp.
+extern fn curlee_putc(c: Int) -> Unit;
+extern fn curlee_halt() -> Unit;
+
+fn emit64(v: Int) -> Unit {
+  curlee_putc((v >> 0) & 255);
+  curlee_putc((v >> 8) & 255);
+  curlee_putc((v >> 16) & 255);
+  curlee_putc((v >> 24) & 255);
+  curlee_putc((v >> 32) & 255);
+  curlee_putc((v >> 40) & 255);
+  curlee_putc((v >> 48) & 255);
+  curlee_putc((v >> 56) & 255);
+  return;
+}
+
+fn main() -> Unit {
+  // 64-bit multiply. One operand per product is let-bound so the emitted C
+  // arithmetic is int64_t * <literal> (two in-int-range literals would
+  // multiply as C `int` and overflow before the 64-bit promotion — the
+  // codegen emits literals without an LL suffix), while the other operand
+  // stays a literal so the verifier's linear-multiplication model accepts it.
+  let m1: Int = 1000000000;
+  let m3: Int = 123456789;
+  emit64(m1 * 1000000000);
+  emit64(m3 * 987654321);
+  // Signed 64-bit divide / modulo (-> __divdi3 / __moddi3 on -m32).
+  emit64(1000000000000 / 7);
+  emit64(1000000000000 % 7);
+  emit64(-1000000000000 / 7);
+  emit64(-1000000000000 % 7);
+  emit64(9223372036854775807 / 3); // INT64_MAX / 3
+  emit64(-9223372036854775807 % 1000);
+  // Variable-count 64-bit shifts (runtime count; GCC inlines on -m32 but the
+  // helpers must still be linked for ABI completeness).
+  let c0: Int = 0;
+  let c33: Int = 33;
+  let c63: Int = 63;
+  emit64(1234567890123456789 << c33);
+  emit64(1234567890123456789 >> c63);
+  emit64(-1234567890123456789 >> c33);
+  emit64(-1234567890123456789 >> c0);
+  emit64(1234567890123456789 << c0);
+  // 64-bit compare (1/0 bytes).
+  if (1000000000000 < 2000000000000) { curlee_putc(1); } else { curlee_putc(0); }
+  if (1000000000000 > 2000000000000) { curlee_putc(1); } else { curlee_putc(0); }
+  if (-5 == -5) { curlee_putc(1); } else { curlee_putc(0); }
+  if (1234567890123456789 < -1) { curlee_putc(1); } else { curlee_putc(0); }
+  if (9223372036854775807 > 0) { curlee_putc(1); } else { curlee_putc(0); }
+  // 64-bit negation.
+  emit64(-(-9223372036854775807));
+  emit64(-(1234567890123456789));
+  // U64 storage (uint64_t in the emitted C -> helpers linked on i386).
+  let u: U64 = 1048576;
+  let u_exp: U64 = 1048576;
+  if (u == u_exp) { curlee_putc(1); } else { curlee_putc(0); }
+  curlee_halt();
+  return;
+}

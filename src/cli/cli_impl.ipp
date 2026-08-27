@@ -99,13 +99,18 @@ void print_usage(std::ostream& out)
     out << "  curlee run [--fuel <n>] [--seed <n>] [--profile] [--profile-format <text|json>] "
            "[--bundle <file.bundle>] [--cap <capability>]... <file.curlee>\n";
     out << "  curlee <lex|parse|check|run|build> [--diag-format <text|json>] ...\n";
-    out << "  curlee build [--target freestanding-c] [--link] [-o out] <entry.curlee>\n";
+    out << "  curlee build [--target freestanding-c] [--link] [--arch <x86_64|i386>] "
+           "[-o out] <entry.curlee>\n";
     out << "    --target freestanding-c: emit freestanding C for the verified program\n";
     out << "      (the only supported target; no hosted builtins: no print, no String,\n";
     out << "      no Vec. The verification gate applies: no proof, no build).\n";
     out << "    --link: produce a bootable kernel ELF (kernel.elf) by compiling the\n";
-    out << "            emitted C + runtime/crt0.S and linking with runtime/linker.ld\n";
-    out << "            (requires a C compiler and ld; x86-64 multiboot2 image)\n";
+    out << "            emitted C + the runtime boot stub and linking with\n";
+    out << "            runtime/linker.ld (requires a C compiler and ld)\n";
+    out << "    --arch <arch>: kernel architecture for --link; x86_64 (default,\n";
+    out << "            multiboot2/PVH 64-bit) or i386 (fully 32-bit ELF; the bundled\n";
+    out << "            libgcc32 helpers are linked automatically when the emitted C\n";
+    out << "            uses 64-bit arithmetic, so no downstream libgcc32.c is needed)\n";
     out << "    -o <path>: output path (default out.c; --link requires -o).\n";
     out << "  curlee run --cap phys.mem <file.curlee>  # phys.mem is freestanding-only\n";
     out << "    phys.mem: grants Phys<T> read()/write() MMIO access, the runtime-address\n";
@@ -130,17 +135,26 @@ void print_build_usage(std::ostream& out)
            "ELF).\n\n";
     out << "usage:\n";
     out << "  curlee build [--target freestanding-c] [-o <path>] <entry.curlee>\n";
-    out << "  curlee build [--target freestanding-c] --link -o <kernel.elf> <entry.curlee>\n\n";
+    out << "  curlee build [--target freestanding-c] --link [--arch <x86_64|i386>] "
+           "-o <kernel.elf> <entry.curlee>\n\n";
     out << "The full check pipeline runs first (lex -> parse -> resolve -> type-check -> "
-           "verify).\n";
+            "verify).\n";
     out << "The verification gate applies: no proof, no build (nothing is emitted on failure).\n\n";
     out << "flags:\n";
     out << "  --target <target>   codegen target; the only supported value is `freestanding-c`\n";
     out << "                      (default). Other targets are rejected.\n";
     out << "  --link              additionally compile the emitted C with\n";
     out << "                      `cc -ffreestanding -fno-builtin -nostdlib -c`, assemble\n";
-    out << "                      runtime/crt0.S, and link with runtime/linker.ld into a\n";
-    out << "                      bootable x86-64 multiboot2 kernel ELF. Requires -o.\n";
+    out << "                      the runtime boot stub (runtime/crt0.S for x86_64,\n";
+    out << "                      runtime/crt0_i386.S for i386), and link with\n";
+    out << "                      runtime/linker.ld into a bootable kernel ELF. Requires -o.\n";
+    out << "  --arch <arch>       kernel architecture for --link: x86_64 (default;\n";
+    out << "                      multiboot2/PVH 64-bit ELF) or i386 (fully 32-bit ELF,\n";
+    out << "                      `-m32` + `ld -m elf_i386`). On i386, when the emitted C\n";
+    out << "                      uses 64-bit integer arithmetic, the bundled libgcc-ABI\n";
+    out << "                      helpers (runtime/libgcc32_helpers.c) are compiled and\n";
+    out << "                      linked automatically — downstream projects never provide\n";
+    out << "                      their own libgcc32.c (issue #288).\n";
     out << "  -o <path>           output path (default: out.c). `-o -` writes the C to stdout.\n";
     out << "  --root <dir>        resolve the entry file relative to <dir>.\n";
     out << "  --stdlib-root <dir> additional stdlib search root (repeatable).\n\n";
@@ -1867,13 +1881,20 @@ int cmd_fmt(const std::string& path, bool check)
 // freestanding C (default) or, with --link, produces a bootable kernel ELF:
 //
 //   verify -> codegen to C -> cc -ffreestanding -fno-builtin -nostdlib -c ->
-//   assemble crt0.S -> ld -nostdlib -T runtime/linker.ld -> kernel.elf
+//   assemble crt0.S (x86_64) or crt0_i386.S (i386) ->
+//   ld -nostdlib -T runtime/linker.ld -> kernel.elf
+//
+// On the 32-bit target (--arch i386) the emitted C is compiled with -m32 and,
+// when it uses 64-bit integer types (int64_t/uint64_t, which GCC lowers to
+// libgcc-ABI helper calls on i386), the bundled runtime/libgcc32_helpers.c is
+// compiled and linked automatically (issue #288). The 64-bit PVH target has
+// native int64_t arithmetic and never links the helpers.
 //
 // On verification or codegen failure prints diagnostics and exits non-zero
 // without writing an output file.
 int cmd_build(const std::string& entry_path, const std::string& output_path,
               const std::vector<std::filesystem::path>& stdlib_roots, bool to_stdout, bool link,
-              DiagOutputFormat diag_format)
+              const std::string& arch, DiagOutputFormat diag_format)
 {
     std::string c_source;
     const int rc =
@@ -1954,9 +1975,14 @@ int cmd_build(const std::string& entry_path, const std::string& output_path,
         return fs::path("runtime") / name;
     };
 
-    const fs::path crt0 = runtime_file("crt0.S");
+    const bool is_i386 = (arch == "i386");
+
+    // The 32-bit target uses its own boot stub: crt0.S switches to long mode
+    // (64-bit kernel), crt0_i386.S stays in 32-bit protected mode.
+    const fs::path crt0 = runtime_file(is_i386 ? "crt0_i386.S" : "crt0.S");
     const fs::path linker_script = runtime_file("linker.ld");
     const fs::path rt_c = runtime_file("rt.c");
+    const fs::path libgcc32_c = runtime_file("libgcc32_helpers.c");
     if (!fs::exists(crt0))
     {
         std::cerr << "error: build --link: boot stub not found: " << crt0.string() << "\n";
@@ -1969,6 +1995,30 @@ int cmd_build(const std::string& entry_path, const std::string& output_path,
         return kExitError;
     }
 
+    // On i386, GCC lowers 64-bit multiply/divide/modulo/shift on int64_t to
+    // calls into libgcc-ABI helpers (__muldi3/__udivdi3/...). The freestanding
+    // build never links libgcc, so the bundled libgcc32_helpers.c must provide
+    // them. A simple "does the emitted C use 64-bit integer types" check is
+    // the gate: any program with int64_t/uint64_t MAY reference a helper, and
+    // linking a few unused (dead) helper functions when it does not is
+    // harmless (issue #288). The 64-bit PVH target never links them.
+    //
+    // A single find("int64_t") is sufficient: the codegen maps Int -> int64_t
+    // and U64 -> uint64_t, and the token "uint64_t" embeds the substring
+    // "int64_t" (u|int64_t), so any emitted C containing uint64_t also
+    // matches the int64_t check. A separate find("uint64_t") disjunct would
+    // be dead code (it could never be the deciding branch) — see the
+    // kernel_libgcc32_u64_only.curlee fixture header.
+    const bool needs_libgcc32 = is_i386 && c_source.find("int64_t") != std::string::npos;
+    if (!needs_libgcc32)
+    {
+        // Drop a stale helper object from a previous build into the same
+        // output directory (e.g. an --arch i386 link followed by an x86_64
+        // link), so a 32-bit object can never leak into a 64-bit link.
+        std::error_code ec;
+        fs::remove(fs::path(output_path).parent_path() / "curlee_libgcc32.o", ec);
+    }
+
     // Scratch files live next to the output (same filesystem).
     fs::path workdir = fs::path(output_path).parent_path();
     if (workdir.empty())
@@ -1979,6 +2029,7 @@ int cmd_build(const std::string& entry_path, const std::string& output_path,
     const fs::path kernel_o = workdir / "curlee_kernel.o";
     const fs::path crt0_o = workdir / "curlee_crt0.o";
     const fs::path rt_o = workdir / "curlee_rt.o";
+    const fs::path libgcc32_o = workdir / "curlee_libgcc32.o";
 
     auto fail = [&](const std::string& msg)
     {
@@ -1988,6 +2039,7 @@ int cmd_build(const std::string& entry_path, const std::string& output_path,
         fs::remove(kernel_o, ec);
         fs::remove(crt0_o, ec);
         fs::remove(rt_o, ec);
+        fs::remove(libgcc32_o, ec);
         return kExitError;
     };
 
@@ -2006,6 +2058,14 @@ int cmd_build(const std::string& entry_path, const std::string& output_path,
     const std::string ld = std::getenv("LD") != nullptr ? std::getenv("LD") : "ld";
     const fs::path rt_dir = runtime_file("rt.h").parent_path();
 
+    // Architecture-specific flags: -m32 for i386 (plus -fno-pie -fno-pic, so
+    // no .got.plt/PIC thunks land in the kernel image — the kernel is not
+    // position-independent, and a writable .got.plt in the .text segment would
+    // collapse into a single RWX LOAD segment, which ld warns about), and
+    // `ld -m elf_i386` so the output is a fully 32-bit ELF.
+    const std::string arch_cc_flags = is_i386 ? " -m32 -fno-pie -fno-pic " : " ";
+    const std::string arch_ld_flags = is_i386 ? "-m elf_i386 " : "";
+
     // 1. Compile the generated kernel C freestanding. The kernel is compiled
     //    with -mno-sse -mno-sse2: the boot stub (crt0.S) never enables SSE
     //    (CR4.OSFXSR), and the emitted C is pure scalar code that never needs
@@ -2015,9 +2075,8 @@ int cmd_build(const std::string& entry_path, const std::string& output_path,
     {
         const std::string cmd = shell_quote(cc) +
                                 " -ffreestanding -fno-builtin -nostdlib -std=c11 "
-                                "-mno-sse -mno-sse2 "
-                                "-I" +
-                                shell_quote(rt_dir.string()) + " -c " +
+                                "-mno-sse -mno-sse2 " +
+                                arch_cc_flags + "-I" + shell_quote(rt_dir.string()) + " -c " +
                                 shell_quote(kernel_c.string()) + " -o " +
                                 shell_quote(kernel_o.string());
         if (!run_shell(cmd))
@@ -2031,35 +2090,67 @@ int cmd_build(const std::string& entry_path, const std::string& output_path,
     {
         const std::string cmd = shell_quote(cc) +
                                 " -ffreestanding -fno-builtin -nostdlib -std=c11 "
-                                "-mno-sse -mno-sse2 "
-                                "-I" +
-                                shell_quote(rt_dir.string()) + " -c " + shell_quote(rt_c.string()) +
-                                " -o " + shell_quote(rt_o.string());
+                                "-mno-sse -mno-sse2 " +
+                                arch_cc_flags + "-I" + shell_quote(rt_dir.string()) + " -c " +
+                                shell_quote(rt_c.string()) + " -o " + shell_quote(rt_o.string());
         if (!run_shell(cmd))
         {
             return fail("C compile of runtime failed");
         }
     }
 
-    // 3. Assemble the boot stub (crt0.S).
+    // 3. On i386, compile the bundled libgcc-ABI helpers (libgcc32_helpers.c)
+    //    when the emitted C uses 64-bit integer types. The helpers use 32-bit
+    //    primitives only, so they never recursively emit another 64-bit libgcc
+    //    call (issue #288).
+    if (needs_libgcc32)
+    {
+        // The helpers ship with the runtime and the runtime dir is fixed at
+        // compile time, so the file is always present (install-error only).
+        if (!fs::exists(libgcc32_c)) // GCOVR_EXCL_LINE
+        {
+            return fail("libgcc32 helpers not found: " + libgcc32_c.string()); // GCOVR_EXCL_LINE
+        }
+        const std::string cmd = shell_quote(cc) +
+                                " -ffreestanding -fno-builtin -nostdlib -std=c11 "
+                                "-mno-sse -mno-sse2 " +
+                                arch_cc_flags + "-I" + shell_quote(rt_dir.string()) + " -c " +
+                                shell_quote(libgcc32_c.string()) + " -o " +
+                                shell_quote(libgcc32_o.string());
+        // Only a toolchain that compiles the kernel and rt.c but fails on
+        // exactly this file reaches here (environment-failure only).
+        if (!run_shell(cmd)) // GCOVR_EXCL_LINE
+        {
+            return fail("C compile of libgcc32 helpers failed"); // GCOVR_EXCL_LINE
+        }
+    }
+
+    // 4. Assemble the boot stub (crt0.S / crt0_i386.S).
     {
         const std::string cmd = shell_quote(as) + " -ffreestanding -fno-builtin -nostdlib -c " +
-                                shell_quote(crt0.string()) + " -o " + shell_quote(crt0_o.string());
+                                arch_cc_flags + shell_quote(crt0.string()) + " -o " +
+                                shell_quote(crt0_o.string());
         if (!run_shell(cmd))
         {
             return fail("assembly of boot stub failed");
         }
     }
 
-    // 4. Link with the linker script into a bootable ELF.
+    // 5. Link with the linker script into a bootable ELF.
     {
         std::string objs = shell_quote(kernel_o.string());
         if (fs::exists(rt_o))
         {
             objs += " " + shell_quote(rt_o.string());
         }
+        // When needs_libgcc32 is set the object was just compiled into this
+        // same workdir above, so it can never be missing here (defensive).
+        if (needs_libgcc32 && fs::exists(libgcc32_o)) // GCOVR_EXCL_LINE
+        {
+            objs += " " + shell_quote(libgcc32_o.string());
+        }
         objs += " " + shell_quote(crt0_o.string());
-        const std::string cmd = shell_quote(ld) + " -nostdlib -static -T " +
+        const std::string cmd = shell_quote(ld) + " -nostdlib -static " + arch_ld_flags + "-T " +
                                 shell_quote(linker_script.string()) + " " + objs + " -o " +
                                 shell_quote(output_path);
         if (!run_shell(cmd))
@@ -2190,6 +2281,7 @@ int run(int argc, char** argv)
     {
         std::string target = "freestanding-c";
         std::string output = "out.c";
+        std::string arch = "x86_64";
         bool to_stdout = false;
         bool link = false;
         bool output_explicit = false;
@@ -2251,6 +2343,36 @@ int run(int argc, char** argv)
             if (a == "--link")
             {
                 link = true;
+                ++i;
+                continue;
+            }
+
+            // `--arch` selects the kernel architecture for --link: x86_64
+            // (default, 64-bit PVH/multiboot2) or i386 (fully 32-bit ELF,
+            // auto-links the bundled libgcc32 helpers — issue #288).
+            if (a == "--arch")
+            {
+                if (i + 1 >= args.size())
+                {
+                    std::cerr << "error: expected arch after --arch\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                arch = std::string(args[i + 1]);
+                i += 2;
+                continue;
+            }
+
+            if (a.starts_with("--arch="))
+            {
+                const auto value = a.substr(std::string_view("--arch=").size());
+                if (value.empty())
+                {
+                    std::cerr << "error: expected arch after --arch=\n\n";
+                    print_usage(std::cerr);
+                    return kExitUsage;
+                }
+                arch = std::string(value);
                 ++i;
                 continue;
             }
@@ -2367,6 +2489,14 @@ int run(int argc, char** argv)
             return kExitUsage;
         }
 
+        if (arch != "x86_64" && arch != "i386")
+        {
+            std::cerr << "error: unsupported build arch: " << arch
+                      << " (supported: x86_64, i386)\n\n";
+            print_usage(std::cerr);
+            return kExitUsage;
+        }
+
         // `--link` produces a kernel ELF: it needs an explicit output path so
         // the user cannot accidentally overwrite a default `out.c` with an ELF.
         if (link && !output_explicit)
@@ -2383,7 +2513,7 @@ int run(int argc, char** argv)
             entry_path = (*root / entry_path).string();
         }
 
-        return cmd_build(entry_path, output, stdlib_roots, to_stdout, link, diag_format);
+        return cmd_build(entry_path, output, stdlib_roots, to_stdout, link, arch, diag_format);
     }
 
     if (cmd == "fmt")

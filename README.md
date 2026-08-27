@@ -158,14 +158,21 @@ At a high level:
 ### Freestanding targets (kernel)
 
 Curlee can also emit a verified program as **freestanding C** and, with `--link`, link it into a
-bootable **x86-64 multiboot2 kernel ELF**:
+bootable kernel ELF:
 
 - `curlee build <entry.curlee>` — verify, then emit freestanding C (default `out.c`).
 - `curlee build --link -o kernel.elf <entry.curlee>` — emit C, compile it with
-  `gcc -ffreestanding -fno-builtin -nostdlib -c`, assemble `runtime/crt0.S`, and link with
+  `gcc -ffreestanding -fno-builtin -nostdlib -c`, assemble the boot stub, and link with
   `runtime/linker.ld` into `kernel.elf`.
+- `curlee build --link --arch i386 -o kernel32.elf <entry.curlee>` — same pipeline as a **fully
+  32-bit ELF** (`-m32`, `ld -m elf_i386`, `runtime/crt0_i386.S`). When the emitted C uses
+  64-bit integer arithmetic (`Int`/`U64`), the bundled 32-bit libgcc-ABI helpers
+  (`runtime/libgcc32_helpers.c`) are compiled and linked **automatically** — downstream
+  projects never provide their own `libgcc32.c` (issue #288). The default `--arch x86_64`
+  (multiboot2/PVH) target has native `int64_t` arithmetic and never links the helpers.
 - The **verification gate applies**: no proof, no build (nothing is emitted on failure).
-- The freestanding target is **Linux/x86-64 only** and has **no hosted builtins** (no `print`,
+- The freestanding target is **Linux/x86-64 host only** (x86-64 or i386 kernel ELF) and has
+  **no hosted builtins** (no `print`,
   no `String`, no `Vec`). Physical memory access uses `Phys<T>` + `read()`/`write()` under
   `unsafe` and requires the `phys.mem` capability. The **runtime-address reads**
   `phys_read_u8`/`phys_read_u16`/`phys_read_u32`/`phys_read_u64` (issue #279) and **writes**
