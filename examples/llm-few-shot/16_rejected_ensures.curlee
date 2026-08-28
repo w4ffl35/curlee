@@ -1,0 +1,28 @@
+// REJECTED PROGRAM -- an `ensures` clause the function's actual behavior
+// does not satisfy. `half`'s postcondition claims `result * 2 == x`, but
+// integer division truncates: half(7) returns 3, and 3 * 2 != 7. The
+// verifier proves this is UNSATISFIABLE for some valid input, not just
+// that it happens to fail for one -- it found the counterexample x=1,
+// result=0 (0 * 2 != 1) via Z3, without ever running the code.
+fn half(x: Int) -> Int
+  [ requires x >= 0;
+    ensures result * 2 == x; ]
+{
+  return x / 2;
+}
+
+fn main() -> Int {
+  return half(7);
+}
+
+// Real `curlee check` output for this file:
+//
+//   error: ensures clause not satisfied
+//     |
+//     |     ensures result * 2 == x; ]
+//     |             ^^^^^^^^^^^^^^^
+//   note: goal: ((result * 2) == x)
+//   note: model:
+//   result = 0
+//   x@0 = 1
+//   note: hint: add or strengthen preconditions/refinements to satisfy this contract

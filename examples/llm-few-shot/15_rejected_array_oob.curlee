@@ -1,0 +1,22 @@
+// REJECTED PROGRAM -- a constant out-of-bounds array index is a hard
+// compile-time error, not a runtime crash. This is what "no proof, no
+// build" looks like in practice: the checker refuses to build code with
+// a provably-unsafe access, on both reads and writes.
+fn main() -> Int {
+  let q: [Int; 8] = [0; 8];
+  q[0] = 42;
+  let v: Int = q[8];   // read out of bounds
+  q[8] = 7;             // write out of bounds
+  return v;
+}
+
+// Real `curlee check` output for this file:
+//
+//   error: array index out of bounds: constant index 8 is not in 0..7 (array length 8)
+//     |
+//     |   let v: Int = q[8];   // read out of bounds
+//     |                  ^
+//   error: array index out of bounds: constant index 8 is not in 0..7 (array length 8)
+//     |
+//     |   q[8] = 7;             // write out of bounds
+//     |     ^

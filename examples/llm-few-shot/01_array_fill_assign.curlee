@@ -1,0 +1,20 @@
+static weekdays: [Int; 7] = [0; 7];
+
+fn init_weekdays() -> Unit {
+  weekdays[0] = 0;
+  weekdays[1] = 1;
+  weekdays[2] = 2;
+  weekdays[3] = 3;
+  weekdays[4] = 4;
+  weekdays[5] = 5;
+  weekdays[6] = 6;
+}
+
+fn weekday_at(i: Int) -> Int {
+  return weekdays[i];
+}
+
+fn main() -> Int {
+  init_weekdays();
+  return weekday_at(3);
+}

@@ -1,0 +1,19 @@
+fn sum_to(n: Int) -> Int
+  [ requires n >= 0;
+    ensures result >= 0; ]
+{
+  let i: Int = 0;
+  let acc: Int = 0;
+  while (i < n)
+    [ invariant 0 <= i && i <= n && acc >= 0;
+      decreases n - i; ]
+  {
+    i = i + 1;
+    acc = acc + i;
+  }
+  return acc;
+}
+
+fn main() -> Int {
+  return sum_to(5);
+}

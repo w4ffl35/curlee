@@ -1,0 +1,12 @@
+// A realistic small pure function: pack two 8-bit fields into one Int,
+// with a contract proving the packed value's range.
+fn pack_cell(ch: Int, attr: Int) -> Int
+  [ requires ch >= 0 && ch < 256 && attr >= 0 && attr < 256;
+    ensures result >= 0 && result < 65536; ]
+{
+  return ch + attr * 256;
+}
+
+fn main() -> Int {
+  return pack_cell(72, 15);
+}
