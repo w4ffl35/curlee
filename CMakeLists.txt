@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.23)
 
-project(curlee VERSION 0.3.0 LANGUAGES C CXX)
+project(curlee VERSION 1.3.0 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 

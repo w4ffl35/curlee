@@ -40,3 +40,5 @@ compile_commands.json
 
 # headlesscode orchestrator worktrees / state (never source, never commit)
 /.worktrees/
+# headlesscode orchestrator auto-generated per-worker task files
+/plans/parallel-tasks/

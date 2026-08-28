@@ -126,11 +126,13 @@ while (cond) {
   via Z3's `Z3_OP_MOD`, so it is NOT freestanding-only or unsupported)
 - Comparison: `==` `!=` `<` `>` `<=` `>=`
 - Logic: `&&` `||` `!`
-- **NO shifts, NO bitwise ops (`& | ^ ~`)** — confirmed absent from the
-  lexer/parser as of this writing. This surface can keep changing; if a
-  claim here matters for what you're about to do, verify it against
-  `src/lexer/`, `src/parser/`, or a throwaway `curlee run` probe rather
-  than trusting this doc.
+- Bitwise: `&` `|` `^` `~` and shifts `<<` `>>` (issue #270) — verified
+  directly 2026-08-27: `(5 & 3) | (1 << 2)` runs and returns 5. This doc
+  previously claimed these were absent; that was stale even before this
+  fix (the feature landed, the doc just wasn't updated). This surface can
+  keep changing; if a claim here matters for what you're about to do,
+  verify it against `src/lexer/`, `src/parser/`, or a throwaway `curlee
+  run` probe rather than trusting this doc.
 
 ### Literals
 
