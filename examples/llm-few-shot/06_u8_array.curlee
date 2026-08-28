@@ -1,0 +1,17 @@
+static crc_table: [U8; 4] = [0; 4];
+
+fn init_crc() -> Unit {
+  crc_table[0] = 0x00;
+  crc_table[1] = 0x1D;
+  crc_table[2] = 0x3A;
+  crc_table[3] = 0x27;
+}
+
+fn crc_at(i: Int) -> U8 {
+  return crc_table[i];
+}
+
+fn main() -> Int {
+  init_crc();
+  return 0;
+}

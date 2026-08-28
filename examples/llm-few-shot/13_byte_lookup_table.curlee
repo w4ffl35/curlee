@@ -1,0 +1,23 @@
+// A realistic pattern: a fixed byte sequence exposed as an indexed
+// accessor. Array literals are repeat-fill only ([value; count] fills
+// every slot with the same value) -- there is no literal syntax for a
+// list of distinct values, so a lookup table is built fill-then-assign.
+static greeting: [Int; 5] = [0; 5];
+
+fn init_greeting() -> Unit {
+  greeting[0] = 72;   // 'H'
+  greeting[1] = 105;  // 'i'
+  greeting[2] = 33;   // '!'
+  greeting[3] = 10;   // '\n'
+  greeting[4] = 0;
+  return;
+}
+
+fn greeting_byte(i: Int) -> Int {
+  return greeting[i];
+}
+
+fn main() -> Int {
+  init_greeting();
+  return greeting_byte(0);
+}

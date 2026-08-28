@@ -1,0 +1,7 @@
+fn pack_rgb(r: Int, g: Int, b: Int) -> Int {
+  return ((r & 255) << 16) | ((g & 255) << 8) | (b & 255);
+}
+
+fn main() -> Int {
+  return pack_rgb(255, 128, 64);
+}

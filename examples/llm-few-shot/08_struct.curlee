@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: MIT
+//
+// A `struct` declaration, construction with named fields, and field
+// access. Struct emission uses natural C alignment (Int lowers to
+// int64_t, 8-byte aligned) -- there is no packing attribute in the MVP
+// grammar.
+
+struct SmallTag {
+  a: Int;
+  b: Int;
+  c: Int;
+  d: Int;
+}
+
+fn main() -> Int {
+  let t: SmallTag = SmallTag{ a: 1, b: 2, c: 3, d: 4 };
+  return t.a + t.b + t.c + t.d;
+}

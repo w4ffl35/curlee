@@ -1,0 +1,27 @@
+[
+  {
+    "id": "arithmetic",
+    "prompt": "Task: write a Curlee function `add(a: Int, b: Int) -> Int` that returns a + b. Have `main()` return `add(3, 4)`.",
+    "expected_result": 7
+  },
+  {
+    "id": "contract",
+    "prompt": "Task: write a Curlee function `clamp(x: Int, lo: Int, hi: Int) -> Int` with contract `requires lo <= hi` and `ensures result >= lo && result <= hi`. Use nested if/else, not early returns. Have `main()` return `clamp(15, 0, 10)`.",
+    "expected_result": 10
+  },
+  {
+    "id": "if_else",
+    "prompt": "Task: write a Curlee function `classify(x: Int) -> Int` that returns 0 if x < 0, 1 if x == 0, else 2, using nested if/else (Curlee has no else-if). Have `main()` return `classify(5)`.",
+    "expected_result": 2
+  },
+  {
+    "id": "array_fill_assign",
+    "prompt": "Task: write correct Curlee code for a module-level `static` fixed-size Int array `[Int; 5]` named `vals` holding 10,20,30,40,50 in order, and `main()` that returns the value at index 2. Remember: array literals are repeat-fill only -- use fill-then-assign.",
+    "expected_result": 30
+  },
+  {
+    "id": "loop_contract",
+    "prompt": "Task: write a Curlee function `sum_to(n: Int) -> Int` with contract `requires n >= 0` and `ensures result >= 0`, using a bounded while loop with invariant/decreases to sum 1..n. Have `main()` return `sum_to(5)`.",
+    "expected_result": 15
+  }
+]
